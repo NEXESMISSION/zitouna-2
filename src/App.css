@@ -281,6 +281,36 @@
   text-decoration: underline;
 }
 
+/* Register — two-column name row */
+.reg-name-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.65rem;
+}
+
+/* Phone field — prefix badge */
+.reg-phone-wrap { gap: 0; }
+
+.reg-phone-prefix {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.6);
+  padding: 0 8px 0 2px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.reg-phone-sep {
+  width: 0.5px;
+  height: 16px;
+  background: rgba(255, 255, 255, 0.2);
+  margin-right: 10px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 380px) {
+  .reg-name-row { grid-template-columns: 1fr; }
+}
+
 .link-btn {
   border: none;
   background: transparent;
@@ -515,6 +545,24 @@
 /* ══════════════════════════════════════════════
    BROWSE PAGE
 ══════════════════════════════════════════════ */
+
+.browse-greeting {
+  margin-bottom: 1.5rem;
+}
+
+.browse-greeting-hello {
+  margin: 0 0 4px;
+  font-size: clamp(1.35rem, 2.2vw, 1.75rem);
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.2px;
+}
+
+.browse-greeting-sub {
+  margin: 0;
+  font-size: clamp(0.85rem, 1.3vw, 1rem);
+  color: rgba(255, 255, 255, 0.5);
+}
 
 .browse-header {
   display: flex;

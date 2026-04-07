@@ -19,6 +19,11 @@ export default function BrowsePage() {
       <section className="dashboard-page">
         <TopBar />
 
+        <div className="browse-greeting">
+          <p className="browse-greeting-hello">Bonjour, Lassaad</p>
+          <p className="browse-greeting-sub">Voici l&apos;état de votre portefeuille d&apos;oliviers</p>
+        </div>
+
         <div className="browse-header">
           <div>
             <h2 className="page-title">Explorer les projets</h2>
