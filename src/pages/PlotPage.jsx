@@ -4,6 +4,21 @@ import TopBar from '../TopBar.jsx'
 import { projects } from '../projects.js'
 
 const REVENUE_PER_TREE = 90
+const CURRENT_YEAR = 2026
+
+/* ── Age-based revenue rate per tree per year ── */
+function treeRevRate(plantYear) {
+  const age = CURRENT_YEAR - plantYear
+  if (age < 3)  return { rate: 0,  label: 'Jeune',             color: '#888' }
+  if (age < 6)  return { rate: 45, label: 'En développement',  color: '#f5c842' }
+  if (age < 10) return { rate: 75, label: 'Pleine croissance', color: '#a8cc50' }
+  return               { rate: 90, label: 'Pleine production', color: '#7ab020' }
+}
+
+function plotAnnualRevenue(plot) {
+  if (!plot.treeBatches?.length) return plot.trees * REVENUE_PER_TREE
+  return plot.treeBatches.reduce((sum, b) => sum + b.count * treeRevRate(b.year).rate, 0)
+}
 
 /* ── Circular donut progress ── */
 function CircularProgress({ value, size = 76, stroke = 6, color = '#a8cc50' }) {
@@ -78,9 +93,9 @@ export default function PlotPage() {
     )
   }
 
-  const annualRevenue = plot.trees * REVENUE_PER_TREE
-  const roi           = ((annualRevenue / plot.totalPrice) * 100).toFixed(1)
-  const paybackYears  = Math.ceil(plot.totalPrice / annualRevenue)
+  const annualRevenue = plotAnnualRevenue(plot)
+  const roi           = plot.totalPrice > 0 ? ((annualRevenue / plot.totalPrice) * 100).toFixed(1) : '0.0'
+  const paybackYears  = annualRevenue > 0 ? Math.ceil(plot.totalPrice / annualRevenue) : '—'
 
   // Purchase plan calculations
   const downAmount = Math.round(plot.totalPrice * downPct / 100)
@@ -137,6 +152,10 @@ export default function PlotPage() {
             <span style={{ color: '#a8cc50' }}>{plot.totalPrice.toLocaleString()} TND</span>
             <label>Prix total</label>
           </div>
+          <div className="proj-hero-stat">
+            <span style={{ color: '#a8cc50' }}>~{annualRevenue.toLocaleString()} DT</span>
+            <label>Revenu / an</label>
+          </div>
         </div>
 
         {/* large map */}
@@ -156,6 +175,52 @@ export default function PlotPage() {
             />
           </div>
         </div>
+
+        {/* ── Plantation composition ── */}
+        {plot.treeBatches?.length > 0 && (
+          <div className="plantation-section">
+            <p className="plantation-section-title">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 22V12m0 0C12 7 7 4 3 6m9 6c0-5 5-8 9-6"/>
+              </svg>
+              Composition du verger · {plot.treeBatches.length} génération{plot.treeBatches.length > 1 ? 's' : ''}
+            </p>
+            <div className="plantation-grid">
+              {plot.treeBatches.map((batch) => {
+                const age  = CURRENT_YEAR - batch.year
+                const info = treeRevRate(batch.year)
+                const batchRevenue = batch.count * info.rate
+                return (
+                  <div key={batch.year} className="plantation-card">
+                    <div className="plantation-card-top">
+                      <span className="plantation-year">{batch.year}</span>
+                      <span className="plantation-age-badge" style={{ color: info.color, borderColor: info.color }}>
+                        {age} an{age > 1 ? 's' : ''}
+                      </span>
+                    </div>
+                    <div className="plantation-trees">
+                      <strong>{batch.count}</strong>
+                      <span>arbres</span>
+                    </div>
+                    <div className="plantation-status" style={{ color: info.color }}>{info.label}</div>
+                    <div className="plantation-revenue">
+                      {info.rate === 0
+                        ? <span className="plantation-revenue--zero">Pas encore productif</span>
+                        : <><span>~{batchRevenue.toLocaleString()} DT / an</span><em>{info.rate} DT/arbre</em></>
+                      }
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+            {plot.treeBatches.length > 1 && (
+              <div className="plantation-total">
+                <span>Revenu total estimé</span>
+                <strong style={{ color: '#a8cc50' }}>~{annualRevenue.toLocaleString()} DT / an</strong>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ── Tree health ── */}
         <div className="health-section">

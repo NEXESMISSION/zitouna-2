@@ -3324,3 +3324,154 @@
 .ap-form-hint--warn {
   color: #e8a838;
 }
+
+/* ════════════════════════════════════════════
+   PLANTATION YEAR TAGS  (ProjectPage, DashboardPage)
+════════════════════════════════════════════ */
+.plot-card-years {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.65rem;
+}
+
+.plot-year-tag {
+  font-size: 10.5px;
+  font-family: Georgia, serif;
+  border: 1px solid;
+  border-radius: 20px;
+  padding: 0.18rem 0.55rem;
+  white-space: nowrap;
+}
+
+.owned-plot-batches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.65rem;
+}
+
+/* ════════════════════════════════════════════
+   PLANTATION COMPOSITION SECTION  (PlotPage)
+════════════════════════════════════════════ */
+.plantation-section {
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 14px;
+  padding: 1.25rem 1.4rem 1.4rem;
+  margin-bottom: 1.75rem;
+}
+
+.plantation-section-title {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1.1px;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.45);
+  margin: 0 0 1.1rem;
+}
+
+.plantation-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 0.75rem;
+}
+
+.plantation-card {
+  background: rgba(0,0,0,0.2);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 10px;
+  padding: 0.9rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.plantation-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.plantation-year {
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff;
+  font-family: Georgia, serif;
+}
+
+.plantation-age-badge {
+  font-size: 11px;
+  font-family: Georgia, serif;
+  border: 1px solid;
+  border-radius: 20px;
+  padding: 0.15rem 0.55rem;
+  white-space: nowrap;
+}
+
+.plantation-trees {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+}
+.plantation-trees strong {
+  font-size: 22px;
+  color: #fff;
+  font-weight: 700;
+}
+.plantation-trees span {
+  font-size: 12px;
+  color: rgba(255,255,255,0.4);
+}
+
+.plantation-status {
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.plantation-revenue {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  margin-top: 0.25rem;
+}
+.plantation-revenue span {
+  font-size: 12.5px;
+  color: #a8cc50;
+  font-weight: 600;
+}
+.plantation-revenue em {
+  font-size: 10.5px;
+  color: rgba(255,255,255,0.35);
+  font-style: normal;
+}
+.plantation-revenue--zero {
+  font-size: 11px;
+  color: rgba(255,255,255,0.3) !important;
+  font-style: italic;
+}
+
+.plantation-total {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 1rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid rgba(255,255,255,0.07);
+  font-size: 13px;
+  color: rgba(255,255,255,0.5);
+}
+.plantation-total strong {
+  font-size: 15px;
+}
+
+@media (max-width: 640px) {
+  .plantation-grid { grid-template-columns: 1fr 1fr; }
+  .plantation-section { padding: 1rem; }
+  .plantation-year { font-size: 15px; }
+  .plantation-trees strong { font-size: 18px; }
+}

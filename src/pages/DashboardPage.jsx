@@ -219,6 +219,19 @@ export default function DashboardPage() {
                       </svg>
                       {purchase.city}, {purchase.region}
                     </p>
+                    {plot?.treeBatches?.length > 0 && (
+                      <div className="owned-plot-batches">
+                        {plot.treeBatches.map(b => {
+                          const age = new Date().getFullYear() - b.year
+                          const color = age < 3 ? '#888' : age < 6 ? '#f5c842' : age < 10 ? '#a8cc50' : '#7ab020'
+                          return (
+                            <span key={b.year} className="plot-year-tag" style={{ borderColor: color, color }}>
+                              {b.year} · {b.count}🌿
+                            </span>
+                          )
+                        })}
+                      </div>
+                    )}
                     <div className="owned-plot-stats">
                       <div className="owned-stat"><span>Arbres</span><strong>{purchase.trees}</strong></div>
                       <div className="owned-stat"><span>Surface</span><strong>{plot?.area ?? '—'} m²</strong></div>

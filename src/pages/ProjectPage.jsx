@@ -3,6 +3,16 @@ import { useNavigate, useParams } from 'react-router-dom'
 import TopBar from '../TopBar.jsx'
 import { projects } from '../projects.js'
 
+const CURRENT_YEAR = 2026
+function plotAnnualRevenue(plot) {
+  if (!plot.treeBatches?.length) return plot.trees * 90
+  return plot.treeBatches.reduce((sum, b) => {
+    const age = CURRENT_YEAR - b.year
+    const rate = age < 3 ? 0 : age < 6 ? 45 : age < 10 ? 75 : 90
+    return sum + b.count * rate
+  }, 0)
+}
+
 export default function ProjectPage() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -143,6 +153,21 @@ export default function ProjectPage() {
                     <strong>{plot.trees}</strong>
                     <span>arbres</span>
                   </div>
+                  {/* Plantation year badges */}
+                  {plot.treeBatches?.length > 0 && (
+                    <div className="plot-card-years">
+                      {plot.treeBatches.map(b => {
+                        const age = CURRENT_YEAR - b.year
+                        const color = age < 3 ? '#888' : age < 6 ? '#f5c842' : age < 10 ? '#a8cc50' : '#7ab020'
+                        return (
+                          <span key={b.year} className="plot-year-tag" style={{ borderColor: color, color }}>
+                            {b.year} · {b.count}🌿
+                          </span>
+                        )
+                      })}
+                    </div>
+                  )}
+
                   <div className="plot-card-details">
                     <div className="plot-card-row">
                       <span>Surface</span>
@@ -158,7 +183,7 @@ export default function ProjectPage() {
                     </div>
                     <div className="plot-card-row">
                       <span>Revenu / an</span>
-                      <strong className="green-text">~{(plot.trees * 90).toLocaleString()} DT</strong>
+                      <strong className="green-text">~{plotAnnualRevenue(plot).toLocaleString()} DT</strong>
                     </div>
                   </div>
 
