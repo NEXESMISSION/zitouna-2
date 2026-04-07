@@ -7,6 +7,8 @@ import BrowsePage         from './pages/BrowsePage.jsx'
 import DashboardPage      from './pages/DashboardPage.jsx'
 import ProjectPage        from './pages/ProjectPage.jsx'
 import PlotPage           from './pages/PlotPage.jsx'
+import OwnerDashboard     from './pages/OwnerDashboard.jsx'
+import AdminDashboard     from './pages/AdminDashboard.jsx'
 
 export default function App() {
   return (
@@ -18,6 +20,8 @@ export default function App() {
       <Route path="/dashboard"                       element={<DashboardPage />} />
       <Route path="/project/:id"                     element={<ProjectPage />} />
       <Route path="/project/:projectId/plot/:plotId" element={<PlotPage />} />
+      <Route path="/owner"                           element={<OwnerDashboard />} />
+      <Route path="/admin"                           element={<AdminDashboard />} />
       <Route path="*"                                element={<Navigate to="/" replace />} />
     </Routes>
   )

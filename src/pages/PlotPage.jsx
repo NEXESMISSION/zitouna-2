@@ -5,6 +5,50 @@ import { projects } from '../projects.js'
 
 const REVENUE_PER_TREE = 90
 
+/* ── Circular donut progress ── */
+function CircularProgress({ value, size = 76, stroke = 6, color = '#a8cc50' }) {
+  const r    = (size - stroke) / 2
+  const circ = 2 * Math.PI * r
+  const off  = circ - (value / 100) * circ
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ display: 'block' }}>
+      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth={stroke} />
+      <circle
+        cx={size/2} cy={size/2} r={r}
+        fill="none" stroke={color} strokeWidth={stroke}
+        strokeDasharray={circ} strokeDashoffset={off}
+        strokeLinecap="round"
+        transform={`rotate(-90 ${size/2} ${size/2})`}
+        style={{ transition: 'stroke-dashoffset 600ms ease' }}
+      />
+    </svg>
+  )
+}
+
+/* ── Tiny sparkline ── */
+function Sparkline({ data, color = '#a8cc50', w = 60, h = 36 }) {
+  const max = Math.max(...data), min = Math.min(...data), range = max - min || 1
+  const pts = data.map((v, i) =>
+    `${(i / (data.length - 1)) * w},${h - ((v - min) / range) * (h - 8) - 2}`
+  ).join(' ')
+  return (
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`}>
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+/* ── Mock health data (per-plot in production this would come from the API) ── */
+const PLOT_HEALTH = {
+  treeSante: 95,   santeLabel: 'Excellent',
+  humidity:  65,   humidityLabel: 'Optimale',
+  nutrients: 80,   nutrientsLabel: 'Équilibrés',
+  co2: 4.2,        co2Trend: [1.8, 2.4, 2.9, 3.4, 3.8, 4.2],
+  lastWatering:  { pct: 70, info: '2 heures' },
+  lastDrone:     { pct: 15, info: '10 jours' },
+  nextAction: '"Arrosage automatisé (0.5 L)" dans 4 heures',
+}
+
 export default function PlotPage() {
   const { projectId, plotId } = useParams()
   const navigate = useNavigate()
@@ -110,6 +154,101 @@ export default function PlotPage() {
               loading="lazy"
               allowFullScreen
             />
+          </div>
+        </div>
+
+        {/* ── Tree health ── */}
+        <div className="health-section">
+          <p className="health-section-title">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2a10 10 0 1 0 0 20A10 10 0 0 0 12 2z"/><path d="M12 6v6l4 2"/>
+            </svg>
+            Santé de l&apos;arbre individualisé
+          </p>
+
+          {/* 4 metric cards */}
+          <div className="health-grid">
+
+            {/* Santé */}
+            <div className="health-card">
+              <span className="health-card-label">Santé de l&apos;arbre</span>
+              <div className="health-circular-wrap">
+                <CircularProgress value={PLOT_HEALTH.treeSante} color="#a8cc50" />
+                <span className="health-pct-overlay">{PLOT_HEALTH.treeSante}%</span>
+              </div>
+              <span className="health-card-sub health-card-sub--green">{PLOT_HEALTH.santeLabel}</span>
+            </div>
+
+            {/* Humidité */}
+            <div className="health-card">
+              <span className="health-card-label">Humidité du sol</span>
+              <div className="health-circular-wrap">
+                <CircularProgress value={PLOT_HEALTH.humidity} color="#4db8ff" />
+                <span className="health-pct-overlay health-pct-overlay--blue">{PLOT_HEALTH.humidity}%</span>
+              </div>
+              <span className="health-card-sub health-card-sub--blue">{PLOT_HEALTH.humidityLabel}</span>
+            </div>
+
+            {/* Nutriments */}
+            <div className="health-card">
+              <span className="health-card-label">Nutriments</span>
+              <div className="health-circular-wrap">
+                <CircularProgress value={PLOT_HEALTH.nutrients} color="#f5c842" />
+                <span className="health-pct-overlay health-pct-overlay--yellow">{PLOT_HEALTH.nutrients}%</span>
+              </div>
+              <span className="health-card-sub health-card-sub--yellow">{PLOT_HEALTH.nutrientsLabel}</span>
+            </div>
+
+            {/* CO₂ */}
+            <div className="health-card">
+              <span className="health-card-label">CO₂ capturé</span>
+              <div className="health-sparkline-wrap">
+                <Sparkline data={PLOT_HEALTH.co2Trend} />
+              </div>
+              <span className="health-co2-value">{PLOT_HEALTH.co2} kg</span>
+              <span className="health-card-sub">ce mois</span>
+            </div>
+          </div>
+
+          {/* Watering / drone bars */}
+          <div className="health-bars">
+            <div className="health-bar-item">
+              <div className="health-bar-header">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#4db8ff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 2C6 8 4 12 4 15a8 8 0 0016 0c0-3-2-7-8-13z"/>
+                </svg>
+                <span>Dernier Arrosage</span>
+              </div>
+              <div className="health-bar-track">
+                <div className="health-bar-fill health-bar-fill--blue" style={{ width: `${PLOT_HEALTH.lastWatering.pct}%` }} />
+              </div>
+              <div className="health-bar-footer">
+                <span className="health-bar-pct">{PLOT_HEALTH.lastWatering.pct}%</span>
+                <span className="health-bar-info">{PLOT_HEALTH.lastWatering.info}</span>
+              </div>
+            </div>
+
+            <div className="health-bar-item">
+              <div className="health-bar-header">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#f5c842" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+                </svg>
+                <span>Dernier Traitement Droniste</span>
+              </div>
+              <div className="health-bar-track">
+                <div className="health-bar-fill health-bar-fill--yellow" style={{ width: `${PLOT_HEALTH.lastDrone.pct}%` }} />
+              </div>
+              <div className="health-bar-footer">
+                <span className="health-bar-pct">{PLOT_HEALTH.lastDrone.pct}%</span>
+                <span className="health-bar-info">{PLOT_HEALTH.lastDrone.info}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Next action */}
+          <div className="health-next-action">
+            <span className="health-next-label">Prochaine action prévue</span>
+            <span className="health-next-value">{PLOT_HEALTH.nextAction}</span>
           </div>
         </div>
 
