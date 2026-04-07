@@ -3190,3 +3190,137 @@
   .ap-form-modal-body { padding: 1rem; }
   .ap-form-modal-header { padding: 1rem 1rem 0; }
 }
+
+/* ── Assign form section labels ── */
+.ap-form-section-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.4px;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.35);
+  margin-bottom: 0.6rem;
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+/* ── Inline create-client box ── */
+.ap-new-client-box {
+  background: rgba(122,176,32,0.06);
+  border: 1px solid rgba(122,176,32,0.22);
+  border-radius: 10px;
+  padding: 1.1rem 1.2rem 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.ap-new-client-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #a8cc50;
+  letter-spacing: 0.5px;
+  margin: 0;
+}
+
+/* ── Offer cards grid ── */
+.ap-offer-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.65rem;
+}
+
+.ap-offer-card {
+  background: rgba(255,255,255,0.04);
+  border: 1.5px solid rgba(255,255,255,0.1);
+  border-radius: 10px;
+  padding: 0.75rem 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  cursor: pointer;
+  text-align: left;
+  font-family: Georgia, serif;
+  transition: border-color 130ms, background 130ms;
+}
+.ap-offer-card:hover { border-color: rgba(122,176,32,0.4); background: rgba(122,176,32,0.06); }
+.ap-offer-card--active {
+  border-color: #7ab020 !important;
+  background: rgba(122,176,32,0.12) !important;
+}
+
+.ap-offer-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+}
+.ap-offer-detail {
+  font-size: 11.5px;
+  color: rgba(255,255,255,0.55);
+}
+.ap-offer-note {
+  font-size: 10.5px;
+  color: rgba(168,204,80,0.7);
+  font-style: italic;
+}
+.ap-offer-monthly {
+  font-size: 12px;
+  font-weight: 700;
+  color: #a8cc50;
+  margin-top: 0.15rem;
+}
+
+/* ── العربون field ── */
+.ap-araboun-wrap {
+  background: rgba(255,255,255,0.03);
+  border: 1px dashed rgba(255,255,255,0.14);
+  border-radius: 10px;
+  padding: 0.9rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  margin-top: 1rem;
+}
+
+.ap-araboun-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.ap-araboun-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #fff;
+  direction: rtl;
+}
+
+.ap-araboun-fr {
+  font-size: 12px;
+  color: rgba(255,255,255,0.4);
+  font-weight: 400;
+  direction: ltr;
+}
+
+.ap-araboun-hint {
+  font-size: 11px;
+  color: rgba(255,255,255,0.35);
+  font-style: italic;
+}
+
+.ap-araboun-input-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.ap-araboun-unit {
+  font-size: 13px;
+  color: rgba(255,255,255,0.4);
+  white-space: nowrap;
+}
+
+/* ── hint warning variant ── */
+.ap-form-hint--warn {
+  color: #e8a838;
+}

@@ -29,6 +29,14 @@ export const mockReceipts = [
   },
 ]
 
+export const mockOffers = [
+  { id: 'OFF-001', label: 'Standard',       avancePct: 20, duration: 24, note: 'Idéal pour débuter' },
+  { id: 'OFF-002', label: 'Confort',        avancePct: 30, duration: 36, note: 'Le plus populaire' },
+  { id: 'OFF-003', label: 'Premium',        avancePct: 40, duration: 48, note: 'Mensualités réduites' },
+  { id: 'OFF-004', label: 'Longue durée',   avancePct: 20, duration: 60, note: 'Étalement maximal' },
+  { id: 'OFF-005', label: 'Accéléré',       avancePct: 50, duration: 12, note: 'Solde rapide' },
+]
+
 export const mockSales = [
   { id: 'SALE-001', userId: 1, userName: 'Lassaad Ben Salah', projectId: 'tunis',  plotId: 101, projectTitle: 'La Marsa',    date: '2024-01-15', amount: 72000,  type: 'installment', adminId: 'admin1' },
   { id: 'SALE-002', userId: 1, userName: 'Lassaad Ben Salah', projectId: 'sousse', plotId: 201, projectTitle: 'El Kantaoui', date: '2024-02-01', amount: 112500, type: 'installment', adminId: 'admin1' },

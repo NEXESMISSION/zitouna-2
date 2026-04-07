@@ -2,7 +2,7 @@ import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import appLogo from '../../logo.png'
 import { projects as allProjects } from '../projects.js'
-import { mockUsers, mockReceipts, mockSales } from '../adminData.js'
+import { mockUsers, mockReceipts, mockSales, mockOffers } from '../adminData.js'
 
 function fmtDate(iso) {
   return new Date(iso).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })
@@ -26,6 +26,7 @@ function Badge({ type }) {
 const TABS = [
   { id: 'overview',  label: 'Aperçu',    icon: '▦' },
   { id: 'projects',  label: 'Projets',   icon: '🌿' },
+  { id: 'offers',    label: 'Offres',    icon: '🏷' },
   { id: 'clients',   label: 'Clients',   icon: '👤' },
   { id: 'sales',     label: 'Ventes',    icon: '💰' },
   { id: 'receipts',  label: 'Reçus',     icon: '📄' },
@@ -52,10 +53,15 @@ export default function OwnerDashboard() {
   const [toast, setToast]           = useState(null)
 
   /* ── New state for forms ── */
-  const [projectModal, setProjectModal] = useState(null)   // null | { mode:'new'|'edit', ...fields }
-  const [parcelPanel, setParcelPanel]   = useState(null)   // projectId | null
-  const [parcelModal, setParcelModal]   = useState(null)   // null | { projectId, ...fields }
-  const [delPlotConfirm, setDelPlotConfirm] = useState(null) // { projectId, plotId, label }
+  const [projectModal, setProjectModal] = useState(null)
+  const [parcelPanel, setParcelPanel]   = useState(null)
+  const [parcelModal, setParcelModal]   = useState(null)
+  const [delPlotConfirm, setDelPlotConfirm] = useState(null)
+
+  /* ── Offers state ── */
+  const [offers, setOffers]           = useState(mockOffers)
+  const [offerModal, setOfferModal]   = useState(null)  // null | { label, avancePct, duration, note }
+  const EMPTY_OFFER = { label: '', avancePct: '20', duration: '24', note: '' }
 
   /* ── Helpers ── */
   const showToast = (msg, ok = true) => {
@@ -143,6 +149,26 @@ export default function OwnerDashboard() {
   const deletePlot = ({ projectId, plotId }) => {
     setProjects(prev => prev.map(p => p.id === projectId ? { ...p, plots: p.plots.filter(pl => pl.id !== plotId) } : p))
     setDelPlotConfirm(null); showToast('Parcelle supprimée.')
+  }
+
+  /* ── Offer CRUD ── */
+  const saveOffer = (e) => {
+    e.preventDefault()
+    const o = offerModal
+    if (!o.label || !o.avancePct || !o.duration) return showToast('Tous les champs sont requis.', false)
+    setOffers(prev => [...prev, {
+      id: `OFF-${Date.now()}`,
+      label:     o.label,
+      avancePct: parseInt(o.avancePct),
+      duration:  parseInt(o.duration),
+      note:      o.note,
+    }])
+    setOfferModal(null)
+    showToast('Offre créée.')
+  }
+  const deleteOffer = (id) => {
+    setOffers(prev => prev.filter(o => o.id !== id))
+    showToast('Offre supprimée.')
   }
 
   /* ── Client delete ── */
@@ -370,6 +396,47 @@ export default function OwnerDashboard() {
                 </tbody>
               </table>
               {projects.length === 0 && <p className="ap-empty">Aucun projet. Créez-en un avec le bouton ci-dessus.</p>}
+            </div>
+          </>
+        )}
+
+        {/* ── OFFRES ── */}
+        {tab === 'offers' && (
+          <>
+            <div className="ap-page-header">
+              <div>
+                <h1 className="ap-page-title">Offres de facilité</h1>
+                <p className="ap-page-sub">{offers.length} offre{offers.length !== 1 ? 's' : ''} disponible{offers.length !== 1 ? 's' : ''} pour les administrateurs</p>
+              </div>
+              <button type="button" className="ap-btn-primary" onClick={() => setOfferModal({ ...EMPTY_OFFER })}>
+                + Nouvelle offre
+              </button>
+            </div>
+
+            <div className="ap-table-wrap">
+              <table className="ap-table">
+                <thead>
+                  <tr><th>Nom de l&apos;offre</th><th>Avance</th><th>Durée</th><th>Mensualité estimée*</th><th>Note</th><th></th></tr>
+                </thead>
+                <tbody>
+                  {offers.map(o => (
+                    <tr key={o.id}>
+                      <td className="ap-bold">{o.label}</td>
+                      <td>{o.avancePct}%</td>
+                      <td>{o.duration} mois</td>
+                      <td className="ap-muted ap-form-hint">Variable selon la parcelle</td>
+                      <td className="ap-muted">{o.note || '—'}</td>
+                      <td>
+                        <button type="button" className="ap-btn-row ap-btn-row--del"
+                          onClick={() => deleteOffer(o.id)}>
+                          Suppr.
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {offers.length === 0 && <p className="ap-empty">Aucune offre. Créez-en une avec le bouton ci-dessus.</p>}
             </div>
           </>
         )}
@@ -646,6 +713,50 @@ export default function OwnerDashboard() {
               <button type="button" className="ap-btn-reject" onClick={() => deletePlot(delPlotConfirm)}>Supprimer</button>
               <button type="button" className="ap-btn-ghost" onClick={() => setDelPlotConfirm(null)}>Annuler</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══ OFFER FORM MODAL ══ */}
+      {offerModal && (
+        <div className="ap-modal-overlay" onClick={() => setOfferModal(null)}>
+          <div className="ap-form-modal ap-form-modal--sm" onClick={e => e.stopPropagation()}>
+            <div className="ap-form-modal-header">
+              <h3 className="ap-modal-title">+ Nouvelle offre de facilité</h3>
+              <button type="button" className="ap-modal-close" onClick={() => setOfferModal(null)}>✕</button>
+            </div>
+            <form className="ap-form-modal-body" onSubmit={saveOffer}>
+              <div className="ap-form-group">
+                <label className="ap-form-label">Nom de l&apos;offre *</label>
+                <input className="ap-form-input" placeholder="ex: Confort 30/36" required
+                  value={offerModal.label}
+                  onChange={e => setOfferModal(p => ({ ...p, label: e.target.value }))} />
+              </div>
+              <div className="ap-form-grid-2">
+                <div className="ap-form-group">
+                  <label className="ap-form-label">Avance (%) *</label>
+                  <input className="ap-form-input" type="number" min="5" max="90" placeholder="20" required
+                    value={offerModal.avancePct}
+                    onChange={e => setOfferModal(p => ({ ...p, avancePct: e.target.value }))} />
+                </div>
+                <div className="ap-form-group">
+                  <label className="ap-form-label">Durée (mois) *</label>
+                  <input className="ap-form-input" type="number" min="6" max="120" placeholder="24" required
+                    value={offerModal.duration}
+                    onChange={e => setOfferModal(p => ({ ...p, duration: e.target.value }))} />
+                </div>
+              </div>
+              <div className="ap-form-group">
+                <label className="ap-form-label">Note (optionnelle)</label>
+                <input className="ap-form-input" placeholder="ex: Le plus populaire"
+                  value={offerModal.note}
+                  onChange={e => setOfferModal(p => ({ ...p, note: e.target.value }))} />
+              </div>
+              <div className="ap-form-modal-actions">
+                <button type="submit" className="ap-btn-primary ap-btn-primary--full">Créer l&apos;offre</button>
+                <button type="button" className="ap-btn-ghost" onClick={() => setOfferModal(null)}>Annuler</button>
+              </div>
+            </form>
           </div>
         </div>
       )}
