@@ -14,7 +14,7 @@ function Badge({ type }) {
     approved:    ['badge--green', '✓ Approuvé'],
     rejected:    ['badge--red',   '✗ Rejeté'],
     cash:        ['badge--green', 'Comptant'],
-    installment: ['badge--amber', 'Versements'],
+    installment: ['badge--amber', 'Facilité'],
     active:      ['badge--green', 'Actif'],
     available:   ['badge--green', 'Disponible'],
     sold:        ['badge--amber', 'Vendue'],
@@ -462,7 +462,7 @@ export default function OwnerDashboard() {
                   <div className="ap-receipt-top">
                     <div>
                       <p className="ap-receipt-ref">{r.id} · {r.projectTitle}</p>
-                      <p className="ap-receipt-client">{r.userName} — Versement {r.month} · {r.amount.toLocaleString()} DT</p>
+                      <p className="ap-receipt-client">{r.userName} — Facilité {r.month} · {r.amount.toLocaleString()} DT</p>
                       <p className="ap-receipt-meta">Dû le {fmtDate(r.dueDate)} · Soumis le {fmtDate(r.submittedDate)}</p>
                     </div>
                     <div className="ap-receipt-right">

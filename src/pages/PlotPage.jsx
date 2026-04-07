@@ -265,7 +265,7 @@ export default function PlotPage() {
               Payer comptant
             </button>
             <button type="button" className="cta-primary" onClick={() => setShowBuyModal(true)}>
-              Acheter en versements →
+              Acheter en facilités →
             </button>
           </div>
         </div>
@@ -367,7 +367,7 @@ export default function PlotPage() {
             {!buySuccess ? (
               <>
                 <div className="modal-header">
-                  <h3 className="modal-title">Plan de versements</h3>
+                  <h3 className="modal-title">Plan de facilités</h3>
                   <button type="button" className="modal-close" onClick={closeModal}>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
                       <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
@@ -447,9 +447,9 @@ export default function PlotPage() {
                   </svg>
                 </div>
                 <h3>Demande enregistrée !</h3>
-                <p>Votre plan de versements est en cours de validation. Suivez vos paiements depuis votre tableau de bord.</p>
+                <p>Votre plan de facilités est en cours de validation. Suivez vos paiements depuis votre tableau de bord.</p>
                 <button type="button" className="cta-primary modal-submit" onClick={() => { closeModal(); navigate('/dashboard') }}>
-                  Voir mes versements →
+                  Voir mes facilités →
                 </button>
                 <button type="button" className="modal-cancel" onClick={closeModal}>
                   Rester sur cette page

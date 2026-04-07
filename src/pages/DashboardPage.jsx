@@ -108,7 +108,7 @@ export default function DashboardPage() {
         ══════════════════════════════ */}
         {plans.length > 0 && (
           <>
-            <h3 className="section-heading" style={{ marginTop: '2rem' }}>Mes versements en cours</h3>
+            <h3 className="section-heading" style={{ marginTop: '2rem' }}>Mes facilités en cours</h3>
             <div className="ic-grid">
               {plans.map((plan) => {
                 const approvedCount = plan.payments.filter((p) => p.status === 'approved').length
@@ -277,7 +277,7 @@ export default function DashboardPage() {
             </div>
 
             <p className="upload-subtitle">
-              Versement {uploadTarget.month} · {uploadTarget.amount.toLocaleString()} DT · dû le {fmtDate(uploadTarget.dueDate)}
+              Facilité {uploadTarget.month} · {uploadTarget.amount.toLocaleString()} DT · dû le {fmtDate(uploadTarget.dueDate)}
             </p>
 
             <label className={`upload-zone${uploadFile ? ' upload-zone--filled' : ''}`}>

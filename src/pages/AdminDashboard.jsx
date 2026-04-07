@@ -14,7 +14,7 @@ function Badge({ type }) {
     approved:    ['badge--green', '✓ Approuvé'],
     rejected:    ['badge--red',   '✗ Rejeté'],
     cash:        ['badge--green', 'Comptant'],
-    installment: ['badge--amber', 'Versements'],
+    installment: ['badge--amber', 'Facilité'],
   }
   const [cls, label] = map[type] || ['badge--gray', type]
   return <span className={`ap-badge ${cls}`}>{label}</span>
@@ -168,7 +168,7 @@ export default function AdminDashboard() {
                   <div className="ap-receipt-top">
                     <div>
                       <p className="ap-receipt-ref">{r.id} · {r.projectTitle}</p>
-                      <p className="ap-receipt-client">{r.userName} — Versement {r.month} · <strong>{r.amount.toLocaleString()} DT</strong></p>
+                      <p className="ap-receipt-client">{r.userName} — Facilité {r.month} · <strong>{r.amount.toLocaleString()} DT</strong></p>
                       <p className="ap-receipt-meta">Dû le {fmtDate(r.dueDate)} · Soumis le {fmtDate(r.submittedDate)}</p>
                     </div>
                     <div className="ap-receipt-right">
@@ -255,7 +255,7 @@ export default function AdminDashboard() {
                     💵 Comptant
                   </button>
                   <button type="button" className={`ap-type-btn${form.type === 'installment' ? ' active' : ''}`} onClick={() => setForm(f => ({ ...f, type: 'installment' }))}>
-                    📅 Versements
+                    📅 Facilités
                   </button>
                 </div>
               </div>
