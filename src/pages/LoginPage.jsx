@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import appLogo from '../../logo.png'
+import { supabase } from '../lib/supabaseClient.js'
 import {
   IconEye,
   IconEyeOff,
@@ -13,6 +14,44 @@ import {
 export default function LoginPage() {
   const navigate = useNavigate()
   const [showPassword, setShowPassword] = useState(false)
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [errorMessage, setErrorMessage] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [oauthLoadingProvider, setOauthLoadingProvider] = useState('')
+
+  async function handleLogin(event) {
+    event.preventDefault()
+    setErrorMessage('')
+    setIsSubmitting(true)
+
+    const { error } = await supabase.auth.signInWithPassword({ email, password })
+
+    if (error) {
+      setErrorMessage(error.message)
+      setIsSubmitting(false)
+      return
+    }
+
+    navigate('/browse')
+  }
+
+  async function handleOAuth(provider) {
+    setErrorMessage('')
+    setOauthLoadingProvider(provider)
+
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: {
+        redirectTo: `${window.location.origin}/browse`,
+      },
+    })
+
+    if (error) {
+      setErrorMessage(error.message)
+      setOauthLoadingProvider('')
+    }
+  }
 
   return (
     <main className="screen screen--login">
@@ -26,13 +65,23 @@ export default function LoginPage() {
         <h1 className="login-title">Se connecter</h1>
 
         <div className="social-row login-social">
-          <button type="button" className="social-button login-social-btn">
+          <button
+            type="button"
+            className="social-button login-social-btn"
+            onClick={() => handleOAuth('google')}
+            disabled={oauthLoadingProvider !== ''}
+          >
             <IconGoogle />
-            Google
+            {oauthLoadingProvider === 'google' ? 'Google...' : 'Google'}
           </button>
-          <button type="button" className="social-button login-social-btn">
+          <button
+            type="button"
+            className="social-button login-social-btn"
+            onClick={() => handleOAuth('facebook')}
+            disabled={oauthLoadingProvider !== ''}
+          >
             <IconFacebook />
-            Facebook
+            {oauthLoadingProvider === 'facebook' ? 'Facebook...' : 'Facebook'}
           </button>
         </div>
 
@@ -42,16 +91,21 @@ export default function LoginPage() {
 
         <form
           className="form login-form"
-          onSubmit={(e) => {
-            e.preventDefault()
-            navigate('/browse')
-          }}
+          onSubmit={handleLogin}
         >
           <div className="login-field">
             <label htmlFor="email">E-mail</label>
             <div className="input-wrap login-input">
               <IconUser />
-              <input id="email" type="email" placeholder="Exemple@gmail.com" autoComplete="email" />
+              <input
+                id="email"
+                type="email"
+                placeholder="Exemple@gmail.com"
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
             </div>
           </div>
 
@@ -64,6 +118,9 @@ export default function LoginPage() {
                 type={showPassword ? 'text' : 'password'}
                 placeholder="••••••••"
                 autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
               />
               <button
                 type="button"
@@ -82,8 +139,10 @@ export default function LoginPage() {
             </button>
           </div>
 
+          {errorMessage ? <p className="auth-error">{errorMessage}</p> : null}
+
           <button type="submit" className="submit-button login-submit">
-            Se connecter
+            {isSubmitting ? 'Connexion...' : 'Se connecter'}
           </button>
         </form>
 

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import appLogo from '../../logo.png'
+import { supabase } from '../lib/supabaseClient.js'
 import {
   IconEye,
   IconEyeOff,
@@ -32,6 +33,69 @@ export default function RegisterPage() {
   const navigate = useNavigate()
   const [showPassword, setShowPassword]           = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
+  const [firstName, setFirstName] = useState('')
+  const [lastName, setLastName] = useState('')
+  const [email, setEmail] = useState('')
+  const [phone, setPhone] = useState('')
+  const [cin, setCin] = useState('')
+  const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [errorMessage, setErrorMessage] = useState('')
+  const [successMessage, setSuccessMessage] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [oauthLoadingProvider, setOauthLoadingProvider] = useState('')
+
+  async function handleRegister(event) {
+    event.preventDefault()
+    setErrorMessage('')
+    setSuccessMessage('')
+
+    if (password !== confirmPassword) {
+      setErrorMessage('Les mots de passe ne correspondent pas.')
+      return
+    }
+
+    setIsSubmitting(true)
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          first_name: firstName,
+          last_name: lastName,
+          phone,
+          cin,
+        },
+      },
+    })
+
+    if (error) {
+      setErrorMessage(error.message)
+      setIsSubmitting(false)
+      return
+    }
+
+    setSuccessMessage('Compte cree. Verifiez votre email pour confirmer le compte.')
+    setIsSubmitting(false)
+  }
+
+  async function handleOAuth(provider) {
+    setErrorMessage('')
+    setSuccessMessage('')
+    setOauthLoadingProvider(provider)
+
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: {
+        redirectTo: `${window.location.origin}/browse`,
+      },
+    })
+
+    if (error) {
+      setErrorMessage(error.message)
+      setOauthLoadingProvider('')
+    }
+  }
 
   return (
     <main className="screen screen--login">
@@ -45,13 +109,23 @@ export default function RegisterPage() {
         <h1 className="login-title">Créer un compte</h1>
 
         <div className="social-row login-social">
-          <button type="button" className="social-button login-social-btn">
+          <button
+            type="button"
+            className="social-button login-social-btn"
+            onClick={() => handleOAuth('google')}
+            disabled={oauthLoadingProvider !== ''}
+          >
             <IconGoogle />
-            Google
+            {oauthLoadingProvider === 'google' ? 'Google...' : 'Google'}
           </button>
-          <button type="button" className="social-button login-social-btn">
+          <button
+            type="button"
+            className="social-button login-social-btn"
+            onClick={() => handleOAuth('facebook')}
+            disabled={oauthLoadingProvider !== ''}
+          >
             <IconFacebook />
-            Facebook
+            {oauthLoadingProvider === 'facebook' ? 'Facebook...' : 'Facebook'}
           </button>
         </div>
 
@@ -61,10 +135,7 @@ export default function RegisterPage() {
 
         <form
           className="form login-form"
-          onSubmit={(e) => {
-            e.preventDefault()
-            navigate('/browse')
-          }}
+          onSubmit={handleRegister}
         >
           {/* First name + Last name — side by side */}
           <div className="reg-name-row">
@@ -72,14 +143,30 @@ export default function RegisterPage() {
               <label htmlFor="reg-firstname">Prénom</label>
               <div className="input-wrap login-input">
                 <IconUser />
-                <input id="reg-firstname" type="text" placeholder="Lassaad" autoComplete="given-name" required />
+                <input
+                  id="reg-firstname"
+                  type="text"
+                  placeholder="Lassaad"
+                  autoComplete="given-name"
+                  value={firstName}
+                  onChange={(e) => setFirstName(e.target.value)}
+                  required
+                />
               </div>
             </div>
             <div className="login-field">
               <label htmlFor="reg-lastname">Nom</label>
               <div className="input-wrap login-input">
                 <IconUser />
-                <input id="reg-lastname" type="text" placeholder="Ben Ali" autoComplete="family-name" required />
+                <input
+                  id="reg-lastname"
+                  type="text"
+                  placeholder="Ben Ali"
+                  autoComplete="family-name"
+                  value={lastName}
+                  onChange={(e) => setLastName(e.target.value)}
+                  required
+                />
               </div>
             </div>
           </div>
@@ -92,7 +179,15 @@ export default function RegisterPage() {
                 <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
                 <polyline points="22,6 12,13 2,6" />
               </svg>
-              <input id="reg-email" type="email" placeholder="Exemple@gmail.com" autoComplete="email" required />
+              <input
+                id="reg-email"
+                type="email"
+                placeholder="Exemple@gmail.com"
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
             </div>
           </div>
 
@@ -103,7 +198,15 @@ export default function RegisterPage() {
               <span className="reg-phone-prefix">+216</span>
               <span className="reg-phone-sep" />
               <IconPhone />
-              <input id="reg-phone" type="tel" placeholder="XX XXX XXX" autoComplete="tel" maxLength={8} />
+              <input
+                id="reg-phone"
+                type="tel"
+                placeholder="XX XXX XXX"
+                autoComplete="tel"
+                maxLength={8}
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+              />
             </div>
           </div>
 
@@ -112,7 +215,15 @@ export default function RegisterPage() {
             <label htmlFor="reg-cin">Numéro de carte d&apos;identité (CIN)</label>
             <div className="input-wrap login-input">
               <IconIdCard />
-              <input id="reg-cin" type="text" placeholder="XXXXXXXX" autoComplete="off" maxLength={8} />
+              <input
+                id="reg-cin"
+                type="text"
+                placeholder="XXXXXXXX"
+                autoComplete="off"
+                maxLength={8}
+                value={cin}
+                onChange={(e) => setCin(e.target.value)}
+              />
             </div>
           </div>
 
@@ -126,6 +237,8 @@ export default function RegisterPage() {
                 type={showPassword ? 'text' : 'password'}
                 placeholder="••••••••"
                 autoComplete="new-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
                 required
               />
               <button
@@ -149,6 +262,8 @@ export default function RegisterPage() {
                 type={showConfirmPassword ? 'text' : 'password'}
                 placeholder="••••••••"
                 autoComplete="new-password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
                 required
               />
               <button
@@ -162,8 +277,11 @@ export default function RegisterPage() {
             </div>
           </div>
 
+          {errorMessage ? <p className="auth-error">{errorMessage}</p> : null}
+          {successMessage ? <p className="auth-success">{successMessage}</p> : null}
+
           <button type="submit" className="submit-button login-submit" style={{ marginTop: '20px' }}>
-            S&apos;inscrire
+            {isSubmitting ? 'Inscription...' : "S'inscrire"}
           </button>
         </form>
 

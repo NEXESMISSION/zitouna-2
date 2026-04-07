@@ -108,22 +108,28 @@ export default function DashboardPage() {
         ══════════════════════════════ */}
         {plans.length > 0 && (
           <>
-            <h3 className="section-heading" style={{ marginTop: '2rem' }}>Mes facilités en cours</h3>
-            <div className="ic-grid">
+            <h3 className="section-heading" style={{ marginTop: '2rem' }}>Mes versements en cours</h3>
+            <div className="inst-cards">
               {plans.map((plan) => {
                 const approvedCount = plan.payments.filter((p) => p.status === 'approved').length
                 const progress      = (approvedCount / plan.totalMonths) * 100
-                const totalLeft     = plan.totalPrice - plan.downPayment - approvedCount * plan.monthlyAmount
-                const needsAction   = plan.payments.filter((p) => p.status === 'pending' || p.status === 'rejected' || p.status === 'submitted')
+                const totalPaid     = plan.downPayment + approvedCount * plan.monthlyAmount
+                const totalLeft     = plan.totalPrice - totalPaid
 
                 return (
-                  <div key={plan.id} className={`ic-card ic-card--${plan.status}`}>
+                  <div key={plan.id} className={`inst-card inst-card--${plan.status}`}>
 
-                    {/* Header: title + badge */}
-                    <div className="ic-header">
-                      <div className="ic-title-block">
-                        <span className="ic-ref">{plan.id} · {plan.city}</span>
-                        <span className="ic-title">{plan.projectTitle}</span>
+                    {/* Header */}
+                    <div className="inst-card-header">
+                      <div>
+                        <p className="inst-card-id">{plan.id}</p>
+                        <h4 className="inst-card-title">{plan.projectTitle}</h4>
+                        <p className="inst-card-location">
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" /><circle cx="12" cy="10" r="3" />
+                          </svg>
+                          {plan.city}, {plan.region}
+                        </p>
                       </div>
                       <span className={`inst-badge inst-badge--${plan.status}`}>
                         {plan.status === 'active' ? 'Actif' : plan.status === 'late' ? 'En retard' : 'Terminé'}
@@ -131,49 +137,88 @@ export default function DashboardPage() {
                     </div>
 
                     {/* Progress bar */}
-                    <div className="ic-progress-row">
-                      <div className="ic-track">
-                        <div className="ic-bar" style={{ width: `${Math.max(progress, 2)}%` }} />
+                    <div className="inst-progress">
+                      <div className="inst-progress-meta">
+                        <span>{approvedCount} versement{approvedCount !== 1 ? 's' : ''} confirmé{approvedCount !== 1 ? 's' : ''}</span>
+                        <span>{plan.totalMonths - approvedCount} restants</span>
                       </div>
-                      <span className="ic-progress-label">{approvedCount}/{plan.totalMonths} mois</span>
+                      <div className="inst-progress-track">
+                        <div className="inst-progress-bar" style={{ width: `${Math.max(progress, 2)}%` }} />
+                      </div>
+                      <p className="inst-progress-caption">
+                        {approvedCount} / {plan.totalMonths} mois · {totalPaid.toLocaleString()} DT payés sur {plan.totalPrice.toLocaleString()} DT
+                      </p>
                     </div>
 
-                    {/* Key numbers inline */}
-                    <div className="ic-meta">
-                      <span>{plan.monthlyAmount.toLocaleString()} DT/mois</span>
-                      <span className="ic-sep">·</span>
-                      <span className="green-text">{totalLeft.toLocaleString()} DT restant</span>
+                    {/* Stats row */}
+                    <div className="inst-stats">
+                      <div className="inst-stat">
+                        <span>Avance payée</span>
+                        <strong>{plan.downPayment.toLocaleString()} DT</strong>
+                      </div>
+                      <div className="inst-stat">
+                        <span>Mensualité</span>
+                        <strong>{plan.monthlyAmount.toLocaleString()} DT</strong>
+                      </div>
+                      <div className="inst-stat">
+                        <span>Restant à payer</span>
+                        <strong className="green-text">{totalLeft.toLocaleString()} DT</strong>
+                      </div>
                     </div>
 
-                    {/* Actionable payments only */}
-                    {needsAction.length > 0 && (
-                      <div className="ic-actions">
-                        {needsAction.map((payment) => (
-                          <div key={payment.month} className={`ic-action ic-action--${payment.status}`}>
-                            <div className="ic-action-left">
-                              <span className={`payment-status-dot psd--${payment.status}`} />
-                              <span className="ic-action-label">
-                                V.{payment.month}
-                                <span className="ic-action-date"> · {fmtDate(payment.dueDate)}</span>
-                              </span>
+                    {/* Payment rows */}
+                    <div className="inst-payments">
+                      {plan.payments.map((payment) => (
+                        <div key={payment.month} className={`payment-row payment-row--${payment.status}`}>
+
+                          <div className="payment-row-left">
+                            <span className={`payment-status-dot psd--${payment.status}`} />
+                            <div>
+                              <span className="payment-row-title">Versement {payment.month}</span>
+                              <span className="payment-row-date">Dû le {fmtDate(payment.dueDate)}</span>
                             </div>
-                            <div className="ic-action-right">
-                              <span className="ic-action-amount">{payment.amount.toLocaleString()} DT</span>
-                              {payment.status === 'submitted' ? (
-                                <span className="ic-submitted-tag">⏳ En révision</span>
-                              ) : (
-                                <button type="button" className="ic-upload-btn" onClick={() => openUpload(plan, payment)}>
-                                  {payment.status === 'rejected' ? '↩ Resoumettre' : '↑ Envoyer'}
-                                </button>
-                              )}
-                            </div>
-                            {payment.status === 'rejected' && payment.rejectedNote && (
-                              <p className="ic-reject-note">⚠ {payment.rejectedNote}</p>
-                            )}
                           </div>
-                        ))}
-                      </div>
-                    )}
+
+                          <div className="payment-row-right">
+                            <span className="payment-row-amount">{payment.amount.toLocaleString()} DT</span>
+                            <span className={`payment-row-status prs--${payment.status}`}>
+                              {STATUS_LABEL[payment.status]}
+                            </span>
+                          </div>
+
+                          {/* Action button for actionable payments */}
+                          {(payment.status === 'pending' || payment.status === 'rejected') && (
+                            <button
+                              type="button"
+                              className="payment-upload-btn"
+                              onClick={() => openUpload(plan, payment)}
+                            >
+                              {payment.status === 'rejected' ? 'Resoumettre le reçu' : 'Envoyer le reçu'}
+                            </button>
+                          )}
+
+                          {/* Receipt submitted: show file name */}
+                          {payment.status === 'submitted' && payment.receiptName && (
+                            <span className="payment-receipt-tag">
+                              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" />
+                              </svg>
+                              {payment.receiptName}
+                            </span>
+                          )}
+
+                          {/* Rejection note */}
+                          {payment.status === 'rejected' && payment.rejectedNote && (
+                            <p className="payment-reject-note">
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
+                              </svg>
+                              {payment.rejectedNote}
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )
               })}
@@ -277,7 +322,7 @@ export default function DashboardPage() {
             </div>
 
             <p className="upload-subtitle">
-              Facilité {uploadTarget.month} · {uploadTarget.amount.toLocaleString()} DT · dû le {fmtDate(uploadTarget.dueDate)}
+              Versement {uploadTarget.month} · {uploadTarget.amount.toLocaleString()} DT · dû le {fmtDate(uploadTarget.dueDate)}
             </p>
 
             <label className={`upload-zone${uploadFile ? ' upload-zone--filled' : ''}`}>

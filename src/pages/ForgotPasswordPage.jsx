@@ -16,6 +16,27 @@ function IconShield() {
   )
 }
 
+function IconLock() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="11" width="18" height="11" rx="2" />
+      <path d="M7 11V7a5 5 0 0110 0v4" />
+      <circle cx="12" cy="16.5" r="1.3" fill="currentColor" stroke="none" />
+    </svg>
+  )
+}
+
+function IconPerson() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="9" cy="7" r="4" />
+      <path d="M1 20c0-4 3.6-7 8-7" />
+      <path d="M17 14l1.5 1.5L22 12" />
+      <circle cx="18" cy="18" r="4" />
+    </svg>
+  )
+}
+
 function IconCheckCircle() {
   return (
     <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="#a8cc50" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -27,6 +48,7 @@ function IconCheckCircle() {
 
 export default function ForgotPasswordPage() {
   const navigate = useNavigate()
+  const [accountType, setAccountType] = useState(null)
   const [email, setEmail] = useState('')
   const [showPass, setShowPass] = useState(false)
   const [sent, setSent] = useState(false)
@@ -62,6 +84,26 @@ export default function ForgotPasswordPage() {
             Veuillez entrer votre nom d&apos;utilisateur ou adresse e-mail pour recevoir un lien
             de réinitialisation de votre mot de passe.
           </p>
+        </div>
+
+        {/* Account type selection */}
+        <div className="forgot-type-wrap">
+          <button
+            type="button"
+            className={`forgot-type-btn${accountType === 'investor' ? ' forgot-type-btn--active' : ''}`}
+            onClick={() => setAccountType(accountType === 'investor' ? null : 'investor')}
+          >
+            <span>Récupération — Investisseur partenaire (≥ 75M)</span>
+            <IconLock />
+          </button>
+          <button
+            type="button"
+            className={`forgot-type-btn${accountType === 'subscriber' ? ' forgot-type-btn--active' : ''}`}
+            onClick={() => setAccountType(accountType === 'subscriber' ? null : 'subscriber')}
+          >
+            <span>Récupération — Abonné (≤ 100 000 DT)</span>
+            <IconPerson />
+          </button>
         </div>
 
         {/* Form / success */}
