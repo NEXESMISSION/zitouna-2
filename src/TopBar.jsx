@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import headerLogo from '../logo-header .png'
 import { IconLogout } from './LoginDecor.jsx'
-import { isSupabaseConfigured, supabase } from './lib/supabaseClient.js'
+import { supabase, isSupabaseConfigured } from './lib/supabase.js'
 
 export default function TopBar() {
   const navigate = useNavigate()
@@ -12,10 +12,8 @@ export default function TopBar() {
 
   async function handleLogout() {
     close()
-    if (isSupabaseConfigured && supabase) {
-      await supabase.auth.signOut()
-    }
-    navigate('/', { replace: true })
+    if (isSupabaseConfigured) await supabase.auth.signOut()
+    navigate('/')
   }
 
   return (

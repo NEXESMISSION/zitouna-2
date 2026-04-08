@@ -1,11 +1,27 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import TopBar from '../TopBar.jsx'
 import { projects } from '../projects.js'
+import { supabase, isSupabaseConfigured } from '../lib/supabase.js'
 
 export default function BrowsePage() {
   const navigate = useNavigate()
-  const [query, setQuery] = useState('')
+  const [query, setQuery]       = useState('')
+  const [userName, setUserName] = useState('')
+
+  useEffect(() => {
+    if (!isSupabaseConfigured) return
+    supabase.auth.getUser().then(({ data }) => {
+      const user = data?.user
+      if (!user) return
+      const firstName =
+        user.user_metadata?.first_name ||
+        user.user_metadata?.full_name?.split(' ')[0] ||
+        user.email?.split('@')[0] ||
+        ''
+      setUserName(firstName)
+    })
+  }, [])
 
   const filtered = projects.filter(
     (p) =>
@@ -20,7 +36,7 @@ export default function BrowsePage() {
         <TopBar />
 
         <div className="browse-greeting">
-          <p className="browse-greeting-hello">Bonjour, Lassaad</p>
+          <p className="browse-greeting-hello">Bonjour, {userName || '…'}</p>
           <p className="browse-greeting-sub">Voici l&apos;état de votre portefeuille d&apos;oliviers</p>
         </div>
 

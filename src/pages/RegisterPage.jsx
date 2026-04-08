@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import appLogo from '../../logo.png'
-import { isSupabaseConfigured, supabase } from '../lib/supabaseClient.js'
 import {
   IconEye,
   IconEyeOff,
@@ -10,6 +9,7 @@ import {
   IconKey,
   IconUser,
 } from '../LoginDecor.jsx'
+import { supabase, isSupabaseConfigured } from '../lib/supabase.js'
 
 function IconPhone() {
   return (
@@ -31,77 +31,109 @@ function IconIdCard() {
 
 export default function RegisterPage() {
   const navigate = useNavigate()
-  const [showPassword, setShowPassword]           = useState(false)
+  const [showPassword, setShowPassword]               = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
-  const [firstName, setFirstName] = useState('')
-  const [lastName, setLastName] = useState('')
-  const [email, setEmail] = useState('')
-  const [phone, setPhone] = useState('')
-  const [cin, setCin] = useState('')
-  const [password, setPassword] = useState('')
-  const [confirmPassword, setConfirmPassword] = useState('')
-  const [errorMessage, setErrorMessage] = useState('')
-  const [successMessage, setSuccessMessage] = useState('')
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const [oauthLoadingProvider, setOauthLoadingProvider] = useState('')
+  const [loading, setLoading]                         = useState(false)
+  const [error, setError]                             = useState('')
+  const [success, setSuccess]                         = useState('')
 
-  async function handleRegister(event) {
-    event.preventDefault()
-    setErrorMessage('')
-    setSuccessMessage('')
-    if (!isSupabaseConfigured || !supabase) {
-      setErrorMessage('Configuration Supabase manquante. Verifiez le fichier .env.local.')
-      return
-    }
+  const [form, setForm] = useState({
+    firstname: '',
+    lastname: '',
+    email: '',
+    phone: '',
+    cin: '',
+    password: '',
+    confirm: '',
+  })
 
-    if (password !== confirmPassword) {
-      setErrorMessage('Les mots de passe ne correspondent pas.')
-      return
-    }
-
-    setIsSubmitting(true)
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          first_name: firstName,
-          last_name: lastName,
-          phone,
-          cin,
-        },
-      },
-    })
-
-    if (error) {
-      setErrorMessage(error.message)
-      setIsSubmitting(false)
-      return
-    }
-
-    setSuccessMessage('Compte cree. Verifiez votre email pour confirmer le compte.')
-    setIsSubmitting(false)
+  function handleChange(e) {
+    setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }))
+    setError('')
   }
 
-  async function handleOAuth(provider) {
-    setErrorMessage('')
-    setSuccessMessage('')
-    if (!isSupabaseConfigured || !supabase) {
-      setErrorMessage('Configuration Supabase manquante. Verifiez le fichier .env.local.')
+  async function handleSubmit(e) {
+    e.preventDefault()
+    setError('')
+    setSuccess('')
+
+    if (form.password !== form.confirm) {
+      setError('Les mots de passe ne correspondent pas.')
       return
     }
-    setOauthLoadingProvider(provider)
+    if (form.password.length < 6) {
+      setError('Le mot de passe doit contenir au moins 6 caractères.')
+      return
+    }
+    if (form.cin && !/^\d{8}$/.test(form.cin)) {
+      setError('Le numéro CIN doit contenir exactement 8 chiffres.')
+      return
+    }
+    if (form.phone && !/^\d{8}$/.test(form.phone)) {
+      setError('Le numéro de téléphone doit contenir exactement 8 chiffres.')
+      return
+    }
 
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider,
-      options: {
-        redirectTo: `${window.location.origin}/browse`,
-      },
-    })
+    if (!isSupabaseConfigured) {
+      setError('Supabase n\'est pas configuré. Vérifiez le fichier .env.')
+      return
+    }
 
-    if (error) {
-      setErrorMessage(error.message)
-      setOauthLoadingProvider('')
+    setLoading(true)
+    try {
+      const { data, error: signUpError } = await supabase.auth.signUp({
+        email: form.email,
+        password: form.password,
+        options: {
+          data: {
+            first_name: form.firstname,
+            last_name: form.lastname,
+            full_name: `${form.firstname} ${form.lastname}`.trim(),
+            phone: form.phone ? `+216${form.phone}` : '',
+            cin: form.cin,
+          },
+        },
+      })
+
+      if (signUpError) {
+        if (signUpError.status === 429 || signUpError.message.includes('rate limit') || signUpError.message.includes('429')) {
+          setError('Trop de tentatives d\'inscription. Attendez quelques minutes et réessayez.')
+        } else if (
+          signUpError.message.includes('already registered') ||
+          signUpError.message.includes('already exists') ||
+          signUpError.message.includes('User already registered')
+        ) {
+          setError('Cet e-mail est déjà utilisé. Veuillez vous connecter.')
+        } else {
+          setError(signUpError.message)
+        }
+        return
+      }
+
+      // Supabase retourne identityData vide si l'email existe déjà en "pending"
+      const isAlreadyPending =
+        data?.user &&
+        data.user.identities &&
+        data.user.identities.length === 0
+
+      if (isAlreadyPending) {
+        setError(
+          'Cet e-mail est déjà enregistré mais en attente de confirmation. ' +
+          'Vérifiez votre boîte mail ou contactez l\'administrateur pour supprimer le compte en attente.'
+        )
+        return
+      }
+
+      setSuccess('Compte créé avec succès ! Vous allez être redirigé vers la connexion…')
+      setTimeout(() => navigate('/'), 2500)
+    } catch (err) {
+      if (err?.status === 429 || String(err?.message).includes('429') || String(err?.message).includes('rate limit')) {
+        setError('Trop de tentatives. Attendez quelques minutes avant de réessayer.')
+      } else {
+        setError('Une erreur inattendue s\'est produite. Réessayez.')
+      }
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -117,23 +149,13 @@ export default function RegisterPage() {
         <h1 className="login-title">Créer un compte</h1>
 
         <div className="social-row login-social">
-          <button
-            type="button"
-            className="social-button login-social-btn"
-            onClick={() => handleOAuth('google')}
-            disabled={oauthLoadingProvider !== ''}
-          >
+          <button type="button" className="social-button login-social-btn">
             <IconGoogle />
-            {oauthLoadingProvider === 'google' ? 'Google...' : 'Google'}
+            Google
           </button>
-          <button
-            type="button"
-            className="social-button login-social-btn"
-            onClick={() => handleOAuth('facebook')}
-            disabled={oauthLoadingProvider !== ''}
-          >
+          <button type="button" className="social-button login-social-btn">
             <IconFacebook />
-            {oauthLoadingProvider === 'facebook' ? 'Facebook...' : 'Facebook'}
+            Facebook
           </button>
         </div>
 
@@ -141,11 +163,35 @@ export default function RegisterPage() {
           <span>Ou continuer avec</span>
         </div>
 
-        <form
-          className="form login-form"
-          onSubmit={handleRegister}
-        >
-          {/* First name + Last name — side by side */}
+        {error && (
+          <div style={{
+            background: 'rgba(220,53,69,0.15)',
+            border: '1px solid rgba(220,53,69,0.5)',
+            color: '#ff6b7a',
+            borderRadius: '8px',
+            padding: '10px 14px',
+            fontSize: '13px',
+            marginBottom: '12px',
+          }}>
+            {error}
+          </div>
+        )}
+
+        {success && (
+          <div style={{
+            background: 'rgba(40,167,69,0.15)',
+            border: '1px solid rgba(40,167,69,0.5)',
+            color: '#5cb85c',
+            borderRadius: '8px',
+            padding: '10px 14px',
+            fontSize: '13px',
+            marginBottom: '12px',
+          }}>
+            {success}
+          </div>
+        )}
+
+        <form className="form login-form" onSubmit={handleSubmit}>
           <div className="reg-name-row">
             <div className="login-field">
               <label htmlFor="reg-firstname">Prénom</label>
@@ -153,12 +199,13 @@ export default function RegisterPage() {
                 <IconUser />
                 <input
                   id="reg-firstname"
+                  name="firstname"
                   type="text"
                   placeholder="Lassaad"
                   autoComplete="given-name"
-                  value={firstName}
-                  onChange={(e) => setFirstName(e.target.value)}
                   required
+                  value={form.firstname}
+                  onChange={handleChange}
                 />
               </div>
             </div>
@@ -168,18 +215,18 @@ export default function RegisterPage() {
                 <IconUser />
                 <input
                   id="reg-lastname"
+                  name="lastname"
                   type="text"
                   placeholder="Ben Ali"
                   autoComplete="family-name"
-                  value={lastName}
-                  onChange={(e) => setLastName(e.target.value)}
                   required
+                  value={form.lastname}
+                  onChange={handleChange}
                 />
               </div>
             </div>
           </div>
 
-          {/* Email */}
           <div className="login-field">
             <label htmlFor="reg-email">E-mail</label>
             <div className="input-wrap login-input">
@@ -189,17 +236,17 @@ export default function RegisterPage() {
               </svg>
               <input
                 id="reg-email"
+                name="email"
                 type="email"
                 placeholder="Exemple@gmail.com"
                 autoComplete="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
                 required
+                value={form.email}
+                onChange={handleChange}
               />
             </div>
           </div>
 
-          {/* Phone number */}
           <div className="login-field">
             <label htmlFor="reg-phone">Numéro de téléphone</label>
             <div className="input-wrap login-input reg-phone-wrap">
@@ -208,46 +255,47 @@ export default function RegisterPage() {
               <IconPhone />
               <input
                 id="reg-phone"
+                name="phone"
                 type="tel"
                 placeholder="XX XXX XXX"
                 autoComplete="tel"
                 maxLength={8}
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
+                value={form.phone}
+                onChange={handleChange}
               />
             </div>
           </div>
 
-          {/* CIN */}
           <div className="login-field">
             <label htmlFor="reg-cin">Numéro de carte d&apos;identité (CIN)</label>
             <div className="input-wrap login-input">
               <IconIdCard />
               <input
                 id="reg-cin"
+                name="cin"
                 type="text"
                 placeholder="XXXXXXXX"
                 autoComplete="off"
                 maxLength={8}
-                value={cin}
-                onChange={(e) => setCin(e.target.value)}
+                value={form.cin}
+                onChange={handleChange}
               />
             </div>
           </div>
 
-          {/* Password */}
           <div className="login-field login-field--password">
             <label htmlFor="reg-password">Mot de passe</label>
             <div className="input-wrap login-input">
               <IconKey />
               <input
                 id="reg-password"
+                name="password"
                 type={showPassword ? 'text' : 'password'}
                 placeholder="••••••••"
                 autoComplete="new-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
                 required
+                value={form.password}
+                onChange={handleChange}
               />
               <button
                 type="button"
@@ -260,19 +308,19 @@ export default function RegisterPage() {
             </div>
           </div>
 
-          {/* Confirm password */}
           <div className="login-field login-field--password">
             <label htmlFor="reg-confirm">Confirmer le mot de passe</label>
             <div className="input-wrap login-input">
               <IconKey />
               <input
                 id="reg-confirm"
+                name="confirm"
                 type={showConfirmPassword ? 'text' : 'password'}
                 placeholder="••••••••"
                 autoComplete="new-password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
                 required
+                value={form.confirm}
+                onChange={handleChange}
               />
               <button
                 type="button"
@@ -285,11 +333,13 @@ export default function RegisterPage() {
             </div>
           </div>
 
-          {errorMessage ? <p className="auth-error">{errorMessage}</p> : null}
-          {successMessage ? <p className="auth-success">{successMessage}</p> : null}
-
-          <button type="submit" className="submit-button login-submit" style={{ marginTop: '20px' }}>
-            {isSubmitting ? 'Inscription...' : "S'inscrire"}
+          <button
+            type="submit"
+            className="submit-button login-submit"
+            style={{ marginTop: '20px' }}
+            disabled={loading}
+          >
+            {loading ? 'Inscription en cours…' : 'S\'inscrire'}
           </button>
         </form>
 
