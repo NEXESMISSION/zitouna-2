@@ -8,20 +8,33 @@ import BrowsePage         from './pages/BrowsePage.jsx'
 import DashboardPage      from './pages/DashboardPage.jsx'
 import ProjectPage        from './pages/ProjectPage.jsx'
 import PlotPage           from './pages/PlotPage.jsx'
-import { supabase } from './lib/supabaseClient.js'
+import { isSupabaseConfigured, supabase } from './lib/supabaseClient.js'
 
 export default function App() {
   const [session, setSession] = useState(null)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(isSupabaseConfigured)
 
   useEffect(() => {
+    if (!isSupabaseConfigured || !supabase) return
+
     let mounted = true
 
-    supabase.auth.getSession().then(({ data }) => {
-      if (!mounted) return
-      setSession(data.session ?? null)
-      setLoading(false)
-    })
+    supabase.auth.getSession()
+      .then(({ data, error }) => {
+        if (!mounted) return
+        if (error) {
+          console.error('Supabase session error:', error.message)
+        }
+        setSession(data?.session ?? null)
+      })
+      .catch((error) => {
+        if (!mounted) return
+        console.error('Supabase init failed:', error)
+      })
+      .finally(() => {
+        if (!mounted) return
+        setLoading(false)
+      })
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession ?? null)
@@ -33,7 +46,15 @@ export default function App() {
     }
   }, [])
 
-  if (loading) return null
+  if (loading) {
+    return (
+      <main className="screen screen--login">
+        <div className="login-content" style={{ textAlign: 'center' }}>
+          <p>Chargement...</p>
+        </div>
+      </main>
+    )
+  }
 
   return (
     <Routes>

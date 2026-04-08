@@ -2,12 +2,21 @@ import { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import headerLogo from '../logo-header .png'
 import { IconLogout } from './LoginDecor.jsx'
+import { isSupabaseConfigured, supabase } from './lib/supabaseClient.js'
 
 export default function TopBar() {
   const navigate = useNavigate()
   const [menuOpen, setMenuOpen] = useState(false)
 
   function close() { setMenuOpen(false) }
+
+  async function handleLogout() {
+    close()
+    if (isSupabaseConfigured && supabase) {
+      await supabase.auth.signOut()
+    }
+    navigate('/', { replace: true })
+  }
 
   return (
     <header className="top-bar-wrap">
@@ -47,7 +56,7 @@ export default function TopBar() {
             type="button"
             className="icon-action"
             title="Déconnexion"
-            onClick={() => { close(); navigate('/') }}
+            onClick={handleLogout}
           >
             <IconLogout />
           </button>

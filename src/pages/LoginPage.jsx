@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import appLogo from '../../logo.png'
-import { supabase } from '../lib/supabaseClient.js'
+import { isSupabaseConfigured, supabase } from '../lib/supabaseClient.js'
 import {
   IconEye,
   IconEyeOff,
@@ -23,6 +23,10 @@ export default function LoginPage() {
   async function handleLogin(event) {
     event.preventDefault()
     setErrorMessage('')
+    if (!isSupabaseConfigured || !supabase) {
+      setErrorMessage('Configuration Supabase manquante. Verifiez le fichier .env.local.')
+      return
+    }
     setIsSubmitting(true)
 
     const { error } = await supabase.auth.signInWithPassword({ email, password })
@@ -38,6 +42,10 @@ export default function LoginPage() {
 
   async function handleOAuth(provider) {
     setErrorMessage('')
+    if (!isSupabaseConfigured || !supabase) {
+      setErrorMessage('Configuration Supabase manquante. Verifiez le fichier .env.local.')
+      return
+    }
     setOauthLoadingProvider(provider)
 
     const { error } = await supabase.auth.signInWithOAuth({

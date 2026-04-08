@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import appLogo from '../../logo.png'
-import { supabase } from '../lib/supabaseClient.js'
+import { isSupabaseConfigured, supabase } from '../lib/supabaseClient.js'
 import {
   IconEye,
   IconEyeOff,
@@ -49,6 +49,10 @@ export default function RegisterPage() {
     event.preventDefault()
     setErrorMessage('')
     setSuccessMessage('')
+    if (!isSupabaseConfigured || !supabase) {
+      setErrorMessage('Configuration Supabase manquante. Verifiez le fichier .env.local.')
+      return
+    }
 
     if (password !== confirmPassword) {
       setErrorMessage('Les mots de passe ne correspondent pas.')
@@ -82,6 +86,10 @@ export default function RegisterPage() {
   async function handleOAuth(provider) {
     setErrorMessage('')
     setSuccessMessage('')
+    if (!isSupabaseConfigured || !supabase) {
+      setErrorMessage('Configuration Supabase manquante. Verifiez le fichier .env.local.')
+      return
+    }
     setOauthLoadingProvider(provider)
 
     const { error } = await supabase.auth.signInWithOAuth({
