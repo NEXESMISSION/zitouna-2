@@ -1,7 +1,8 @@
 import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import appLogo from '../../logo.png'
+import TopBar from '../TopBar.jsx'
 import { projects as allProjects } from '../projects.js'
+import { googleMapsEmbed } from '../mapUrls.js'
 import { mockUsers, mockReceipts, mockSales, mockOffers } from '../adminData.js'
 
 function fmtDate(iso) {
@@ -36,8 +37,7 @@ const EMPTY_PROJECT = { id: '', title: '', city: '', region: '', area: '', year:
 const EMPTY_PARCEL  = { trees: '', area: '', pricePerTree: '' }
 
 function makeMapUrl(lat, lng) {
-  const pad = 0.05
-  return `https://www.openstreetmap.org/export/embed.html?bbox=${(lng - pad).toFixed(3)},${(lat - pad).toFixed(3)},${(lng + pad).toFixed(3)},${(lat + pad).toFixed(3)}&layer=mapnik&marker=${lat},${lng}`
+  return googleMapsEmbed(Number(lat), Number(lng), 14)
 }
 
 export default function OwnerDashboard() {
@@ -196,38 +196,30 @@ export default function OwnerDashboard() {
   })
 
   return (
-    <div className="ap-shell">
+    <main className="screen screen--app">
+      <section className="dashboard-page">
+      <TopBar />
 
-      {/* ── Sidebar ── */}
-      <aside className="ap-sidebar ap-sidebar--owner">
-        <div className="ap-sidebar-logo">
-          <img src={appLogo} alt="logo" width="36" />
-          <div>
-            <span className="ap-brand">ZITOUNA BLADI</span>
-            <span className="ap-role ap-role--owner">👑 Propriétaire</span>
-          </div>
-        </div>
-        <nav className="ap-nav">
-          {TABS.map(t => (
-            <button key={t.id} type="button"
-              className={`ap-nav-btn${tab === t.id ? ' ap-nav-btn--active' : ''}`}
-              onClick={() => setTab(t.id)}
-            >
-              <span className="ap-nav-icon">{t.icon}</span>
-              {t.label}
-              {t.id === 'receipts' && pendingCount > 0 && (
-                <span className="ap-nav-badge">{pendingCount}</span>
-              )}
-            </button>
-          ))}
-        </nav>
-        <button type="button" className="ap-back-btn" onClick={() => navigate('/')}>
-          ← Quitter le panel
-        </button>
-      </aside>
+      {/* role badge */}
+      <p className="ap-role-badge ap-role-badge--owner">👑 Propriétaire — Accès illimité</p>
 
-      {/* ── Main ── */}
-      <main className="ap-main">
+      {/* horizontal tab bar */}
+      <div className="ap-tabbar">
+        {TABS.map(t => (
+          <button key={t.id} type="button"
+            className={`ap-tab-btn${tab === t.id ? ' ap-tab-btn--active' : ''}`}
+            onClick={() => setTab(t.id)}
+          >
+            <span>{t.icon}</span> {t.label}
+            {t.id === 'receipts' && pendingCount > 0 && (
+              <span className="ap-nav-badge">{pendingCount}</span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* content */}
+      <div className="ap-content">
 
         {/* ── APERÇU ── */}
         {tab === 'overview' && (
@@ -563,7 +555,6 @@ export default function OwnerDashboard() {
             </div>
           </>
         )}
-      </main>
 
       {/* ══════════════════════════════════════════════
           PROJECT FORM MODAL (create / edit)
@@ -763,6 +754,8 @@ export default function OwnerDashboard() {
 
       {/* ── Toast ── */}
       {toast && <div className={`ap-toast${toast.ok ? '' : ' ap-toast--err'}`}>{toast.msg}</div>}
-    </div>
+      </div>{/* ap-content */}
+      </section>
+    </main>
   )
 }

@@ -19,6 +19,16 @@ export default function ProjectPage() {
   const proj = projects.find((p) => p.id === id)
   const [search, setSearch] = useState('')
 
+  const callAgency = () => {
+    window.location.href = 'tel:+21655123456'
+  }
+
+  const finalizeWithExpert = () => {
+    const allPlotIds = proj?.plots?.map((p) => p.id) ?? []
+    if (allPlotIds.length === 0) return
+    navigate(`/project/${proj.id}/visite`, { state: { plotIds: allPlotIds } })
+  }
+
   if (!proj) {
     return (
       <main className="screen screen--app">
@@ -35,16 +45,13 @@ export default function ProjectPage() {
     )
   }
 
-  const totalTrees = proj.plots.reduce((s, p) => s + p.trees, 0)
-  const totalArea  = proj.plots.reduce((s, p) => s + p.area, 0)
-
   const filteredPlots = proj.plots.filter((p) =>
     search === '' || String(p.id).includes(search.trim()),
   )
 
   return (
     <main className="screen screen--app">
-      <section className="dashboard-page">
+      <section className="dashboard-page" style={{ paddingBottom: '6.5rem' }}>
         <TopBar />
 
         {/* breadcrumb */}
@@ -56,30 +63,6 @@ export default function ProjectPage() {
             Explorer
           </button>
           <span className="detail-breadcrumb">{proj.city} · {proj.title}</span>
-        </div>
-
-        {/* hero stats */}
-        <div className="proj-hero-stats">
-          <div className="proj-hero-stat">
-            <span>{proj.area}</span>
-            <label>Superficie</label>
-          </div>
-          <div className="proj-hero-stat">
-            <span>{totalTrees.toLocaleString()}</span>
-            <label>Arbres disponibles</label>
-          </div>
-          <div className="proj-hero-stat">
-            <span>{proj.plots.length}</span>
-            <label>Parcelles</label>
-          </div>
-          <div className="proj-hero-stat">
-            <span>{proj.year}</span>
-            <label>Plantation</label>
-          </div>
-          <div className="proj-hero-stat">
-            <span>{totalArea.toLocaleString()} m²</span>
-            <label>Surface totale</label>
-          </div>
         </div>
 
         {/* project map */}
@@ -131,74 +114,58 @@ export default function ProjectPage() {
             <button className="link-btn" onClick={() => setSearch('')}>Réinitialiser</button>
           </div>
         ) : (
-          <div className="plot-cards-grid">
-            {filteredPlots.map((plot, i) => (
-              <div key={plot.id} className="plot-card">
-                {/* mini map */}
-                <div className="plot-card-map">
-                  <iframe
-                    title={`Parcelle ${plot.id}`}
-                    src={plot.mapUrl}
-                    loading="lazy"
-                    tabIndex={-1}
-                  />
-                </div>
+          <div className="plots-cards-grid">
+            {filteredPlots.map((plot) => {
+              return (
+                <article key={plot.id} className="plot-mini-card">
+                  <header className="plot-mini-card__head">
+                    <span className="plot-mini-card__head-lbl">Parcelle</span>
+                    <span className="plot-mini-card__head-num">N° {plot.id}</span>
+                  </header>
 
-                <div className="plot-card-body">
-                  <div className="plot-card-top">
-                    <span className="plot-card-num">Parcelle {i + 1}</span>
-                    <span className="plot-card-id">#{plot.id}</span>
-                  </div>
-                  <div className="plot-card-trees">
-                    <strong>{plot.trees}</strong>
-                    <span>arbres</span>
-                  </div>
-                  {/* Plantation year badges */}
-                  {plot.treeBatches?.length > 0 && (
-                    <div className="plot-card-years">
-                      {plot.treeBatches.map(b => {
-                        const age = CURRENT_YEAR - b.year
-                        const color = age < 3 ? '#888' : age < 6 ? '#f5c842' : age < 10 ? '#a8cc50' : '#7ab020'
-                        return (
-                          <span key={b.year} className="plot-year-tag" style={{ borderColor: color, color }}>
-                            {b.year} · {b.count}🌿
-                          </span>
-                        )
-                      })}
-                    </div>
-                  )}
-
-                  <div className="plot-card-details">
-                    <div className="plot-card-row">
-                      <span>Surface</span>
-                      <strong>{plot.area.toLocaleString()} m²</strong>
-                    </div>
-                    <div className="plot-card-row">
-                      <span>Prix / arbre</span>
-                      <strong>{plot.pricePerTree.toLocaleString()} TND</strong>
-                    </div>
-                    <div className="plot-card-row">
-                      <span>Prix total</span>
-                      <strong className="green-text">{plot.totalPrice.toLocaleString()} TND</strong>
-                    </div>
-                    <div className="plot-card-row">
-                      <span>Revenu / an</span>
-                      <strong className="green-text">~{plotAnnualRevenue(plot).toLocaleString()} DT</strong>
-                    </div>
+                  <div className="plot-mini-card__line">
+                    <span className="plot-mini-card__k">Surface</span>
+                    <span className="plot-mini-card__v">{plot.area.toLocaleString()} m²</span>
                   </div>
 
-                  <button
-                    type="button"
-                    className="plot-detail-btn"
-                    onClick={() => navigate(`/project/${proj.id}/plot/${plot.id}`)}
-                  >
-                    Voir le détail →
-                  </button>
-                </div>
-              </div>
-            ))}
+                  <div className="plot-mini-card__line">
+                    <span className="plot-mini-card__k">Prix / arbre</span>
+                    <span className="plot-mini-card__v">{plot.pricePerTree.toLocaleString()} TND</span>
+                  </div>
+
+                  <p className="plot-mini-card__trees">{plot.trees} arbres</p>
+
+                  <div className="plot-mini-card__total">
+                    <div className="plot-mini-card__total-top">
+                      <span className="plot-mini-card__total-lbl">Prix total</span>
+                      <span className="plot-mini-card__total-num">{plot.totalPrice.toLocaleString()} TND</span>
+                    </div>
+                    <span className="plot-mini-card__rev">~{plotAnnualRevenue(plot).toLocaleString()} DT/an</span>
+                  </div>
+
+                  <div className="plot-mini-card__actions">
+                    <button
+                      type="button"
+                      className="plot-mini-card__btn plot-mini-card__btn--more"
+                      onClick={() => navigate(`/project/${proj.id}/plot/${plot.id}`)}
+                    >
+                      Voir plus
+                    </button>
+                  </div>
+                </article>
+              )
+            })}
           </div>
         )}
+
+        <div className="project-page-actions">
+          <button type="button" className="project-page-btn project-page-btn--gold" onClick={finalizeWithExpert}>
+            Prendre de visite
+          </button>
+          <button type="button" className="project-page-btn project-page-btn--outline" onClick={callAgency}>
+            Contacter nous
+          </button>
+        </div>
       </section>
     </main>
   )

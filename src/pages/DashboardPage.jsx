@@ -68,112 +68,113 @@ export default function DashboardPage() {
       <section className="dashboard-page">
         <TopBar />
 
-        {/* Greeting */}
+        {/* ── Greeting ── */}
         <div className="dash-greeting">
           <div>
             <h2 className="page-title">Bonjour, <strong>Lassaad</strong></h2>
             <p className="page-subtitle">Voici l&apos;état de votre portefeuille d&apos;oliviers</p>
           </div>
-          <button type="button" className="cta-primary" onClick={() => navigate('/browse')}>
+          <button type="button" className="cta-primary cta-primary--gold" onClick={() => navigate('/browse')}>
             + Ajouter des oliviers
           </button>
         </div>
 
-        {/* Stats */}
-        <div className="stats-grid">
-          <div className="stat-card stat-card--green">
-            <span className="stat-label">Arbres possédés</span>
-            <p className="stat-value">{totalTrees.toLocaleString()}</p>
-            <span className="stat-sub">oliviers actifs</span>
+        {/* ── KPI strip ── */}
+        <div className="dash-kpi-strip">
+          <div className="dash-kpi">
+            <span className="dash-kpi-val dash-kpi-val--green">{totalTrees.toLocaleString()}</span>
+            <span className="dash-kpi-lbl">Oliviers</span>
           </div>
-          <div className="stat-card">
-            <span className="stat-label">Total investi</span>
-            <p className="stat-value">{totalInvested.toLocaleString()}</p>
-            <span className="stat-sub">TND</span>
+          <div className="dash-kpi-sep" />
+          <div className="dash-kpi">
+            <span className="dash-kpi-val">{totalInvested.toLocaleString()}</span>
+            <span className="dash-kpi-lbl">TND investis</span>
           </div>
-          <div className="stat-card">
-            <span className="stat-label">Revenu annuel estimé</span>
-            <p className="stat-value">{totalRevenue.toLocaleString()}</p>
-            <span className="stat-sub">TND / an</span>
+          <div className="dash-kpi-sep" />
+          <div className="dash-kpi">
+            <span className="dash-kpi-val dash-kpi-val--green">{totalRevenue.toLocaleString()}</span>
+            <span className="dash-kpi-lbl">TND / an</span>
           </div>
-          <div className="stat-card">
-            <span className="stat-label">Rendement estimé</span>
-            <p className="stat-value">{roi}%</p>
-            <span className="stat-sub">ROI annuel</span>
+          <div className="dash-kpi-sep" />
+          <div className="dash-kpi">
+            <span className="dash-kpi-val">{roi}%</span>
+            <span className="dash-kpi-lbl">ROI</span>
           </div>
         </div>
 
-        {/* ══════════════════════════════
-            MES VERSEMENTS EN COURS
-        ══════════════════════════════ */}
+        {/* ── Mes facilités ── */}
         {plans.length > 0 && (
           <>
-            <h3 className="section-heading" style={{ marginTop: '2rem' }}>Mes facilités en cours</h3>
-            <div className="ic-grid">
+            <h3 className="dash-section-title">Mes facilités en cours</h3>
+            <div className="dash-plans-wrap">
+              {/* header */}
+              <div className="dash-plans-head">
+                <span>Projet</span>
+                <span>Progression</span>
+                <span>Mensualité</span>
+                <span>Restant</span>
+                <span>Prochain paiement</span>
+                <span></span>
+              </div>
+
               {plans.map((plan) => {
-                const approvedCount = plan.payments.filter((p) => p.status === 'approved').length
-                const progress      = (approvedCount / plan.totalMonths) * 100
-                const totalLeft     = plan.totalPrice - plan.downPayment - approvedCount * plan.monthlyAmount
-                const needsAction   = plan.payments.filter((p) => p.status === 'pending' || p.status === 'rejected' || p.status === 'submitted')
+                const approvedCount  = plan.payments.filter((p) => p.status === 'approved').length
+                const progress       = (approvedCount / plan.totalMonths) * 100
+                const totalLeft      = plan.totalPrice - plan.downPayment - approvedCount * plan.monthlyAmount
+                const nextPayment    = plan.payments.find((p) => p.status === 'pending' || p.status === 'rejected')
+                const submittedPay   = plan.payments.find((p) => p.status === 'submitted')
 
                 return (
-                  <div key={plan.id} className={`ic-card ic-card--${plan.status}`}>
-
-                    {/* Header: title + badge */}
-                    <div className="ic-header">
-                      <div className="ic-title-block">
-                        <span className="ic-ref">{plan.id} · {plan.city}</span>
-                        <span className="ic-title">{plan.projectTitle}</span>
-                      </div>
-                      <span className={`inst-badge inst-badge--${plan.status}`}>
-                        {plan.status === 'active' ? 'Actif' : plan.status === 'late' ? 'En retard' : 'Terminé'}
-                      </span>
+                  <div key={plan.id} className={`dash-plan-row dash-plan-row--${plan.status}`}>
+                    {/* project */}
+                    <div className="dpr-cell dpr-project">
+                      <strong>{plan.projectTitle}</strong>
+                      <small>{plan.city} · #{plan.id}</small>
                     </div>
 
-                    {/* Progress bar */}
-                    <div className="ic-progress-row">
-                      <div className="ic-track">
-                        <div className="ic-bar" style={{ width: `${Math.max(progress, 2)}%` }} />
+                    {/* progress */}
+                    <div className="dpr-cell dpr-progress">
+                      <div className="dpr-track">
+                        <div className="dpr-fill" style={{ width: `${Math.max(progress, 2)}%` }} />
                       </div>
-                      <span className="ic-progress-label">{approvedCount}/{plan.totalMonths} mois</span>
+                      <span className="dpr-pct">{approvedCount}/{plan.totalMonths}</span>
                     </div>
 
-                    {/* Key numbers inline */}
-                    <div className="ic-meta">
-                      <span>{plan.monthlyAmount.toLocaleString()} DT/mois</span>
-                      <span className="ic-sep">·</span>
-                      <span className="green-text">{totalLeft.toLocaleString()} DT restant</span>
+                    {/* monthly */}
+                    <div className="dpr-cell">
+                      <span>{plan.monthlyAmount.toLocaleString()} DT</span>
                     </div>
 
-                    {/* Actionable payments only */}
-                    {needsAction.length > 0 && (
-                      <div className="ic-actions">
-                        {needsAction.map((payment) => (
-                          <div key={payment.month} className={`ic-action ic-action--${payment.status}`}>
-                            <div className="ic-action-left">
-                              <span className={`payment-status-dot psd--${payment.status}`} />
-                              <span className="ic-action-label">
-                                V.{payment.month}
-                                <span className="ic-action-date"> · {fmtDate(payment.dueDate)}</span>
-                              </span>
-                            </div>
-                            <div className="ic-action-right">
-                              <span className="ic-action-amount">{payment.amount.toLocaleString()} DT</span>
-                              {payment.status === 'submitted' ? (
-                                <span className="ic-submitted-tag">⏳ En révision</span>
-                              ) : (
-                                <button type="button" className="ic-upload-btn" onClick={() => openUpload(plan, payment)}>
-                                  {payment.status === 'rejected' ? '↩ Resoumettre' : '↑ Envoyer'}
-                                </button>
-                              )}
-                            </div>
-                            {payment.status === 'rejected' && payment.rejectedNote && (
-                              <p className="ic-reject-note">⚠ {payment.rejectedNote}</p>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                    {/* remaining */}
+                    <div className="dpr-cell dpr-green">
+                      <span>{totalLeft.toLocaleString()} DT</span>
+                    </div>
+
+                    {/* next payment info */}
+                    <div className="dpr-cell dpr-next">
+                      {submittedPay ? (
+                        <span className="dpr-tag dpr-tag--review">⏳ En révision</span>
+                      ) : nextPayment ? (
+                        <span className="dpr-tag">
+                          F.{nextPayment.month} · {fmtDate(nextPayment.dueDate)}
+                          {nextPayment.status === 'rejected' && nextPayment.rejectedNote && (
+                            <span className="dpr-reject"> ⚠ {nextPayment.rejectedNote}</span>
+                          )}
+                        </span>
+                      ) : (
+                        <span className="dpr-tag dpr-tag--done">✓ À jour</span>
+                      )}
+                    </div>
+
+                    {/* action */}
+                    <div className="dpr-cell dpr-action">
+                      {submittedPay ? null : nextPayment ? (
+                        <button type="button" className="dpr-btn"
+                          onClick={() => openUpload(plan, nextPayment)}>
+                          {nextPayment.status === 'rejected' ? '↩ Resoumettre' : '↑ Payer'}
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
                 )
               })}
@@ -181,98 +182,61 @@ export default function DashboardPage() {
           </>
         )}
 
-        {/* ══════════════════════════════
-            MES PARCELLES (owned)
-        ══════════════════════════════ */}
-        <h3 className="section-heading" style={{ marginTop: '2.5rem' }}>Mes parcelles</h3>
+        {/* ── Mes parcelles ── */}
+        <h3 className="dash-section-title" style={{ marginTop: '2rem' }}>Mes parcelles</h3>
 
         {myPurchases.length === 0 ? (
           <div className="empty-state">
             <p>Vous ne possédez pas encore de parcelles.</p>
-            <button className="cta-primary" onClick={() => navigate('/browse')}>
-              Explorer les projets
-            </button>
+            <button className="cta-primary" onClick={() => navigate('/browse')}>Explorer les projets</button>
           </div>
         ) : (
-          <div className="owned-plots">
+          <div className="dash-parcels">
             {myPurchases.map((purchase) => {
-              const proj = projects.find((p) => p.id === purchase.projectId)
-              const plot = proj?.plots.find((pl) => pl.id === purchase.plotId)
-              const yearsHeld  = new Date().getFullYear() - parseInt(purchase.since.split('-')[0])
+              const proj        = projects.find((p) => p.id === purchase.projectId)
+              const plot        = proj?.plots.find((pl) => pl.id === purchase.plotId)
+              const yearsHeld   = new Date().getFullYear() - parseInt(purchase.since.split('-')[0])
               const totalEarned = yearsHeld * purchase.annualRevenue
               return (
-                <div key={`${purchase.projectId}-${purchase.plotId}`} className="owned-plot-card">
+                <div key={`${purchase.projectId}-${purchase.plotId}`}
+                  className="dash-parcel-card"
+                  onClick={() => navigate(`/project/${purchase.projectId}/plot/${purchase.plotId}`)}>
+
+                  {/* map thumbnail */}
                   {plot?.mapUrl && (
-                    <div className="owned-plot-map">
+                    <div className="dash-parcel-map">
                       <iframe title={`Parcelle ${purchase.plotId}`} src={plot.mapUrl} loading="lazy" tabIndex={-1} />
                     </div>
                   )}
-                  <div className="owned-plot-info">
-                    <div className="owned-plot-id">
-                      <span className="status-dot" />
-                      Parcelle #{purchase.plotId}
-                    </div>
-                    <p className="owned-plot-project">{proj?.title}</p>
-                    <p className="owned-plot-location">
-                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" /><circle cx="12" cy="10" r="3" />
-                      </svg>
-                      {purchase.city}, {purchase.region}
-                    </p>
-                    {plot?.treeBatches?.length > 0 && (
-                      <div className="owned-plot-batches">
-                        {plot.treeBatches.map(b => {
-                          const age = new Date().getFullYear() - b.year
-                          const color = age < 3 ? '#888' : age < 6 ? '#f5c842' : age < 10 ? '#a8cc50' : '#7ab020'
-                          return (
-                            <span key={b.year} className="plot-year-tag" style={{ borderColor: color, color }}>
-                              {b.year} · {b.count}🌿
-                            </span>
-                          )
-                        })}
+
+                  {/* info */}
+                  <div className="dash-parcel-body">
+                    {/* title row */}
+                    <div className="dash-parcel-header">
+                      <div>
+                        <span className="dash-parcel-id">Parcelle #{purchase.plotId}</span>
+                        <p className="dash-parcel-name">{proj?.title}</p>
                       </div>
-                    )}
-                    <div className="owned-plot-stats">
-                      <div className="owned-stat"><span>Arbres</span><strong>{purchase.trees}</strong></div>
-                      <div className="owned-stat"><span>Surface</span><strong>{plot?.area ?? '—'} m²</strong></div>
-                      <div className="owned-stat"><span>Investi</span><strong>{purchase.invested.toLocaleString()} DT</strong></div>
-                      <div className="owned-stat"><span>Revenu / an</span><strong className="green-text">{purchase.annualRevenue.toLocaleString()} DT</strong></div>
-                      <div className="owned-stat"><span>Gains cumulés</span><strong className="green-text">~{totalEarned.toLocaleString()} DT</strong></div>
-                      <div className="owned-stat"><span>Depuis</span><strong>{purchase.since}</strong></div>
+                      <span className="dash-parcel-loc">
+                        📍 {purchase.city}
+                      </span>
+                    </div>
+
+                    {/* stats row */}
+                    <div className="dash-parcel-stats">
+                      <div className="dash-ps"><span>Arbres</span><strong>{purchase.trees}</strong></div>
+                      <div className="dash-ps"><span>Investi</span><strong>{purchase.invested.toLocaleString()} DT</strong></div>
+                      <div className="dash-ps"><span>Revenu/an</span><strong className="green-text">{purchase.annualRevenue.toLocaleString()} DT</strong></div>
+                      <div className="dash-ps"><span>Gains cumulés</span><strong className="green-text">~{totalEarned.toLocaleString()} DT</strong></div>
                     </div>
                   </div>
-                  <button type="button" className="owned-plot-action"
-                    onClick={() => navigate(`/project/${purchase.projectId}/plot/${purchase.plotId}`)}>
-                    Voir le détail →
-                  </button>
+
+                  {/* cta */}
+                  <div className="dash-parcel-cta">→</div>
                 </div>
               )
             })}
           </div>
-        )}
-
-        {/* Revenue breakdown */}
-        {myPurchases.length > 0 && (
-          <>
-            <h3 className="section-heading" style={{ marginTop: '2rem' }}>Estimation des revenus</h3>
-            <div className="revenue-note">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
-              </svg>
-              Estimation basée sur {REVENUE_PER_TREE} DT / arbre / an (30 kg huile × 3 DT/kg).
-            </div>
-            <div className="revenue-rows">
-              {myPurchases.map((p) => (
-                <div key={p.plotId} className="revenue-row">
-                  <span className="revenue-row-label">Parcelle #{p.plotId} · {p.city}</span>
-                  <div className="revenue-row-bar-wrap">
-                    <div className="revenue-row-bar" style={{ width: `${Math.min((p.annualRevenue / totalRevenue) * 100, 100)}%` }} />
-                  </div>
-                  <span className="revenue-row-amount">{p.annualRevenue.toLocaleString()} DT/an</span>
-                </div>
-              ))}
-            </div>
-          </>
         )}
       </section>
 

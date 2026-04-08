@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import appLogo from '../../logo.png'
+import TopBar from '../TopBar.jsx'
 import { projects as allProjects } from '../projects.js'
 import { mockUsers, mockReceipts, mockSales, mockOffers } from '../adminData.js'
 
@@ -134,42 +134,30 @@ export default function AdminDashboard() {
   }
 
   return (
-    <div className="ap-shell">
+    <main className="screen screen--app">
+      <section className="dashboard-page">
+      <TopBar />
 
-      {/* ── Sidebar ── */}
-      <aside className="ap-sidebar ap-sidebar--admin">
-        <div className="ap-sidebar-logo">
-          <img src={appLogo} alt="logo" width="36" />
-          <div>
-            <span className="ap-brand">ZITOUNA BLADI</span>
-            <span className="ap-role ap-role--admin">🛡 Administrateur</span>
-          </div>
-        </div>
-        <nav className="ap-nav">
-          {TABS.map(t => (
-            <button key={t.id} type="button"
-              className={`ap-nav-btn${tab === t.id ? ' ap-nav-btn--active' : ''}`}
-              onClick={() => setTab(t.id)}
-            >
-              <span className="ap-nav-icon">{t.icon}</span>
-              {t.label}
-              {t.id === 'receipts' && pendingCount > 0 && (
-                <span className="ap-nav-badge">{pendingCount}</span>
-              )}
-            </button>
-          ))}
-        </nav>
-        <div className="ap-restriction-note">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
-          Accès limité — les projets et parcelles sont en lecture seule
-        </div>
-        <button type="button" className="ap-back-btn" onClick={() => navigate('/')}>
-          ← Quitter
-        </button>
-      </aside>
+      {/* role badge */}
+      <p className="ap-role-badge ap-role-badge--admin">🛡 Administrateur — Accès limité</p>
 
-      {/* ── Main ── */}
-      <main className="ap-main">
+      {/* horizontal tab bar */}
+      <div className="ap-tabbar">
+        {TABS.map(t => (
+          <button key={t.id} type="button"
+            className={`ap-tab-btn${tab === t.id ? ' ap-tab-btn--active' : ''}`}
+            onClick={() => setTab(t.id)}
+          >
+            <span>{t.icon}</span> {t.label}
+            {t.id === 'receipts' && pendingCount > 0 && (
+              <span className="ap-nav-badge">{pendingCount}</span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* content */}
+      <div className="ap-content">
 
         {/* ── REÇUS ── */}
         {tab === 'receipts' && (
@@ -422,10 +410,11 @@ export default function AdminDashboard() {
             </div>
           </>
         )}
-      </main>
 
       {/* ── Toast ── */}
       {toast && <div className={`ap-toast${toast.ok ? '' : ' ap-toast--err'}`}>{toast.msg}</div>}
-    </div>
+      </div>{/* ap-content */}
+      </section>
+    </main>
   )
 }

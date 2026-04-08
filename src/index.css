@@ -14,9 +14,7 @@ body {
   margin: 0;
   min-height: 100vh;
   overflow-x: hidden;
-  background:
-    radial-gradient(circle at top, rgba(91, 122, 70, 0.28), rgba(12, 19, 11, 0.95)),
-    #0a120b;
+  background: #1d2915;
 }
 
 #root {

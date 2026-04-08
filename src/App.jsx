@@ -1,4 +1,5 @@
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { useEffect } from 'react'
+import { Routes, Route, Navigate, useParams, useLocation } from 'react-router-dom'
 import './App.css'
 import LoginPage          from './pages/LoginPage.jsx'
 import RegisterPage       from './pages/RegisterPage.jsx'
@@ -7,22 +8,47 @@ import BrowsePage         from './pages/BrowsePage.jsx'
 import DashboardPage      from './pages/DashboardPage.jsx'
 import ProjectPage        from './pages/ProjectPage.jsx'
 import PlotPage           from './pages/PlotPage.jsx'
+import PurchaseMandatPage from './pages/PurchaseMandatPage.jsx'
+import VisitSuccessPage   from './pages/VisitSuccessPage.jsx'
 import OwnerDashboard     from './pages/OwnerDashboard.jsx'
 import AdminDashboard     from './pages/AdminDashboard.jsx'
+import TunisMapLandingPage from './pages/TunisMapLandingPage.jsx'
+
+function LegacyMandatToVisiteRedirect() {
+  const { id } = useParams()
+  return <Navigate to={`/project/${id}/visite`} replace />
+}
+
+function ScrollToTopOnRouteChange() {
+  const { pathname } = useLocation()
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+  }, [pathname])
+
+  return null
+}
 
 export default function App() {
   return (
-    <Routes>
-      <Route path="/"                                element={<LoginPage />} />
-      <Route path="/register"                        element={<RegisterPage />} />
-      <Route path="/forgot-password"                 element={<ForgotPasswordPage />} />
-      <Route path="/browse"                          element={<BrowsePage />} />
-      <Route path="/dashboard"                       element={<DashboardPage />} />
-      <Route path="/project/:id"                     element={<ProjectPage />} />
-      <Route path="/project/:projectId/plot/:plotId" element={<PlotPage />} />
-      <Route path="/owner"                           element={<OwnerDashboard />} />
-      <Route path="/admin"                           element={<AdminDashboard />} />
-      <Route path="*"                                element={<Navigate to="/" replace />} />
-    </Routes>
+    <>
+      <ScrollToTopOnRouteChange />
+      <Routes>
+        <Route path="/"                                element={<TunisMapLandingPage />} />
+        <Route path="/login"                           element={<LoginPage />} />
+        <Route path="/register"                        element={<RegisterPage />} />
+        <Route path="/forgot-password"                 element={<ForgotPasswordPage />} />
+        <Route path="/browse"                          element={<BrowsePage />} />
+        <Route path="/dashboard"                       element={<DashboardPage />} />
+        <Route path="/project/:id"                     element={<ProjectPage />} />
+        <Route path="/project/:id/visite"               element={<PurchaseMandatPage />} />
+        <Route path="/project/:id/visite/success"       element={<VisitSuccessPage />} />
+        <Route path="/project/:id/mandat"               element={<LegacyMandatToVisiteRedirect />} />
+        <Route path="/project/:projectId/plot/:plotId" element={<PlotPage />} />
+        <Route path="/owner"                           element={<OwnerDashboard />} />
+        <Route path="/admin"                           element={<AdminDashboard />} />
+        <Route path="*"                                element={<Navigate to="/" replace />} />
+      </Routes>
+    </>
   )
 }

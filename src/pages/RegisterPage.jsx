@@ -169,7 +169,7 @@ export default function RegisterPage() {
 
         <p className="signup-text login-signup">
           Déjà un compte ?{' '}
-          <button type="button" className="link-btn" onClick={() => navigate('/')}>
+          <button type="button" className="link-btn" onClick={() => navigate('/login')}>
             Se connecter
           </button>
         </p>

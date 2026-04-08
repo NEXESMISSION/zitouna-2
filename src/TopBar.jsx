@@ -15,7 +15,7 @@ export default function TopBar() {
         <div className="brand-inline">
           <img src={headerLogo} alt="Zitouna Bladi" className="top-logo" />
           <div>
-            <p className="company">ZITOUNA BLADI S.A.</p>
+            <p className="company">ZITOUNA BLADI</p>
             <p className="company-subtitle">Smart Agriculture</p>
           </div>
         </div>
@@ -43,11 +43,20 @@ export default function TopBar() {
         </nav>
 
         <div className="top-actions">
+          {/* notification bell — always visible */}
+          <button type="button" className="icon-action" title="Notifications">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+              <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+            </svg>
+          </button>
+
+          {/* logout — desktop only */}
           <button
             type="button"
-            className="icon-action"
+            className="icon-action top-logout-desktop"
             title="Déconnexion"
-            onClick={() => { close(); navigate('/') }}
+            onClick={() => { close(); navigate('/login') }}
           >
             <IconLogout />
           </button>
@@ -76,6 +85,17 @@ export default function TopBar() {
       {menuOpen && (
         <nav className="mobile-menu">
           <NavLink
+            to="/"
+            className={({ isActive }) => 'mobile-menu-link' + (isActive ? ' active' : '')}
+            onClick={close}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+              <circle cx="12" cy="10" r="3" />
+            </svg>
+            Carte des projets
+          </NavLink>
+          <NavLink
             to="/browse"
             className={({ isActive }) => 'mobile-menu-link' + (isActive ? ' active' : '')}
             onClick={close}
@@ -95,6 +115,15 @@ export default function TopBar() {
             </svg>
             Mon Portfolio
           </NavLink>
+
+          <button
+            type="button"
+            className="mobile-menu-link mobile-menu-logout"
+            onClick={() => { close(); navigate('/login') }}
+          >
+            <IconLogout />
+            Déconnexion
+          </button>
         </nav>
       )}
     </header>

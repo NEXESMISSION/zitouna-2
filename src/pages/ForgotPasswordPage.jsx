@@ -119,7 +119,7 @@ export default function ForgotPasswordPage() {
             <p className="forgot-success-note">
               Vérifiez votre boîte de réception et suivez les instructions pour réinitialiser votre mot de passe.
             </p>
-            <button type="button" className="submit-button login-submit" style={{ marginTop: '0.5rem' }} onClick={() => navigate('/')}>
+            <button type="button" className="submit-button login-submit" style={{ marginTop: '0.5rem' }} onClick={() => navigate('/login')}>
               Retour à la connexion
             </button>
           </div>
@@ -128,7 +128,7 @@ export default function ForgotPasswordPage() {
         {/* Bottom navigation — two pill buttons like the image */}
         {!sent && (
           <div className="forgot-bottom">
-            <button type="button" className="forgot-nav-btn" onClick={() => navigate('/')}>
+            <button type="button" className="forgot-nav-btn" onClick={() => navigate('/login')}>
               ← Connexion
             </button>
             <button type="button" className="forgot-nav-btn">
