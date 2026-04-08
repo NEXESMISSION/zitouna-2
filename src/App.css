@@ -1491,9 +1491,15 @@
 /* ── Project page: compact parcel cards ── */
 .plots-cards-grid {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.55rem;
   margin-bottom: 1.75rem;
+}
+
+@media (max-width: 340px) {
+  .plots-cards-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (min-width: 420px) {
@@ -1769,6 +1775,106 @@
 .plot-page-btn:hover {
   filter: brightness(1.08);
   transform: translateY(-2px);
+}
+
+.installments-page .detail-nav {
+  margin-bottom: 0.75rem;
+}
+
+.installments-head h2 {
+  margin: 0;
+  color: #f3efe7;
+}
+
+.installments-head p {
+  margin: 0.3rem 0 1rem;
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 13px;
+}
+
+.installments-list {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.installments-plan {
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 0.75rem;
+}
+
+.installments-plan-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+}
+
+.installments-plan-top strong {
+  color: #f2eee6;
+  font-size: 14px;
+}
+
+.installments-plan-top span {
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 11.5px;
+}
+
+.installments-items {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.inst-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 0.55rem;
+  border-radius: 9px;
+  padding: 0.48rem 0.55rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.inst-item input {
+  accent-color: #d8b861;
+}
+
+.inst-item-main {
+  color: #ece7dd;
+  font-size: 12px;
+}
+
+.inst-item-status {
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.inst-item-status--approved { color: #8fd65c; }
+.inst-item-status--submitted { color: #62b8ff; }
+.inst-item-status--rejected { color: #ff8f8f; }
+.inst-item-status--pending { color: #e6d6a6; }
+
+.inst-item--off {
+  opacity: 0.72;
+}
+
+.installments-batch {
+  margin-top: 1rem;
+  border-radius: 14px;
+  border: 1px solid rgba(214, 176, 92, 0.28);
+  background: rgba(17, 27, 14, 0.78);
+  padding: 0.8rem;
+}
+
+.installments-batch-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 0.55rem;
+  color: #f3ede0;
 }
 
 /* ── Simple parcel details card ── */
@@ -4753,5 +4859,14 @@
   .mandat-parcel-table th,
   .mandat-parcel-table td {
     padding: 0.25rem 0.2rem;
+  }
+}
+
+/* Prevent iOS/Android browser auto-zoom when focusing fields */
+@media (max-width: 900px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
   }
 }
