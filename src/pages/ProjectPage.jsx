@@ -51,7 +51,7 @@ export default function ProjectPage() {
 
   return (
     <main className="screen screen--app">
-      <section className="dashboard-page" style={{ paddingBottom: 'calc(6.5rem + env(safe-area-inset-bottom, 0px))' }}>
+      <section className="dashboard-page project-page-skin" style={{ paddingBottom: 'calc(6.5rem + env(safe-area-inset-bottom, 0px))' }}>
         <TopBar />
 
         {/* breadcrumb */}

@@ -10,6 +10,14 @@ export default function TunisMapLandingPage() {
     <main className="screen screen--app">
       <section className="dashboard-page map-landing-page">
         <TopBar />
+        <div className="detail-nav" style={{ marginBottom: '0.9rem' }}>
+          <button type="button" className="back-btn" onClick={() => navigate('/browse')}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+            Retour a Explorer
+          </button>
+        </div>
         <div className="map-landing-hero">
           <span className="map-landing-hero__kicker">OPPORTUNITES FONCIERES</span>
           <p className="map-landing-hero__title">Carte des projets disponibles a la vente</p>

@@ -3,23 +3,18 @@ import { useNavigate } from 'react-router-dom'
 import TopBar from '../TopBar.jsx'
 import { myPurchases } from '../portfolio.js'
 import { projects } from '../projects.js'
-import { loadInstallments, saveInstallments } from '../installmentsStore.js'
+import { loadInstallments } from '../installmentsStore.js'
 
 const REVENUE_PER_TREE = 90
 
-function fmtDate(iso) {
-  return new Date(iso).toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' })
-}
-
-const STATUS_LABEL = {
-  approved:  '✓ Confirmé',
-  submitted: '⏳ En révision',
-  rejected:  '✗ Rejeté',
-  pending:   '— En attente',
-}
-
 export default function DashboardPage() {
   const navigate = useNavigate()
+  const [activeTab, setActiveTab] = useState('facilites')
+  const [network] = useState([
+    { id: 'm-k', name: 'Mohamed Khalil', note: 'Contrat signe (1.5 Ha)', reward: 50, state: 'complete', initials: 'MK' },
+    { id: 's-t', name: 'Sofiene Tounsi', note: 'Reservation en attente de signature', reward: 50, state: 'queued', initials: 'ST' },
+    { id: 'a-b', name: 'Ali Ben Ahmed', note: 'Inscrit, pas encore de reservation', reward: 0, state: 'pending', initials: 'AB' }
+  ])
 
   // ── Owned plots stats ──
   const totalTrees    = myPurchases.reduce((s, p) => s + p.trees, 0)
@@ -27,49 +22,43 @@ export default function DashboardPage() {
   const totalRevenue  = myPurchases.reduce((s, p) => s + p.annualRevenue, 0)
   const roi           = totalInvested > 0 ? ((totalRevenue / totalInvested) * 100).toFixed(1) : '0.0'
 
-  // ── Installment plans (local state so receipt uploads update the UI) ──
-  const [plans, setPlans] = useState(loadInstallments)
+  const [plans] = useState(loadInstallments)
+  const allPayments = plans
+    .flatMap((plan) => plan.payments.map((p) => ({ ...p, planId: plan.id })))
+    .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate))
+  const nextPayment =
+    allPayments.find((p) => p.status === 'pending' || p.status === 'rejected' || p.status === 'submitted')
+    || allPayments.find((p) => p.status === 'approved')
+    || null
 
-  // ── Upload modal state ──
-  const [uploadTarget, setUploadTarget] = useState(null) // { planId, month, amount, dueDate }
-  const [uploadFile,   setUploadFile]   = useState(null)
-  const [uploadNote,   setUploadNote]   = useState('')
-
-  const openUpload = (plan, payment) => {
-    setUploadTarget({ planId: plan.id, month: payment.month, amount: payment.amount, dueDate: payment.dueDate })
-    setUploadFile(null)
-    setUploadNote('')
-  }
-
-  const closeUpload = () => setUploadTarget(null)
-
-  const submitReceipt = () => {
-    if (!uploadFile) return
-    const next = plans.map((plan) =>
-      plan.id !== uploadTarget.planId
-        ? plan
-        : {
-            ...plan,
-            status: 'active',
-            payments: plan.payments.map((p) =>
-              p.month === uploadTarget.month
-                ? { ...p, status: 'submitted', receiptName: uploadFile, rejectedNote: undefined }
-                : p,
-            ),
-          },
-    )
-    setPlans(next)
-    saveInstallments(next)
-    closeUpload()
-  }
+  const nextPaymentLabel = nextPayment
+    ? `${nextPayment.amount.toLocaleString()} DT - ${new Date(nextPayment.dueDate).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}`
+    : 'Aucune echeance disponible'
+  const nextPaymentStatus = nextPayment
+    ? (nextPayment.status === 'approved'
+        ? 'Deja couverte'
+        : nextPayment.status === 'submitted'
+          ? 'En revision'
+          : nextPayment.status === 'rejected'
+            ? 'A renvoyer'
+            : 'A payer')
+    : 'Sans statut'
 
   return (
     <main className="screen screen--app">
-      <section className="dashboard-page">
+      <section className="dashboard-page dash-page-skin">
         <TopBar />
+        <div className="detail-nav" style={{ marginBottom: '0.85rem' }}>
+          <button type="button" className="back-btn" onClick={() => navigate('/browse')}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+            Retour a Explorer
+          </button>
+        </div>
 
         {/* ── Greeting ── */}
-        <div className="dash-greeting">
+        <div className="dash-greeting dash-hero-card">
           <div>
             <h2 className="page-title">Bonjour, <strong>Lassaad</strong></h2>
             <p className="page-subtitle">Voici l&apos;état de votre portefeuille d&apos;oliviers</p>
@@ -102,8 +91,93 @@ export default function DashboardPage() {
           </div>
         </div>
 
+        <section className="dash-invest-summary">
+          <div className="dis-head">
+            <h3>Synthese investissement</h3>
+            <span>Actif</span>
+          </div>
+          <div className="dis-grid">
+            <article>
+              <p>Patrimoine agricole</p>
+              <strong>{totalTrees.toLocaleString()} oliviers</strong>
+            </article>
+            <article>
+              <p>Revenus estimes</p>
+              <strong>{totalRevenue.toLocaleString()} DT/an</strong>
+            </article>
+          </div>
+          <div className="dis-next">
+            <div>
+              <p>Prochaine payment</p>
+              <strong>{nextPaymentLabel}</strong>
+            </div>
+            <div className="dis-next-actions">
+              <em className={`dis-next-badge dis-next-badge--${nextPayment?.status || 'none'}`}>{nextPaymentStatus}</em>
+              <button type="button" className="dis-next-link" onClick={() => navigate('/installments')}>
+                Voir echeancier
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <section className="dash-ambassador">
+          <div className="dash-wallet-card">
+            <div className="dw-head">
+              <span>Portefeuille Parrainage</span>
+              <em>Pret au retrait</em>
+            </div>
+            <div className="dw-main">
+              <h4>50 DT</h4>
+              <p>1 commission liberee</p>
+            </div>
+            <div className="dw-actions">
+              <button type="button">Retirer les gains</button>
+              <small>Commissions en attente: 100 DT</small>
+            </div>
+          </div>
+
+          <div className="dash-network">
+            <div className="dn-head">
+              <h4>Reseau investisseurs</h4>
+              <span>4 invites</span>
+            </div>
+            <div className="dn-list">
+              {network.map((person) => (
+                <article key={person.id} className={`dn-item${person.state === 'pending' ? ' dn-item--pending' : ''}${person.state === 'queued' ? ' dn-item--queued' : ''}`}>
+                  <div className="dn-id">{person.initials}</div>
+                  <div className="dn-body">
+                    <strong>{person.name}</strong>
+                    <p>{person.note}</p>
+                  </div>
+                  <div className="dn-reward">
+                    <strong>{person.reward > 0 ? `+${person.reward} DT` : '0 DT'}</strong>
+                    <span>{person.state === 'complete' ? 'Liberee' : person.state === 'queued' ? 'En attente signature' : 'En attente'}</span>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <div className="dash-tabs">
+          <button
+            type="button"
+            className={`dash-tab-btn${activeTab === 'facilites' ? ' dash-tab-btn--active' : ''}`}
+            onClick={() => setActiveTab('facilites')}
+          >
+            Mes facilités
+          </button>
+          <button
+            type="button"
+            className={`dash-tab-btn${activeTab === 'parcelles' ? ' dash-tab-btn--active' : ''}`}
+            onClick={() => setActiveTab('parcelles')}
+          >
+            Mes parcelles
+          </button>
+        </div>
+
         {/* ── Mes facilités ── */}
-        {plans.length > 0 && (
+        {activeTab === 'facilites' && plans.length > 0 && (
           <>
             <h3 className="dash-section-title">Mes facilités en cours</h3>
             <div style={{ margin: '-0.35rem 0 0.75rem' }}>
@@ -111,76 +185,32 @@ export default function DashboardPage() {
                 Gérer toutes les échéances →
               </button>
             </div>
-            <div className="dash-plans-wrap">
-              {/* header */}
-              <div className="dash-plans-head">
-                <span>Projet</span>
-                <span>Progression</span>
-                <span>Mensualité</span>
-                <span>Restant</span>
-                <span>Prochain paiement</span>
-                <span></span>
-              </div>
-
+            <div className="dash-plan-cards">
               {plans.map((plan) => {
-                const approvedCount  = plan.payments.filter((p) => p.status === 'approved').length
-                const progress       = (approvedCount / plan.totalMonths) * 100
-                const totalLeft      = plan.totalPrice - plan.downPayment - approvedCount * plan.monthlyAmount
-                const nextPayment    = plan.payments.find((p) => p.status === 'pending' || p.status === 'rejected')
-                const submittedPay   = plan.payments.find((p) => p.status === 'submitted')
-
+                const approvedCount = plan.payments.filter((p) => p.status === 'approved').length
+                const progress = (approvedCount / plan.totalMonths) * 100
                 return (
-                  <div key={plan.id} className={`dash-plan-row dash-plan-row--${plan.status}`}>
-                    {/* project */}
-                    <div className="dpr-cell dpr-project">
+                  <button
+                    key={plan.id}
+                    type="button"
+                    className="dash-plan-card"
+                    onClick={() => navigate('/installments', { state: { planId: plan.id } })}
+                  >
+                    <div className="dash-plan-card__head">
                       <strong>{plan.projectTitle}</strong>
-                      <small>{plan.city} · #{plan.id}</small>
+                      <span>{plan.city} · #{plan.id}</span>
                     </div>
-
-                    {/* progress */}
-                    <div className="dpr-cell dpr-progress">
+                    <div className="dash-plan-card__progress">
                       <div className="dpr-track">
                         <div className="dpr-fill" style={{ width: `${Math.max(progress, 2)}%` }} />
                       </div>
-                      <span className="dpr-pct">{approvedCount}/{plan.totalMonths}</span>
+                      <em>{approvedCount}/{plan.totalMonths}</em>
                     </div>
-
-                    {/* monthly */}
-                    <div className="dpr-cell">
-                      <span>{plan.monthlyAmount.toLocaleString()} DT</span>
+                    <div className="dash-plan-card__cta-strip">
+                      <span>Voir toutes les échéances (début → fin)</span>
+                      <span className="dash-plan-card__cta-arrow" aria-hidden="true">→</span>
                     </div>
-
-                    {/* remaining */}
-                    <div className="dpr-cell dpr-green">
-                      <span>{totalLeft.toLocaleString()} DT</span>
-                    </div>
-
-                    {/* next payment info */}
-                    <div className="dpr-cell dpr-next">
-                      {submittedPay ? (
-                        <span className="dpr-tag dpr-tag--review">⏳ En révision</span>
-                      ) : nextPayment ? (
-                        <span className="dpr-tag">
-                          F.{nextPayment.month} · {fmtDate(nextPayment.dueDate)}
-                          {nextPayment.status === 'rejected' && nextPayment.rejectedNote && (
-                            <span className="dpr-reject"> ⚠ {nextPayment.rejectedNote}</span>
-                          )}
-                        </span>
-                      ) : (
-                        <span className="dpr-tag dpr-tag--done">✓ À jour</span>
-                      )}
-                    </div>
-
-                    {/* action */}
-                    <div className="dpr-cell dpr-action">
-                      {submittedPay ? null : nextPayment ? (
-                        <button type="button" className="dpr-btn"
-                          onClick={() => openUpload(plan, nextPayment)}>
-                          {nextPayment.status === 'rejected' ? '↩ Resoumettre' : '↑ Payer'}
-                        </button>
-                      ) : null}
-                    </div>
-                  </div>
+                  </button>
                 )
               })}
             </div>
@@ -188,14 +218,14 @@ export default function DashboardPage() {
         )}
 
         {/* ── Mes parcelles ── */}
-        <h3 className="dash-section-title" style={{ marginTop: '2rem' }}>Mes parcelles</h3>
+        {activeTab === 'parcelles' && <h3 className="dash-section-title" style={{ marginTop: '1.25rem' }}>Mes parcelles</h3>}
 
-        {myPurchases.length === 0 ? (
+        {activeTab === 'parcelles' && myPurchases.length === 0 ? (
           <div className="empty-state">
             <p>Vous ne possédez pas encore de parcelles.</p>
             <button className="cta-primary" onClick={() => navigate('/browse')}>Explorer les projets</button>
           </div>
-        ) : (
+        ) : activeTab === 'parcelles' ? (
           <div className="dash-parcels">
             {myPurchases.map((purchase) => {
               const proj        = projects.find((p) => p.id === purchase.projectId)
@@ -242,73 +272,15 @@ export default function DashboardPage() {
               )
             })}
           </div>
-        )}
+        ) : null}
+
+        <footer className="dash-logout-footer">
+          <button type="button" className="dash-logout-btn" onClick={() => navigate('/login')}>
+            Se déconnecter
+          </button>
+        </footer>
       </section>
 
-      {/* ── Receipt upload modal ── */}
-      {uploadTarget && (
-        <div className="modal-overlay" onClick={closeUpload}>
-          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3 className="modal-title">Soumettre votre reçu</h3>
-              <button type="button" className="modal-close" onClick={closeUpload}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
-            </div>
-
-            <p className="upload-subtitle">
-              Facilité {uploadTarget.month} · {uploadTarget.amount.toLocaleString()} DT · dû le {fmtDate(uploadTarget.dueDate)}
-            </p>
-
-            <label className={`upload-zone${uploadFile ? ' upload-zone--filled' : ''}`}>
-              <input
-                type="file" accept="image/*,.pdf"
-                style={{ display: 'none' }}
-                onChange={(e) => { if (e.target.files[0]) setUploadFile(e.target.files[0].name) }}
-              />
-              {uploadFile ? (
-                <>
-                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ color: '#a8cc50' }}>
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" />
-                  </svg>
-                  <span className="upload-filename">{uploadFile}</span>
-                  <span className="upload-change">Changer le fichier</span>
-                </>
-              ) : (
-                <>
-                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ color: 'rgba(255,255,255,0.3)' }}>
-                    <polyline points="16 16 12 12 8 16" /><line x1="12" y1="12" x2="12" y2="21" />
-                    <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3" />
-                  </svg>
-                  <span>Cliquez pour sélectionner votre reçu</span>
-                  <small>JPG, PNG ou PDF acceptés</small>
-                </>
-              )}
-            </label>
-
-            <textarea
-              className="upload-note"
-              placeholder="Note pour l'équipe (optionnel)…"
-              value={uploadNote}
-              onChange={(e) => setUploadNote(e.target.value)}
-            />
-
-            <div className="modal-actions">
-              <button type="button" className="modal-cancel" onClick={closeUpload}>Annuler</button>
-              <button
-                type="button"
-                className={`cta-primary${!uploadFile ? ' cta-disabled' : ''}`}
-                onClick={submitReceipt}
-                disabled={!uploadFile}
-              >
-                Envoyer le reçu
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </main>
   )
 }

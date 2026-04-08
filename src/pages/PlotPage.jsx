@@ -90,7 +90,7 @@ export default function PlotPage() {
 
   return (
     <main className="screen screen--app">
-      <section className="dashboard-page" style={{ paddingBottom: 'calc(6.5rem + env(safe-area-inset-bottom, 0px))' }}>
+      <section className="dashboard-page plot-page-skin" style={{ paddingBottom: 'calc(6.5rem + env(safe-area-inset-bottom, 0px))' }}>
         <TopBar />
 
         {/* breadcrumb */}
@@ -219,7 +219,7 @@ export default function PlotPage() {
               <span className="plot-detail-id">Parcelle #{plot.id}</span>
               <span className="plot-detail-project">{proj.title} · {proj.city}, {proj.region}</span>
             </div>
-            <span className="inline-badge">Disponible</span>
+            <span className="inline-badge plot-inline-badge">Disponible</span>
           </div>
           <div className="plot-detail-row">
             <span className="plot-detail-label">Surface</span>
@@ -227,7 +227,7 @@ export default function PlotPage() {
           </div>
           <div className="plot-detail-row">
             <span className="plot-detail-label">Nombre d&apos;arbres</span>
-            <span className="plot-detail-value" style={{ color: '#a8cc50' }}>{plot.trees} oliviers</span>
+            <span className="plot-detail-value plot-detail-value--accent">{plot.trees} oliviers</span>
           </div>
           <div className="plot-detail-row">
             <span className="plot-detail-label">Prix / arbre</span>
@@ -235,7 +235,7 @@ export default function PlotPage() {
           </div>
           <div className="plot-detail-row plot-detail-row--total">
             <span className="plot-detail-label">Prix total</span>
-            <span className="plot-detail-value" style={{ color: '#a8cc50' }}>{plot.totalPrice.toLocaleString()} TND</span>
+            <span className="plot-detail-value plot-detail-value--accent">{plot.totalPrice.toLocaleString()} TND</span>
           </div>
           <div className="plot-detail-row">
             <span className="plot-detail-label">Revenu estimé / an</span>

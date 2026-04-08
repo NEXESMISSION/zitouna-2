@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import appLogo from '../../logo.png'
 import {
   IconEye,
   IconEyeOff,
@@ -9,7 +8,6 @@ import {
   IconKey,
   IconUser,
 } from '../LoginDecor.jsx'
-import { supabase, isSupabaseConfigured } from '../lib/supabase.js'
 
 function IconPhone() {
   return (
@@ -74,77 +72,19 @@ export default function RegisterPage() {
       return
     }
 
-    if (!isSupabaseConfigured) {
-      setError('Supabase n\'est pas configuré. Vérifiez le fichier .env.')
-      return
-    }
-
     setLoading(true)
-    try {
-      const { data, error: signUpError } = await supabase.auth.signUp({
-        email: form.email,
-        password: form.password,
-        options: {
-          data: {
-            first_name: form.firstname,
-            last_name: form.lastname,
-            full_name: `${form.firstname} ${form.lastname}`.trim(),
-            phone: form.phone ? `+216${form.phone}` : '',
-            cin: form.cin,
-          },
-        },
-      })
-
-      if (signUpError) {
-        if (signUpError.status === 429 || signUpError.message.includes('rate limit') || signUpError.message.includes('429')) {
-          setError('Trop de tentatives d\'inscription. Attendez quelques minutes et réessayez.')
-        } else if (
-          signUpError.message.includes('already registered') ||
-          signUpError.message.includes('already exists') ||
-          signUpError.message.includes('User already registered')
-        ) {
-          setError('Cet e-mail est déjà utilisé. Veuillez vous connecter.')
-        } else {
-          setError(signUpError.message)
-        }
-        return
-      }
-
-      // Supabase retourne identityData vide si l'email existe déjà en "pending"
-      const isAlreadyPending =
-        data?.user &&
-        data.user.identities &&
-        data.user.identities.length === 0
-
-      if (isAlreadyPending) {
-        setError(
-          'Cet e-mail est déjà enregistré mais en attente de confirmation. ' +
-          'Vérifiez votre boîte mail ou contactez l\'administrateur pour supprimer le compte en attente.'
-        )
-        return
-      }
-
-      setSuccess('Compte créé avec succès ! Vous allez être redirigé vers la connexion…')
-      setTimeout(() => navigate('/'), 2500)
-    } catch (err) {
-      if (err?.status === 429 || String(err?.message).includes('429') || String(err?.message).includes('rate limit')) {
-        setError('Trop de tentatives. Attendez quelques minutes avant de réessayer.')
-      } else {
-        setError('Une erreur inattendue s\'est produite. Réessayez.')
-      }
-    } finally {
+    setSuccess('Compte créé avec succès ! Connexion en cours…')
+    setTimeout(() => {
       setLoading(false)
-    }
+      navigate('/browse')
+    }, 550)
   }
 
   return (
     <main className="screen screen--login">
-      <div className="login-content">
-        <header className="login-brand">
-          <div className="login-logo-wrap">
-            <img src={appLogo} alt="Zitouna Bladi logo" className="login-logo-image" />
-          </div>
-        </header>
+      <div className="auth-bg auth-bg--one" aria-hidden="true" />
+      <div className="auth-bg auth-bg--two" aria-hidden="true" />
+      <div className="login-content login-content--register">
 
         <h1 className="login-title">Créer un compte</h1>
 
@@ -163,33 +103,9 @@ export default function RegisterPage() {
           <span>Ou continuer avec</span>
         </div>
 
-        {error && (
-          <div style={{
-            background: 'rgba(220,53,69,0.15)',
-            border: '1px solid rgba(220,53,69,0.5)',
-            color: '#ff6b7a',
-            borderRadius: '8px',
-            padding: '10px 14px',
-            fontSize: '13px',
-            marginBottom: '12px',
-          }}>
-            {error}
-          </div>
-        )}
+        {error && <div className="auth-alert auth-alert--error">{error}</div>}
 
-        {success && (
-          <div style={{
-            background: 'rgba(40,167,69,0.15)',
-            border: '1px solid rgba(40,167,69,0.5)',
-            color: '#5cb85c',
-            borderRadius: '8px',
-            padding: '10px 14px',
-            fontSize: '13px',
-            marginBottom: '12px',
-          }}>
-            {success}
-          </div>
-        )}
+        {success && <div className="auth-alert auth-alert--ok">{success}</div>}
 
         <form className="form login-form" onSubmit={handleSubmit}>
           <div className="reg-name-row">
@@ -336,7 +252,6 @@ export default function RegisterPage() {
           <button
             type="submit"
             className="submit-button login-submit"
-            style={{ marginTop: '20px' }}
             disabled={loading}
           >
             {loading ? 'Inscription en cours…' : 'S\'inscrire'}

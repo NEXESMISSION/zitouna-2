@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import appLogo from '../../logo.png'
+import appLogo from '../../logo2.png'
 import {
   IconEye,
   IconEyeOff,
@@ -9,7 +9,6 @@ import {
   IconKey,
   IconUser,
 } from '../LoginDecor.jsx'
-import { supabase, isSupabaseConfigured } from '../lib/supabase.js'
 
 export default function LoginPage() {
   const navigate = useNavigate()
@@ -27,41 +26,17 @@ export default function LoginPage() {
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
-
-    if (!isSupabaseConfigured) {
-      setError("Supabase n'est pas configuré. Vérifiez le fichier .env.")
-      return
-    }
-
     setLoading(true)
-    try {
-      const { error: signInError } = await supabase.auth.signInWithPassword({
-        email: form.email,
-        password: form.password,
-      })
-
-      if (signInError) {
-        if (
-          signInError.message.includes('Invalid login credentials') ||
-          signInError.message.includes('invalid_credentials')
-        ) {
-          setError('E-mail ou mot de passe incorrect.')
-        } else {
-          setError(signInError.message)
-        }
-        return
-      }
-
-      navigate('/browse')
-    } catch {
-      setError('Une erreur inattendue s\'est produite. Réessayez.')
-    } finally {
+    setTimeout(() => {
       setLoading(false)
-    }
+      navigate('/browse')
+    }, 350)
   }
 
   return (
     <main className="screen screen--login">
+      <div className="auth-bg auth-bg--one" aria-hidden="true" />
+      <div className="auth-bg auth-bg--two" aria-hidden="true" />
       <div className="login-content">
         <header className="login-brand">
           <div className="login-logo-wrap">
@@ -86,19 +61,7 @@ export default function LoginPage() {
           <span>Ou continuer avec</span>
         </div>
 
-        {error && (
-          <div style={{
-            background: 'rgba(220,53,69,0.15)',
-            border: '1px solid rgba(220,53,69,0.5)',
-            color: '#ff6b7a',
-            borderRadius: '8px',
-            padding: '10px 14px',
-            fontSize: '13px',
-            marginBottom: '12px',
-          }}>
-            {error}
-          </div>
-        )}
+        {error && <div className="auth-alert auth-alert--error">{error}</div>}
 
         <form className="form login-form" onSubmit={handleSubmit}>
           <div className="login-field">

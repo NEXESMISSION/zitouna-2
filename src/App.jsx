@@ -4,6 +4,7 @@ import './App.css'
 import LoginPage          from './pages/LoginPage.jsx'
 import RegisterPage       from './pages/RegisterPage.jsx'
 import ForgotPasswordPage from './pages/ForgotPasswordPage.jsx'
+import ResetPasswordPage  from './pages/ResetPasswordPage.jsx'
 import BrowsePage         from './pages/BrowsePage.jsx'
 import DashboardPage      from './pages/DashboardPage.jsx'
 import InstallmentsPage   from './pages/InstallmentsPage.jsx'
@@ -34,10 +35,12 @@ export default function App() {
     <>
       <ScrollToTopOnRouteChange />
       <Routes>
-        <Route path="/"                                element={<TunisMapLandingPage />} />
+        <Route path="/"                                element={<BrowsePage />} />
+        <Route path="/maps"                            element={<TunisMapLandingPage />} />
         <Route path="/login"                           element={<LoginPage />} />
         <Route path="/register"                        element={<RegisterPage />} />
         <Route path="/forgot-password"                 element={<ForgotPasswordPage />} />
+        <Route path="/reset-password"                  element={<ResetPasswordPage />} />
         <Route path="/browse"                          element={<BrowsePage />} />
         <Route path="/dashboard"                       element={<DashboardPage />} />
         <Route path="/installments"                    element={<InstallmentsPage />} />
@@ -48,7 +51,7 @@ export default function App() {
         <Route path="/project/:projectId/plot/:plotId" element={<PlotPage />} />
         <Route path="/owner"                           element={<Navigate to="/admin" replace />} />
         <Route path="/admin"                           element={<AdminDashboard />} />
-        <Route path="*"                                element={<Navigate to="/" replace />} />
+        <Route path="*"                                element={<Navigate to="/browse" replace />} />
       </Routes>
     </>
   )

@@ -31,18 +31,6 @@ export default function BrowsePage() {
             src={GOOGLE_MAP_TUNISIA_OVERVIEW}
             loading="lazy"
           />
-          <div className="browse-map-pins">
-            {projects.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                className="browse-map-pin"
-                onClick={() => navigate(`/project/${p.id}`)}
-              >
-                📍 {p.city}
-              </button>
-            ))}
-          </div>
         </div>
 
         <div className="browse-search-bar">
