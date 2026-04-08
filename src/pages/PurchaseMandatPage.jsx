@@ -3,6 +3,7 @@ import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import TopBar from '../TopBar.jsx'
 import { projects } from '../projects.js'
 import { mockRendezvousHours } from '../purchaseMandatData.js'
+import { addVisitRequest } from '../visitRequestsStore.js'
 
 function localISODate(d = new Date()) {
   const y = d.getFullYear()
@@ -30,6 +31,22 @@ export default function PurchaseMandatPage() {
   const [rendezvousHourId, setRendezvousHourId] = useState(mockRendezvousHours[0]?.id ?? '')
 
   const selectedHour = mockRendezvousHours.find((h) => h.id === rendezvousHourId) ?? mockRendezvousHours[0]
+
+  const submitVisitRequest = () => {
+    addVisitRequest({
+      userName: 'Lassaad',
+      projectId: projectId,
+      projectTitle: proj.title,
+      city: proj.city,
+      region: proj.region,
+      plotIds: selectedPlots.map((p) => p.id),
+      date: rendezvousDate,
+      slotId: rendezvousHourId,
+      slotLabel: selectedHour?.label || '',
+      slotHint: selectedHour?.hint || '',
+    })
+    navigate(`/project/${projectId}/visite/success`)
+  }
 
   if (!proj) {
     return (
@@ -190,7 +207,7 @@ export default function PurchaseMandatPage() {
             <button
               type="button"
               className="mandat-btn mandat-btn--gold mandat-btn--single"
-              onClick={() => navigate(`/project/${projectId}/visite/success`)}
+              onClick={submitVisitRequest}
             >
               CONFIRMER LE RENDEZ-VOUS DE VISITE
             </button>

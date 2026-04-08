@@ -29,13 +29,26 @@ export const mockReceipts = [
   },
 ]
 
-export const mockOffers = [
-  { id: 'OFF-001', label: 'Standard',       avancePct: 20, duration: 24, note: 'Idéal pour débuter' },
-  { id: 'OFF-002', label: 'Confort',        avancePct: 30, duration: 36, note: 'Le plus populaire' },
-  { id: 'OFF-003', label: 'Premium',        avancePct: 40, duration: 48, note: 'Mensualités réduites' },
-  { id: 'OFF-004', label: 'Longue durée',   avancePct: 20, duration: 60, note: 'Étalement maximal' },
-  { id: 'OFF-005', label: 'Accéléré',       avancePct: 50, duration: 12, note: 'Solde rapide' },
-]
+export const mockOffersByProject = {
+  tunis: [
+    { id: 'OFF-TN-001', label: 'Standard Tunis', avancePct: 20, duration: 24, note: 'Parcelles premium urbaines' },
+    { id: 'OFF-TN-002', label: 'Confort Tunis',  avancePct: 30, duration: 36, note: 'Le plus choisi a Tunis' },
+  ],
+  sousse: [
+    { id: 'OFF-SO-001', label: 'Standard Sousse', avancePct: 20, duration: 24, note: 'Equilibre cout / duree' },
+    { id: 'OFF-SO-002', label: 'Longue duree',    avancePct: 25, duration: 60, note: 'Mensualites reduites' },
+  ],
+  sfax: [
+    { id: 'OFF-SF-001', label: 'Accéléré Sfax', avancePct: 45, duration: 18, note: 'Solde plus rapide' },
+    { id: 'OFF-SF-002', label: 'Premium Sfax',  avancePct: 35, duration: 36, note: 'Plan flexible' },
+  ],
+  nabeul: [
+    { id: 'OFF-NA-001', label: 'Standard Nabeul', avancePct: 20, duration: 24, note: 'Ideal debut investissement' },
+  ],
+}
+
+// Backward-compatible flat list (used by Owner dashboard legacy UI)
+export const mockOffers = Object.values(mockOffersByProject).flat()
 
 export const mockSales = [
   { id: 'SALE-001', userId: 1, userName: 'Lassaad Ben Salah', projectId: 'tunis',  plotId: 101, projectTitle: 'La Marsa',    date: '2024-01-15', amount: 72000,  type: 'installment', adminId: 'admin1' },

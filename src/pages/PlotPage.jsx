@@ -1,6 +1,7 @@
 import { useNavigate, useParams } from 'react-router-dom'
 import TopBar from '../TopBar.jsx'
 import { projects } from '../projects.js'
+import { getPlotHealthReport } from '../healthReportsStore.js'
 
 const REVENUE_PER_TREE = 90
 const CURRENT_YEAR = 2026
@@ -52,17 +53,6 @@ function Sparkline({ data, color = '#a8cc50', w = 46, h = 28 }) {
   )
 }
 
-/* ── Mock health data (per-plot in production this would come from the API) ── */
-const PLOT_HEALTH = {
-  treeSante: 95,   santeLabel: 'Excellent',
-  humidity:  65,   humidityLabel: 'Optimale',
-  nutrients: 80,   nutrientsLabel: 'Équilibrés',
-  co2: 4.2,        co2Trend: [1.8, 2.4, 2.9, 3.4, 3.8, 4.2],
-  lastWatering:  { pct: 70, info: '2 heures' },
-  lastDrone:     { pct: 15, info: '10 jours' },
-  nextAction: '"Arrosage automatisé (0.5 L)" dans 4 heures',
-}
-
 export default function PlotPage() {
   const { projectId, plotId } = useParams()
   const navigate = useNavigate()
@@ -88,6 +78,7 @@ export default function PlotPage() {
   }
 
   const annualRevenue = plotAnnualRevenue(plot)
+  const health = getPlotHealthReport(projectId, plot.id)
 
   const goReserveVisite = () => {
     navigate(`/project/${proj.id}/visite`, { state: { plotIds: [plot.id] } })
@@ -99,7 +90,7 @@ export default function PlotPage() {
 
   return (
     <main className="screen screen--app">
-      <section className="dashboard-page" style={{ paddingBottom: '6.5rem' }}>
+      <section className="dashboard-page" style={{ paddingBottom: 'calc(6.5rem + env(safe-area-inset-bottom, 0px))' }}>
         <TopBar />
 
         {/* breadcrumb */}
@@ -145,36 +136,36 @@ export default function PlotPage() {
             <div className="health-card">
               <span className="health-card-label">Santé de l&apos;arbre</span>
               <div className="health-circular-wrap">
-                <CircularProgress value={PLOT_HEALTH.treeSante} color="#a8cc50" />
-                <span className="health-pct-overlay">{PLOT_HEALTH.treeSante}%</span>
+                <CircularProgress value={health.treeSante} color="#a8cc50" />
+                <span className="health-pct-overlay">{health.treeSante}%</span>
               </div>
-              <span className="health-card-sub health-card-sub--green">{PLOT_HEALTH.santeLabel}</span>
+              <span className="health-card-sub health-card-sub--green">{health.santeLabel}</span>
             </div>
 
             <div className="health-card">
               <span className="health-card-label">Humidité du sol</span>
               <div className="health-circular-wrap">
-                <CircularProgress value={PLOT_HEALTH.humidity} color="#4db8ff" />
-                <span className="health-pct-overlay health-pct-overlay--blue">{PLOT_HEALTH.humidity}%</span>
+                <CircularProgress value={health.humidity} color="#4db8ff" />
+                <span className="health-pct-overlay health-pct-overlay--blue">{health.humidity}%</span>
               </div>
-              <span className="health-card-sub health-card-sub--blue">{PLOT_HEALTH.humidityLabel}</span>
+              <span className="health-card-sub health-card-sub--blue">{health.humidityLabel}</span>
             </div>
 
             <div className="health-card">
               <span className="health-card-label">Nutriments</span>
               <div className="health-circular-wrap">
-                <CircularProgress value={PLOT_HEALTH.nutrients} color="#f5c842" />
-                <span className="health-pct-overlay health-pct-overlay--yellow">{PLOT_HEALTH.nutrients}%</span>
+                <CircularProgress value={health.nutrients} color="#f5c842" />
+                <span className="health-pct-overlay health-pct-overlay--yellow">{health.nutrients}%</span>
               </div>
-              <span className="health-card-sub health-card-sub--yellow">{PLOT_HEALTH.nutrientsLabel}</span>
+              <span className="health-card-sub health-card-sub--yellow">{health.nutrientsLabel}</span>
             </div>
 
             <div className="health-card">
               <span className="health-card-label">CO₂ capturé</span>
               <div className="health-sparkline-wrap">
-                <Sparkline data={PLOT_HEALTH.co2Trend} />
+                <Sparkline data={health.co2Trend} />
               </div>
-              <span className="health-co2-value">{PLOT_HEALTH.co2} kg</span>
+              <span className="health-co2-value">{health.co2} kg</span>
               <span className="health-card-sub">ce mois</span>
             </div>
           </div>
@@ -189,11 +180,11 @@ export default function PlotPage() {
                 <span>Dernier Arrosage</span>
               </div>
               <div className="health-bar-track">
-                <div className="health-bar-fill health-bar-fill--blue" style={{ width: `${PLOT_HEALTH.lastWatering.pct}%` }} />
+                <div className="health-bar-fill health-bar-fill--blue" style={{ width: `${health.lastWatering.pct}%` }} />
               </div>
               <div className="health-bar-footer">
-                <span className="health-bar-pct">{PLOT_HEALTH.lastWatering.pct}%</span>
-                <span className="health-bar-info">{PLOT_HEALTH.lastWatering.info}</span>
+                <span className="health-bar-pct">{health.lastWatering.pct}%</span>
+                <span className="health-bar-info">{health.lastWatering.info}</span>
               </div>
             </div>
 
@@ -205,11 +196,11 @@ export default function PlotPage() {
                 <span>Dernier Traitement Droniste</span>
               </div>
               <div className="health-bar-track">
-                <div className="health-bar-fill health-bar-fill--yellow" style={{ width: `${PLOT_HEALTH.lastDrone.pct}%` }} />
+                <div className="health-bar-fill health-bar-fill--yellow" style={{ width: `${health.lastDrone.pct}%` }} />
               </div>
               <div className="health-bar-footer">
-                <span className="health-bar-pct">{PLOT_HEALTH.lastDrone.pct}%</span>
-                <span className="health-bar-info">{PLOT_HEALTH.lastDrone.info}</span>
+                <span className="health-bar-pct">{health.lastDrone.pct}%</span>
+                <span className="health-bar-info">{health.lastDrone.info}</span>
               </div>
             </div>
           </div>
@@ -217,7 +208,7 @@ export default function PlotPage() {
           {/* Next action */}
           <div className="health-next-action">
             <span className="health-next-label">Prochaine action prévue</span>
-            <span className="health-next-value">{PLOT_HEALTH.nextAction}</span>
+            <span className="health-next-value">{health.nextAction}</span>
           </div>
         </div>
 

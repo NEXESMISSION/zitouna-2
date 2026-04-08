@@ -51,7 +51,7 @@ export default function ProjectPage() {
 
   return (
     <main className="screen screen--app">
-      <section className="dashboard-page" style={{ paddingBottom: '6.5rem' }}>
+      <section className="dashboard-page" style={{ paddingBottom: 'calc(6.5rem + env(safe-area-inset-bottom, 0px))' }}>
         <TopBar />
 
         {/* breadcrumb */}
@@ -114,7 +114,10 @@ export default function ProjectPage() {
             <button className="link-btn" onClick={() => setSearch('')}>Réinitialiser</button>
           </div>
         ) : (
-          <div className="plots-cards-grid">
+          <div
+            className="plots-cards-grid"
+            style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '0.45rem' }}
+          >
             {filteredPlots.map((plot) => {
               return (
                 <article key={plot.id} className="plot-mini-card">

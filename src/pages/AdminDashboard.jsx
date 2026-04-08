@@ -1,8 +1,11 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import TopBar from '../TopBar.jsx'
 import { projects as allProjects } from '../projects.js'
-import { mockUsers, mockReceipts, mockSales, mockOffers } from '../adminData.js'
+import { mockUsers, mockReceipts, mockSales, mockOffersByProject } from '../adminData.js'
+import { loadHealthReports, upsertPlotHealthReport } from '../healthReportsStore.js'
+import { loadVisitRequests, saveVisitRequests } from '../visitRequestsStore.js'
+import { loadOffersByProject } from '../offersStore.js'
 
 function fmtDate(iso) {
   return new Date(iso).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })
@@ -17,6 +20,9 @@ function Badge({ type }) {
     installment: ['badge--amber', 'Facilité'],
     available:   ['badge--green', 'Disponible'],
     sold:        ['badge--amber', 'Vendue'],
+    visit_new:   ['badge--blue', 'Nouveau'],
+    visit_called:['badge--amber', 'Client contacté'],
+    visit_done:  ['badge--green', 'Planifié'],
   }
   const [cls, label] = map[type] || ['badge--gray', type]
   return <span className={`ap-badge ${cls}`}>{label}</span>
@@ -25,6 +31,8 @@ function Badge({ type }) {
 const TABS = [
   { id: 'receipts', label: 'Reçus',            icon: '📄' },
   { id: 'assign',   label: 'Vendre parcelle',   icon: '🤝' },
+  { id: 'visits',   label: 'Rendez-vous',       icon: '📅' },
+  { id: 'health',   label: 'Rapports santé',    icon: '🩺' },
   { id: 'history',  label: 'Mes ventes',        icon: '📊' },
 ]
 
@@ -37,7 +45,12 @@ export default function AdminDashboard() {
   const [receipts, setReceipts] = useState(mockReceipts)
   const [sales, setSales]       = useState(mockSales.filter(s => s.adminId === 'admin1'))
   const [localUsers, setLocalUsers] = useState(mockUsers)
-  const [offers]                = useState(mockOffers)
+  const [offersByProject]       = useState(() => {
+    const fromStore = loadOffersByProject()
+    return Object.keys(fromStore).length > 0 ? fromStore : mockOffersByProject
+  })
+  const [healthReports, setHealthReports] = useState(loadHealthReports())
+  const [visitRequests, setVisitRequests] = useState(loadVisitRequests())
 
   const [rejectNote, setRejectNote]     = useState('')
   const [rejectTarget, setRejectTarget] = useState(null)
@@ -51,6 +64,19 @@ export default function AdminDashboard() {
     araboun: '',
   })
   const [newClientForm, setNewClientForm] = useState(EMPTY_NEW_CLIENT)
+  const [healthForm, setHealthForm] = useState({
+    projectId: '',
+    plotId: '',
+    treeSante: '95',
+    humidity: '65',
+    nutrients: '80',
+    co2: '4.2',
+    lastWateringPct: '70',
+    lastWateringInfo: '2 heures',
+    lastDronePct: '15',
+    lastDroneInfo: '10 jours',
+    nextAction: '"Arrosage automatise (0.5 L)" dans 4 heures',
+  })
 
   const sf = (key) => (e) => setForm(f => ({ ...f, [key]: e.target.value }))
   const nc = (key) => (e) => setNewClientForm(f => ({ ...f, [key]: e.target.value }))
@@ -61,6 +87,7 @@ export default function AdminDashboard() {
   }
 
   const pendingCount = receipts.filter(r => r.status === 'submitted').length
+  const pendingVisits = visitRequests.filter((v) => v.status === 'new').length
 
   /* ── Receipt actions ── */
   const approveReceipt = (id) => {
@@ -100,7 +127,8 @@ export default function AdminDashboard() {
   const selectedPlot   = selectedProj?.plots.find(pl => pl.id === Number(form.plotId))
   const plotPrice      = selectedPlot?.totalPrice || 0
 
-  const selectedOffer  = offers.find(o => o.id === form.offerId)
+  const projectOffers  = offersByProject[form.projectId] || []
+  const selectedOffer  = projectOffers.find(o => o.id === form.offerId)
   const avanceAmt      = selectedOffer ? Math.round(plotPrice * selectedOffer.avancePct / 100) : 0
   const remaining      = plotPrice - avanceAmt
   const monthly        = selectedOffer?.duration > 0 ? Math.round(remaining / selectedOffer.duration) : 0
@@ -133,6 +161,68 @@ export default function AdminDashboard() {
     setTab('history')
   }
 
+  const selectedHealthProject = allProjects.find((p) => p.id === healthForm.projectId)
+  const healthPlots = selectedHealthProject?.plots || []
+  const projectHealthCount = useMemo(() => {
+    if (!healthForm.projectId) return 0
+    return Object.keys(healthReports).filter((k) => k.startsWith(`${healthForm.projectId}:`)).length
+  }, [healthForm.projectId, healthReports])
+
+  useEffect(() => {
+    if (!healthForm.projectId || !healthForm.plotId) return
+    const key = `${healthForm.projectId}:${healthForm.plotId}`
+    const existing = healthReports[key]
+    if (!existing) return
+    setHealthForm((f) => ({
+      ...f,
+      treeSante: String(existing.treeSante ?? 0),
+      humidity: String(existing.humidity ?? 0),
+      nutrients: String(existing.nutrients ?? 0),
+      co2: String(existing.co2 ?? 0),
+      lastWateringPct: String(existing.lastWatering?.pct ?? 0),
+      lastWateringInfo: existing.lastWatering?.info ?? '—',
+      lastDronePct: String(existing.lastDrone?.pct ?? 0),
+      lastDroneInfo: existing.lastDrone?.info ?? '—',
+      nextAction: existing.nextAction ?? '—',
+    }))
+  }, [healthForm.projectId, healthForm.plotId, healthReports])
+
+  const saveHealthReport = () => {
+    if (!healthForm.projectId || !healthForm.plotId) {
+      return showToast('Choisissez un projet et une parcelle.', false)
+    }
+    const report = {
+      treeSante: Number(healthForm.treeSante) || 0,
+      santeLabel: 'Manuel',
+      humidity: Number(healthForm.humidity) || 0,
+      humidityLabel: 'Manuel',
+      nutrients: Number(healthForm.nutrients) || 0,
+      nutrientsLabel: 'Manuel',
+      co2: Number(healthForm.co2) || 0,
+      co2Trend: [1, 1.5, 2.2, 2.8, 3.6, Number(healthForm.co2) || 0],
+      lastWatering: {
+        pct: Number(healthForm.lastWateringPct) || 0,
+        info: healthForm.lastWateringInfo || '—',
+      },
+      lastDrone: {
+        pct: Number(healthForm.lastDronePct) || 0,
+        info: healthForm.lastDroneInfo || '—',
+      },
+      nextAction: healthForm.nextAction || '—',
+    }
+
+    const next = upsertPlotHealthReport(healthForm.projectId, healthForm.plotId, report)
+    setHealthReports(next)
+    showToast('Rapport santé manuel enregistré.')
+  }
+
+  const updateVisitStatus = (visitId, status) => {
+    const next = visitRequests.map((v) => (v.id === visitId ? { ...v, status } : v))
+    setVisitRequests(next)
+    saveVisitRequests(next)
+    showToast('Rendez-vous mis à jour.')
+  }
+
   return (
     <main className="screen screen--app">
       <section className="dashboard-page">
@@ -151,6 +241,9 @@ export default function AdminDashboard() {
             <span>{t.icon}</span> {t.label}
             {t.id === 'receipts' && pendingCount > 0 && (
               <span className="ap-nav-badge">{pendingCount}</span>
+            )}
+            {t.id === 'visits' && pendingVisits > 0 && (
+              <span className="ap-nav-badge">{pendingVisits}</span>
             )}
           </button>
         ))}
@@ -206,6 +299,42 @@ export default function AdminDashboard() {
                   )}
                 </div>
               ))}
+            </div>
+          </>
+        )}
+
+        {/* ── RENDEZ-VOUS RECUS ── */}
+        {tab === 'visits' && (
+          <>
+            <div className="ap-page-header">
+              <div>
+                <h1 className="ap-page-title">Rendez-vous reçus</h1>
+                <p className="ap-page-sub">{visitRequests.length} demande{visitRequests.length !== 1 ? 's' : ''} · {pendingVisits} nouvelle{pendingVisits !== 1 ? 's' : ''}</p>
+              </div>
+            </div>
+            <div className="ap-receipt-list">
+              {visitRequests.map((v) => (
+                <div key={v.id} className="ap-receipt-card">
+                  <div className="ap-receipt-top">
+                    <div>
+                      <p className="ap-receipt-ref">{v.id} · {v.projectTitle}</p>
+                      <p className="ap-receipt-client">{v.userName} — Parcelles: {v.plotIds?.join(', ') || '—'}</p>
+                      <p className="ap-receipt-meta">
+                        {v.date} · {v.slotLabel}
+                      </p>
+                    </div>
+                    <div className="ap-receipt-right">
+                      <Badge type={`visit_${v.status}`} />
+                    </div>
+                  </div>
+                  {v.slotHint && <p className="ap-receipt-note">💬 {v.slotHint}</p>}
+                  <div className="ap-receipt-actions">
+                    <button type="button" className="ap-btn-approve" onClick={() => updateVisitStatus(v.id, 'called')}>Contacter client</button>
+                    <button type="button" className="ap-btn-ghost" onClick={() => updateVisitStatus(v.id, 'done')}>Marquer planifié</button>
+                  </div>
+                </div>
+              ))}
+              {visitRequests.length === 0 && <p className="ap-empty">Aucune demande de rendez-vous pour le moment.</p>}
             </div>
           </>
         )}
@@ -309,11 +438,11 @@ export default function AdminDashboard() {
               {form.type === 'installment' && (
                 <div className="ap-form-group">
                   <label className="ap-form-label">Offre de facilité</label>
-                  {offers.length === 0 ? (
+                  {projectOffers.length === 0 ? (
                     <p className="ap-form-hint ap-form-hint--warn">Aucune offre disponible. L&apos;administrateur propriétaire doit en créer.</p>
                   ) : (
                     <div className="ap-offer-grid">
-                      {offers.map(o => (
+                      {projectOffers.map(o => (
                         <button key={o.id} type="button"
                           className={`ap-offer-card${form.offerId === o.id ? ' ap-offer-card--active' : ''}`}
                           onClick={() => setForm(f => ({ ...f, offerId: o.id }))}>
@@ -375,6 +504,101 @@ export default function AdminDashboard() {
               <button type="button" className="ap-btn-primary ap-btn-primary--full" onClick={submitAssign}>
                 Confirmer la vente →
               </button>
+            </div>
+          </>
+        )}
+
+        {/* ── RAPPORTS SANTE (manuel) ── */}
+        {tab === 'health' && (
+          <>
+            <div className="ap-page-header">
+              <div>
+                <h1 className="ap-page-title">Rapports santé (manuel)</h1>
+                <p className="ap-page-sub">Chaque projet a ses propres rapports. Saisissez l&apos;état santé par projet et parcelle.</p>
+              </div>
+            </div>
+
+            <div className="ap-assign-form">
+              <div className="ap-form-grid-2">
+                <div className="ap-form-group">
+                  <label className="ap-form-label">Projet</label>
+                  <select
+                    className="ap-select"
+                    value={healthForm.projectId}
+                    onChange={(e) => setHealthForm((f) => ({ ...f, projectId: e.target.value, plotId: '' }))}
+                  >
+                    <option value="">— Sélectionner un projet —</option>
+                    {allProjects.map((p) => (
+                      <option key={p.id} value={p.id}>{p.title} · {p.city}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="ap-form-group">
+                  <label className="ap-form-label">Parcelle</label>
+                  <select
+                    className="ap-select"
+                    value={healthForm.plotId}
+                    onChange={(e) => setHealthForm((f) => ({ ...f, plotId: e.target.value }))}
+                    disabled={!healthForm.projectId}
+                  >
+                    <option value="">— Sélectionner une parcelle —</option>
+                    {healthPlots.map((pl) => (
+                      <option key={pl.id} value={String(pl.id)}>#{pl.id} · {pl.trees} arbres</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="ap-form-grid-2">
+                <div className="ap-form-group">
+                  <label className="ap-form-label">Santé arbre (%)</label>
+                  <input className="ap-form-input" type="number" min="0" max="100" value={healthForm.treeSante} onChange={(e) => setHealthForm((f) => ({ ...f, treeSante: e.target.value }))} />
+                </div>
+                <div className="ap-form-group">
+                  <label className="ap-form-label">Humidité (%)</label>
+                  <input className="ap-form-input" type="number" min="0" max="100" value={healthForm.humidity} onChange={(e) => setHealthForm((f) => ({ ...f, humidity: e.target.value }))} />
+                </div>
+                <div className="ap-form-group">
+                  <label className="ap-form-label">Nutriments (%)</label>
+                  <input className="ap-form-input" type="number" min="0" max="100" value={healthForm.nutrients} onChange={(e) => setHealthForm((f) => ({ ...f, nutrients: e.target.value }))} />
+                </div>
+                <div className="ap-form-group">
+                  <label className="ap-form-label">CO2 capturé (kg)</label>
+                  <input className="ap-form-input" type="number" step="0.1" min="0" value={healthForm.co2} onChange={(e) => setHealthForm((f) => ({ ...f, co2: e.target.value }))} />
+                </div>
+              </div>
+
+              <div className="ap-form-grid-2">
+                <div className="ap-form-group">
+                  <label className="ap-form-label">Dernier arrosage (%)</label>
+                  <input className="ap-form-input" type="number" min="0" max="100" value={healthForm.lastWateringPct} onChange={(e) => setHealthForm((f) => ({ ...f, lastWateringPct: e.target.value }))} />
+                </div>
+                <div className="ap-form-group">
+                  <label className="ap-form-label">Info arrosage</label>
+                  <input className="ap-form-input" value={healthForm.lastWateringInfo} onChange={(e) => setHealthForm((f) => ({ ...f, lastWateringInfo: e.target.value }))} />
+                </div>
+                <div className="ap-form-group">
+                  <label className="ap-form-label">Dernier drone (%)</label>
+                  <input className="ap-form-input" type="number" min="0" max="100" value={healthForm.lastDronePct} onChange={(e) => setHealthForm((f) => ({ ...f, lastDronePct: e.target.value }))} />
+                </div>
+                <div className="ap-form-group">
+                  <label className="ap-form-label">Info drone</label>
+                  <input className="ap-form-input" value={healthForm.lastDroneInfo} onChange={(e) => setHealthForm((f) => ({ ...f, lastDroneInfo: e.target.value }))} />
+                </div>
+              </div>
+
+              <div className="ap-form-group">
+                <label className="ap-form-label">Prochaine action</label>
+                <input className="ap-form-input" value={healthForm.nextAction} onChange={(e) => setHealthForm((f) => ({ ...f, nextAction: e.target.value }))} />
+              </div>
+
+              <button type="button" className="ap-btn-primary ap-btn-primary--full" onClick={saveHealthReport}>
+                Enregistrer le rapport manuel
+              </button>
+
+              <p className="ap-form-hint" style={{ marginTop: '0.5rem' }}>
+                Rapports enregistrés pour ce projet: {projectHealthCount}
+              </p>
             </div>
           </>
         )}

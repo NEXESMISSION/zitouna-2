@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import TopBar from '../TopBar.jsx'
 import { projects as allProjects } from '../projects.js'
 import { googleMapsEmbed } from '../mapUrls.js'
-import { mockUsers, mockReceipts, mockSales, mockOffers } from '../adminData.js'
+import { mockUsers, mockReceipts, mockSales, mockOffersByProject } from '../adminData.js'
+import { loadOffersByProject, saveOffersByProject } from '../offersStore.js'
 
 function fmtDate(iso) {
   return new Date(iso).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })
@@ -59,9 +60,13 @@ export default function OwnerDashboard() {
   const [delPlotConfirm, setDelPlotConfirm] = useState(null)
 
   /* ── Offers state ── */
-  const [offers, setOffers]           = useState(mockOffers)
-  const [offerModal, setOfferModal]   = useState(null)  // null | { label, avancePct, duration, note }
-  const EMPTY_OFFER = { label: '', avancePct: '20', duration: '24', note: '' }
+  const [offersByProject, setOffersByProject] = useState(() => {
+    const fromStore = loadOffersByProject()
+    return Object.keys(fromStore).length > 0 ? fromStore : mockOffersByProject
+  })
+  const [selectedOfferProjectId, setSelectedOfferProjectId] = useState(allProjects[0]?.id || '')
+  const [offerModal, setOfferModal]   = useState(null)  // null | { projectId, label, avancePct, duration, note }
+  const EMPTY_OFFER = { projectId: '', label: '', avancePct: '20', duration: '24', note: '' }
 
   /* ── Helpers ── */
   const showToast = (msg, ok = true) => {
@@ -106,6 +111,11 @@ export default function OwnerDashboard() {
         area: m.area || '—', year: parseInt(m.year) || new Date().getFullYear(),
         mapUrl, plots: [],
       }])
+      setOffersByProject((prev) => {
+        const next = { ...prev, [slug]: prev[slug] || [] }
+        saveOffersByProject(next)
+        return next
+      })
       showToast('Projet créé avec succès.')
     } else {
       setProjects(prev => prev.map(p => p.id === m.id ? {
@@ -120,7 +130,17 @@ export default function OwnerDashboard() {
 
   const deleteProject = (id) => {
     setProjects(prev => prev.filter(p => p.id !== id))
+    setOffersByProject((prev) => {
+      const next = { ...prev }
+      delete next[id]
+      saveOffersByProject(next)
+      return next
+    })
     if (parcelPanel === id) setParcelPanel(null)
+    if (selectedOfferProjectId === id) {
+      const fallback = projects.find((p) => p.id !== id)?.id || ''
+      setSelectedOfferProjectId(fallback)
+    }
     setDelConfirm(null); showToast('Projet supprimé.')
   }
 
@@ -155,19 +175,31 @@ export default function OwnerDashboard() {
   const saveOffer = (e) => {
     e.preventDefault()
     const o = offerModal
-    if (!o.label || !o.avancePct || !o.duration) return showToast('Tous les champs sont requis.', false)
-    setOffers(prev => [...prev, {
-      id: `OFF-${Date.now()}`,
-      label:     o.label,
+    if (!o.projectId || !o.label || !o.avancePct || !o.duration) return showToast('Tous les champs sont requis.', false)
+    const offer = {
+      id: `OFF-${o.projectId}-${Date.now()}`,
+      label: o.label,
       avancePct: parseInt(o.avancePct),
-      duration:  parseInt(o.duration),
-      note:      o.note,
-    }])
+      duration: parseInt(o.duration),
+      note: o.note,
+    }
+    setOffersByProject((prev) => {
+      const list = prev[o.projectId] || []
+      const next = { ...prev, [o.projectId]: [...list, offer] }
+      saveOffersByProject(next)
+      return next
+    })
     setOfferModal(null)
+    setSelectedOfferProjectId(o.projectId)
     showToast('Offre créée.')
   }
-  const deleteOffer = (id) => {
-    setOffers(prev => prev.filter(o => o.id !== id))
+  const deleteOffer = (projectId, id) => {
+    setOffersByProject((prev) => {
+      const list = prev[projectId] || []
+      const next = { ...prev, [projectId]: list.filter((o) => o.id !== id) }
+      saveOffersByProject(next)
+      return next
+    })
     showToast('Offre supprimée.')
   }
 
@@ -398,11 +430,21 @@ export default function OwnerDashboard() {
             <div className="ap-page-header">
               <div>
                 <h1 className="ap-page-title">Offres de facilité</h1>
-                <p className="ap-page-sub">{offers.length} offre{offers.length !== 1 ? 's' : ''} disponible{offers.length !== 1 ? 's' : ''} pour les administrateurs</p>
+                <p className="ap-page-sub">Chaque projet possède ses propres offres.</p>
               </div>
-              <button type="button" className="ap-btn-primary" onClick={() => setOfferModal({ ...EMPTY_OFFER })}>
+              <button type="button" className="ap-btn-primary" onClick={() => setOfferModal({ ...EMPTY_OFFER, projectId: selectedOfferProjectId || projects[0]?.id || '' })}>
                 + Nouvelle offre
               </button>
+            </div>
+
+            <div className="ap-form-group" style={{ maxWidth: 420, marginBottom: '0.8rem' }}>
+              <label className="ap-form-label">Projet concerné</label>
+              <select className="ap-select" value={selectedOfferProjectId} onChange={(e) => setSelectedOfferProjectId(e.target.value)}>
+                <option value="">— Sélectionner un projet —</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>{p.title} · {p.city}</option>
+                ))}
+              </select>
             </div>
 
             <div className="ap-table-wrap">
@@ -411,7 +453,7 @@ export default function OwnerDashboard() {
                   <tr><th>Nom de l&apos;offre</th><th>Avance</th><th>Durée</th><th>Mensualité estimée*</th><th>Note</th><th></th></tr>
                 </thead>
                 <tbody>
-                  {offers.map(o => (
+                  {(offersByProject[selectedOfferProjectId] || []).map(o => (
                     <tr key={o.id}>
                       <td className="ap-bold">{o.label}</td>
                       <td>{o.avancePct}%</td>
@@ -420,7 +462,7 @@ export default function OwnerDashboard() {
                       <td className="ap-muted">{o.note || '—'}</td>
                       <td>
                         <button type="button" className="ap-btn-row ap-btn-row--del"
-                          onClick={() => deleteOffer(o.id)}>
+                          onClick={() => deleteOffer(selectedOfferProjectId, o.id)}>
                           Suppr.
                         </button>
                       </td>
@@ -428,7 +470,7 @@ export default function OwnerDashboard() {
                   ))}
                 </tbody>
               </table>
-              {offers.length === 0 && <p className="ap-empty">Aucune offre. Créez-en une avec le bouton ci-dessus.</p>}
+              {(offersByProject[selectedOfferProjectId] || []).length === 0 && <p className="ap-empty">Aucune offre pour ce projet. Créez-en une avec le bouton ci-dessus.</p>}
             </div>
           </>
         )}
@@ -717,6 +759,15 @@ export default function OwnerDashboard() {
               <button type="button" className="ap-modal-close" onClick={() => setOfferModal(null)}>✕</button>
             </div>
             <form className="ap-form-modal-body" onSubmit={saveOffer}>
+              <div className="ap-form-group">
+                <label className="ap-form-label">Projet *</label>
+                <select className="ap-select" required value={offerModal.projectId} onChange={e => setOfferModal(p => ({ ...p, projectId: e.target.value }))}>
+                  <option value="">— Sélectionner un projet —</option>
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>{p.title} · {p.city}</option>
+                  ))}
+                </select>
+              </div>
               <div className="ap-form-group">
                 <label className="ap-form-label">Nom de l&apos;offre *</label>
                 <input className="ap-form-input" placeholder="ex: Confort 30/36" required

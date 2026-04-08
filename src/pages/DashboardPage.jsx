@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import TopBar from '../TopBar.jsx'
 import { myPurchases } from '../portfolio.js'
 import { projects } from '../projects.js'
-import { myInstallments } from '../installments.js'
+import { loadInstallments, saveInstallments } from '../installmentsStore.js'
 
 const REVENUE_PER_TREE = 90
 
@@ -28,7 +28,7 @@ export default function DashboardPage() {
   const roi           = totalInvested > 0 ? ((totalRevenue / totalInvested) * 100).toFixed(1) : '0.0'
 
   // ── Installment plans (local state so receipt uploads update the UI) ──
-  const [plans, setPlans] = useState(myInstallments)
+  const [plans, setPlans] = useState(loadInstallments)
 
   // ── Upload modal state ──
   const [uploadTarget, setUploadTarget] = useState(null) // { planId, month, amount, dueDate }
@@ -45,21 +45,21 @@ export default function DashboardPage() {
 
   const submitReceipt = () => {
     if (!uploadFile) return
-    setPlans((prev) =>
-      prev.map((plan) =>
-        plan.id !== uploadTarget.planId
-          ? plan
-          : {
-              ...plan,
-              status: 'active',
-              payments: plan.payments.map((p) =>
-                p.month === uploadTarget.month
-                  ? { ...p, status: 'submitted', receiptName: uploadFile, rejectedNote: undefined }
-                  : p,
-              ),
-            },
-      ),
+    const next = plans.map((plan) =>
+      plan.id !== uploadTarget.planId
+        ? plan
+        : {
+            ...plan,
+            status: 'active',
+            payments: plan.payments.map((p) =>
+              p.month === uploadTarget.month
+                ? { ...p, status: 'submitted', receiptName: uploadFile, rejectedNote: undefined }
+                : p,
+            ),
+          },
     )
+    setPlans(next)
+    saveInstallments(next)
     closeUpload()
   }
 
@@ -106,6 +106,11 @@ export default function DashboardPage() {
         {plans.length > 0 && (
           <>
             <h3 className="dash-section-title">Mes facilités en cours</h3>
+            <div style={{ margin: '-0.35rem 0 0.75rem' }}>
+              <button type="button" className="link-btn" onClick={() => navigate('/installments')}>
+                Gérer toutes les échéances →
+              </button>
+            </div>
             <div className="dash-plans-wrap">
               {/* header */}
               <div className="dash-plans-head">
