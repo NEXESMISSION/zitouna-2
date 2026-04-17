@@ -1,36 +1,61 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation, Navigate } from 'react-router-dom'
+import { useAuth } from '../lib/AuthContext.jsx'
 import appLogo from '../../logo2.png'
 import {
   IconEye,
   IconEyeOff,
-  IconFacebook,
-  IconGoogle,
   IconKey,
   IconUser,
 } from '../LoginDecor.jsx'
 
 export default function LoginPage() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const { loading: authLoading, ready, isAuthenticated, adminUser, clientProfile, login } = useAuth()
   const [showPassword, setShowPassword] = useState(false)
-  const [loading, setLoading]           = useState(false)
-  const [error, setError]               = useState('')
-
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
   const [form, setForm] = useState({ email: '', password: '' })
+
+  if (ready && isAuthenticated && (adminUser || clientProfile)) {
+    const dest = adminUser ? '/admin' : '/dashboard'
+    return <Navigate to={dest} replace />
+  }
 
   function handleChange(e) {
     setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }))
-    setError('')
   }
 
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
-    setLoading(true)
-    setTimeout(() => {
-      setLoading(false)
-      navigate('/browse')
-    }, 350)
+    setSubmitting(true)
+    try {
+      const result = await login(form.email, form.password)
+      if (!result.ok) {
+        setError(result.error || 'Connexion impossible.')
+        return
+      }
+      const fromPath = typeof location.state?.from === 'string' ? location.state.from : null
+      const safePath =
+        fromPath && fromPath.startsWith('/') && !fromPath.startsWith('//') && !fromPath.includes('://')
+          ? fromPath
+          : null
+      navigate(result.redirectTo || safePath || '/browse', { replace: true })
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  if (authLoading) {
+    return (
+      <main className="screen screen--login">
+        <div className="login-content" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '40vh' }}>
+          <div className="app-loader-spinner" />
+        </div>
+      </main>
+    )
   }
 
   return (
@@ -40,28 +65,17 @@ export default function LoginPage() {
       <div className="login-content">
         <header className="login-brand">
           <div className="login-logo-wrap">
-            <img src={appLogo} alt="Zitouna Bladi logo" className="login-logo-image" />
+            <img src={appLogo} alt="Zitounat Bladi logo" className="login-logo-image" />
           </div>
         </header>
 
         <h1 className="login-title">Connexion</h1>
 
-        <div className="social-row login-social">
-          <button type="button" className="social-button login-social-btn">
-            <IconGoogle />
-            Google
-          </button>
-          <button type="button" className="social-button login-social-btn">
-            <IconFacebook />
-            Facebook
-          </button>
-        </div>
-
         <div className="divider login-divider">
-          <span>Ou continuer avec</span>
+          <span>Connectez-vous à votre compte</span>
         </div>
 
-        {error && <div className="auth-alert auth-alert--error">{error}</div>}
+        {error ? <div className="auth-alert auth-alert--error">{error}</div> : null}
 
         <form className="form login-form" onSubmit={handleSubmit}>
           <div className="login-field">
@@ -116,12 +130,8 @@ export default function LoginPage() {
             </button>
           </div>
 
-          <button
-            type="submit"
-            className="submit-button login-submit"
-            disabled={loading}
-          >
-            {loading ? 'Connexion en cours…' : 'Se connecter'}
+          <button type="submit" className="submit-button login-submit" disabled={submitting}>
+            {submitting ? 'Connexion en cours…' : 'Se connecter'}
           </button>
         </form>
 

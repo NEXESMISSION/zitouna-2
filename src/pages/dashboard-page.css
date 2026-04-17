@@ -1,0 +1,382 @@
+/* ══════════════════════════════════════════════════════════════
+   dashboard-page.css — Investor Dashboard
+   Dark green theme matching browse / project / plot pages
+   Mobile-first, responsive
+   ══════════════════════════════════════════════════════════════ */
+
+.inv-dash {
+  width: 100%;
+  max-width: 540px;
+  margin: 0 auto;
+  font-family: Georgia, 'Times New Roman', serif;
+  color: #d7e5d8;
+  padding: 0 0 3rem;
+}
+
+/* ══════════════════════════════════════
+   HEADER
+   ══════════════════════════════════════ */
+.inv-header {
+  padding: 14px;
+  margin-bottom: 14px;
+  border-radius: 12px;
+  background: linear-gradient(160deg, rgba(22,41,23,0.92), rgba(13,26,15,0.96));
+  border: 1px solid rgba(42,75,44,0.85);
+}
+.inv-header__top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.inv-header__avatar {
+  width: 38px; height: 38px; border-radius: 10px;
+  overflow: hidden; flex-shrink: 0;
+  border: 1px solid rgba(42,75,44,0.8);
+}
+.inv-header__avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.inv-header__profile-btn {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid rgba(168, 204, 80, 0.45);
+  background: linear-gradient(160deg, rgba(168, 204, 80, 0.18), rgba(122, 176, 32, 0.12));
+  color: #a8cc50;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.15s, border-color 0.15s, background 0.15s, color 0.15s;
+}
+.inv-header__profile-btn:hover {
+  transform: translateY(-1px);
+  border-color: rgba(168, 204, 80, 0.75);
+  background: linear-gradient(160deg, rgba(168, 204, 80, 0.3), rgba(122, 176, 32, 0.2));
+  color: #d7e5d8;
+}
+.inv-header__profile-btn:active { transform: translateY(0); }
+.inv-header__profile-btn:focus-visible {
+  outline: 2px solid rgba(168, 204, 80, 0.75);
+  outline-offset: 2px;
+}
+.inv-header__name {
+  margin: 0; font-size: 14px; font-weight: 700;
+  color: #e0ebe1;
+}
+.inv-header__subtitle {
+  margin: 2px 0 0; font-size: 10px;
+  color: #8da68e;
+}
+.inv-header__icon-btn {
+  flex-shrink: 0;
+  width: 32px; height: 32px; border-radius: 8px;
+  border: 1px solid rgba(42,75,44,0.8);
+  background: rgba(11,21,12,0.5);
+  color: #8da68e; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.15s;
+}
+.inv-header__icon-btn:hover { color: #a8cc50; border-color: rgba(58,92,59,0.9); }
+.inv-header__icon-btn--admin { border-color: rgba(212,168,67,0.3); color: #d4a843; }
+.inv-header__icon-btn--admin:hover { border-color: rgba(212,168,67,0.5); color: #e8c05a; }
+.inv-header__actions { display: flex; gap: 6px; margin-top: 10px; }
+.inv-header__cta {
+  flex: 1; padding: 9px 12px;
+  border-radius: 8px; border: none;
+  background: linear-gradient(90deg, #7ab020, #a8cc50);
+  color: #0b150c; font-size: 11px; font-weight: 700;
+  font-family: inherit; cursor: pointer; transition: filter 0.15s;
+  text-align: center;
+}
+.inv-header__cta:hover { filter: brightness(1.08); }
+.inv-header__seller-btn {
+  padding: 9px 12px; border-radius: 8px;
+  border: 1px solid rgba(168,204,80,0.3);
+  background: transparent;
+  color: #a8cc50; font-size: 11px; font-weight: 700;
+  font-family: inherit; cursor: pointer; transition: all 0.15s;
+}
+.inv-header__seller-btn:hover { background: rgba(168,204,80,0.08); }
+.inv-header__seller-badge {
+  margin-top: 8px; width: fit-content;
+  padding: 3px 10px; border-radius: 20px;
+  border: 1px solid rgba(168,204,80,0.3);
+  background: rgba(168,204,80,0.08);
+  color: #a8cc50; font-size: 10px; font-weight: 700;
+}
+
+/* ══════════════════════════════════════
+   PROFILE PANEL
+   ══════════════════════════════════════ */
+.inv-profile {
+  background: rgba(22,41,23,0.92);
+  border: 1px solid rgba(42,75,44,0.85);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 14px;
+}
+.inv-profile__head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+.inv-profile__title { font-size: 13px; font-weight: 700; color: #e0ebe1; margin: 0; }
+.inv-profile__close {
+  background: none; border: none; cursor: pointer; padding: 4px;
+  color: #8da68e; border-radius: 6px;
+}
+.inv-profile__close:hover { color: #a8cc50; }
+.inv-profile__fields { display: flex; flex-direction: column; gap: 10px; }
+.inv-profile__label {
+  display: block; font-size: 9px; font-weight: 700;
+  color: #8da68e; text-transform: uppercase;
+  letter-spacing: 0.5px; margin-bottom: 3px;
+}
+.inv-profile__input-wrap { position: relative; display: flex; align-items: center; }
+.inv-profile__input {
+  width: 100%; box-sizing: border-box; padding: 8px 10px;
+  border: 1px solid rgba(42,75,44,0.8);
+  border-radius: 8px;
+  background: #0b150c; color: #e0ebe1;
+  font-size: 12px; font-family: inherit; outline: none;
+}
+.inv-profile__input:focus { border-color: #a8cc50; }
+.inv-profile__input--locked { color: #6b8a6d; cursor: not-allowed; }
+.inv-profile__lock { position: absolute; right: 10px; font-size: 11px; opacity: 0.5; }
+.inv-profile__msg { font-size: 11px; color: #a8cc50; margin: 8px 0 0; }
+.inv-profile__save {
+  margin-top: 12px; width: 100%; padding: 9px;
+  border-radius: 8px; border: none;
+  background: linear-gradient(90deg, #7ab020, #a8cc50);
+  color: #0b150c; font-size: 11px; font-weight: 700;
+  font-family: inherit; cursor: pointer;
+}
+.inv-profile__save:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ══════════════════════════════════════
+   TABS
+   ══════════════════════════════════════ */
+.inv-tabs {
+  display: flex; gap: 4px;
+  margin-bottom: 14px;
+}
+.inv-tab {
+  flex: 1; padding: 8px 6px;
+  border-radius: 8px;
+  border: 1px solid rgba(42,75,44,0.8);
+  background: rgba(11,21,12,0.5);
+  color: #8da68e;
+  font-size: 11px; font-weight: 600;
+  font-family: inherit; cursor: pointer;
+  transition: all 0.15s; text-align: center;
+}
+.inv-tab:hover { color: #d7e5d8; }
+.inv-tab--active {
+  background: rgba(168,204,80,0.1);
+  border-color: rgba(168,204,80,0.35);
+  color: #a8cc50;
+}
+
+/* ══════════════════════════════════════
+   KPI STRIP
+   ══════════════════════════════════════ */
+.inv-kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.inv-kpi {
+  text-align: center;
+  padding: 10px 4px;
+  border-radius: 10px;
+  background: rgba(22,41,23,0.92);
+  border: 1px solid rgba(42,75,44,0.85);
+}
+.inv-kpi__value {
+  display: block; font-size: 16px; font-weight: 700;
+  color: #e0ebe1; line-height: 1.2;
+}
+.inv-kpi__value--green { color: #a8cc50; }
+.inv-kpi__value--blue { color: #d4a843; }
+.inv-kpi__label {
+  display: block; font-size: 8px;
+  color: #6b8a6d; margin-top: 2px;
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.inv-kpi-sep { display: none; }
+
+/* ══════════════════════════════════════
+   SECTION TITLE
+   ══════════════════════════════════════ */
+.inv-section-title {
+  margin: 0 0 10px; font-size: 13px;
+  font-weight: 700; color: #e0ebe1;
+}
+
+/* ══════════════════════════════════════
+   PARCEL CARDS
+   ══════════════════════════════════════ */
+.inv-parcels { display: flex; flex-direction: column; gap: 8px; }
+.inv-parcel-card {
+  border-radius: 10px; overflow: hidden; cursor: pointer;
+  background: rgba(22,41,23,0.92);
+  border: 1px solid rgba(42,75,44,0.85);
+  display: flex; flex-direction: row; align-items: stretch;
+  transition: border-color 140ms, box-shadow 130ms;
+}
+.inv-parcel-card:hover {
+  border-color: rgba(58,92,59,0.95);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.2);
+}
+.inv-parcel-card__map {
+  width: 100px; min-width: 100px;
+  flex-shrink: 0; background: #0d1a0f; overflow: hidden;
+  border-radius: 8px; margin: 6px 0 6px 6px;
+}
+.inv-parcel-card__map iframe {
+  width: 100%; height: 100%; border: none;
+  pointer-events: none; display: block; min-height: 80px;
+}
+.inv-parcel-card__body { flex: 1; padding: 8px 10px; min-width: 0; }
+.inv-parcel-card__top {
+  display: flex; justify-content: space-between;
+  align-items: flex-start; gap: 6px; margin-bottom: 6px;
+}
+.inv-parcel-card__id { font-size: 12px; font-weight: 700; color: #e0ebe1; }
+.inv-parcel-card__project { font-size: 9px; color: #8da68e; margin-top: 1px; }
+.inv-parcel-card__loc { font-size: 9px; color: #8da68e; flex-shrink: 0; }
+.inv-parcel-card__stats { display: flex; flex-direction: column; gap: 2px; }
+.inv-parcel-card__stat-row {
+  display: flex; justify-content: space-between;
+  align-items: baseline; gap: 6px;
+}
+.inv-parcel-card__stat-label { font-size: 10px; color: #6b8a6d; }
+.inv-parcel-card__stat-value { font-size: 11px; font-weight: 700; color: #d7e5d8; }
+.inv-green { color: #a8cc50 !important; }
+.inv-parcel-card__links { margin-top: 6px; }
+.inv-link-btn {
+  background: none; border: none; padding: 0;
+  color: #a8cc50; font-size: 10px; font-weight: 600;
+  font-family: inherit; cursor: pointer;
+}
+.inv-link-btn:hover { color: #c8e670; }
+
+/* ══════════════════════════════════════
+   EMPTY / PROGRESS STATES
+   ══════════════════════════════════════ */
+.inv-empty {
+  text-align: center; padding: 2rem 1rem;
+  border: 1px dashed rgba(42,75,44,0.8);
+  border-radius: 10px; color: #6b8a6d;
+}
+.inv-empty strong { display: block; color: #8da68e; font-size: 13px; margin-bottom: 4px; }
+.inv-empty p { margin: 0 0 10px; font-size: 11px; }
+.inv-empty__btn {
+  padding: 8px 16px; border-radius: 8px; border: none;
+  background: linear-gradient(90deg, #7ab020, #a8cc50);
+  color: #0b150c; font-size: 11px; font-weight: 700;
+  font-family: inherit; cursor: pointer;
+}
+.inv-progress-notice {
+  padding: 10px 12px; border-radius: 8px;
+  background: rgba(168,204,80,0.06);
+  border: 1px solid rgba(168,204,80,0.2);
+  color: #a8cc50; font-size: 11px; line-height: 1.5;
+  margin-bottom: 12px;
+}
+
+/* ══════════════════════════════════════
+   WALLET (parrainage)
+   ══════════════════════════════════════ */
+.inv-wallet {
+  background: rgba(22,41,23,0.92);
+  border: 1px solid rgba(42,75,44,0.85);
+  border-radius: 10px; padding: 14px;
+}
+.inv-wallet__header {
+  display: flex; justify-content: space-between;
+  align-items: flex-start; gap: 8px; margin-bottom: 12px;
+}
+.inv-wallet__title { margin: 0; font-size: 13px; font-weight: 700; color: #e0ebe1; }
+.inv-wallet__lead { margin: 3px 0 0; font-size: 10px; color: #6b8a6d; line-height: 1.4; }
+.inv-wallet__pill {
+  padding: 3px 8px; border-radius: 20px;
+  background: rgba(168,204,80,0.08);
+  border: 1px solid rgba(168,204,80,0.25);
+  color: #a8cc50; font-size: 9px; font-weight: 700;
+  white-space: nowrap;
+}
+.inv-wallet__loading { color: #6b8a6d; font-size: 11px; }
+.inv-wallet__hero {
+  padding: 14px; border-radius: 8px;
+  background: #0b150c; border: 1px solid rgba(42,75,44,0.8);
+  text-align: center; margin-bottom: 10px;
+}
+.inv-wallet__hero-label { display: block; font-size: 9px; color: #6b8a6d; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.05em; }
+.inv-wallet__hero-amount { display: block; font-size: 24px; font-weight: 700; color: #a8cc50; }
+.inv-wallet__hero-currency { font-size: 13px; color: #8da68e; }
+.inv-wallet__hero-meta { display: block; font-size: 9px; color: #6b8a6d; margin-top: 4px; }
+.inv-wallet__phases { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 10px; }
+.inv-wallet__phase {
+  padding: 8px; border-radius: 8px;
+  background: #0b150c; border: 1px solid rgba(42,75,44,0.8);
+}
+.inv-wallet__phase-label { display: block; font-size: 9px; color: #6b8a6d; margin-bottom: 3px; }
+.inv-wallet__phase-value { display: block; font-size: 13px; font-weight: 700; color: #d7e5d8; }
+.inv-wallet__phase-hint { display: block; font-size: 8px; color: #6b8a6d; margin-top: 2px; }
+.inv-wallet__alert { font-size: 10px; padding: 8px 10px; border-radius: 8px; margin-bottom: 8px; line-height: 1.4; }
+.inv-wallet__alert--error { background: rgba(248,113,113,0.08); border: 1px solid rgba(248,113,113,0.2); color: #f87171; }
+.inv-wallet__alert--warn { background: rgba(251,191,36,0.08); border: 1px solid rgba(251,191,36,0.2); color: #fbbf24; }
+.inv-wallet__alert--verify { background: rgba(168,204,80,0.06); border: 1px solid rgba(168,204,80,0.18); color: #a8cc50; }
+.inv-wallet__actions { margin-top: 12px; }
+.inv-wallet__btn {
+  width: 100%; padding: 10px;
+  border-radius: 8px; border: none;
+  background: linear-gradient(90deg, #7ab020, #a8cc50);
+  color: #0b150c; font-size: 12px; font-weight: 700;
+  font-family: inherit; cursor: pointer; transition: filter 0.15s;
+}
+.inv-wallet__btn:hover { filter: brightness(1.08); }
+.inv-wallet__btn:disabled { opacity: 0.4; cursor: not-allowed; filter: none; }
+.inv-wallet__actions-note { font-size: 9px; color: #6b8a6d; margin: 6px 0 0; text-align: center; }
+.inv-wallet__code {
+  margin-top: 12px; padding: 10px;
+  border-radius: 8px; background: #0b150c;
+  border: 1px solid rgba(42,75,44,0.8);
+  text-align: center;
+}
+.inv-wallet__code-label { display: block; font-size: 9px; color: #6b8a6d; margin-bottom: 4px; text-transform: uppercase; }
+.inv-wallet__code-value {
+  display: block; font-size: 15px; font-weight: 700;
+  color: #d4a843; letter-spacing: 0.1em;
+  font-family: 'Courier New', monospace;
+}
+.inv-wallet__code-hint { display: block; font-size: 9px; color: #6b8a6d; margin-top: 4px; }
+
+/* ══════════════════════════════════════
+   FOOTER
+   ══════════════════════════════════════ */
+.inv-footer {
+  margin-top: 2rem; padding-top: 1rem;
+  border-top: 1px solid rgba(42,75,44,0.4);
+  text-align: center;
+}
+.inv-footer__btn {
+  background: none; border: 1px solid rgba(42,75,44,0.8);
+  border-radius: 8px; padding: 7px 18px;
+  color: #8da68e; font-size: 11px; font-weight: 600;
+  font-family: inherit; cursor: pointer; transition: all 0.15s;
+}
+.inv-footer__btn:hover { border-color: rgba(248,113,113,0.35); color: #f87171; }
+
+/* ══════════════════════════════════════
+   RESPONSIVE
+   ══════════════════════════════════════ */
+@media (max-width: 480px) {
+  .inv-kpi-strip { grid-template-columns: repeat(2, 1fr); }
+  .inv-parcel-card__map { width: 80px; min-width: 80px; }
+  .inv-tab { font-size: 10px; padding: 7px 4px; }
+  .inv-header__name { font-size: 13px; }
+  .inv-wallet__phases { grid-template-columns: 1fr; }
+}
+
+@media (min-width: 640px) {
+  .inv-dash { max-width: 600px; }
+}

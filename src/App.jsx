@@ -1,19 +1,44 @@
-import { useEffect } from 'react'
+import { Suspense, lazy, useEffect } from 'react'
 import { Routes, Route, Navigate, useParams, useLocation } from 'react-router-dom'
+import AppErrorBoundary from './components/AppErrorBoundary.jsx'
+import RequireCustomerAuth from './components/RequireCustomerAuth.jsx'
+import RequireStaff from './components/RequireStaff.jsx'
 import './App.css'
-import LoginPage          from './pages/LoginPage.jsx'
-import RegisterPage       from './pages/RegisterPage.jsx'
-import ForgotPasswordPage from './pages/ForgotPasswordPage.jsx'
-import ResetPasswordPage  from './pages/ResetPasswordPage.jsx'
-import BrowsePage         from './pages/BrowsePage.jsx'
-import DashboardPage      from './pages/DashboardPage.jsx'
-import InstallmentsPage   from './pages/InstallmentsPage.jsx'
-import ProjectPage        from './pages/ProjectPage.jsx'
-import PlotPage           from './pages/PlotPage.jsx'
-import PurchaseMandatPage from './pages/PurchaseMandatPage.jsx'
-import VisitSuccessPage   from './pages/VisitSuccessPage.jsx'
-import AdminDashboard     from './pages/AdminDashboard.jsx'
-import TunisMapLandingPage from './pages/TunisMapLandingPage.jsx'
+
+const LoginPage = lazy(() => import('./pages/LoginPage.jsx'))
+const RegisterPage = lazy(() => import('./pages/RegisterPage.jsx'))
+const ForgotPasswordPage = lazy(() => import('./pages/ForgotPasswordPage.jsx'))
+const ResetPasswordPage = lazy(() => import('./pages/ResetPasswordPage.jsx'))
+const BrowsePage = lazy(() => import('./pages/BrowsePage.jsx'))
+const DashboardPage = lazy(() => import('./pages/DashboardPage.jsx'))
+const InstallmentsPage = lazy(() => import('./pages/InstallmentsPage.jsx'))
+const ProjectPage = lazy(() => import('./pages/ProjectPage.jsx'))
+const PlotPage = lazy(() => import('./pages/PlotPage.jsx'))
+const PurchaseMandatPage = lazy(() => import('./pages/PurchaseMandatPage.jsx'))
+const VisitSuccessPage = lazy(() => import('./pages/VisitSuccessPage.jsx'))
+
+const AdminLayout = lazy(() => import('./admin/AdminLayout.jsx'))
+const ProjectsPage = lazy(() => import('./admin/pages/ProjectsPage.jsx'))
+const ProjectDetailPage = lazy(() => import('./admin/pages/ProjectDetailPage.jsx'))
+const SellPage = lazy(() => import('./admin/pages/SellPage.jsx'))
+const CashSalesPage = lazy(() => import('./admin/pages/CashSalesPage.jsx'))
+const ClientsPage = lazy(() => import('./admin/pages/ClientsPage.jsx'))
+const ClientProfilePage = lazy(() => import('./admin/pages/ClientProfilePage.jsx'))
+const AuditLogPage = lazy(() => import('./admin/pages/AuditLogPage.jsx'))
+const UserManagementPage = lazy(() => import('./admin/pages/UserManagementPage.jsx'))
+const FinanceDashboardPage = lazy(() => import('./admin/pages/FinanceDashboardPage.jsx'))
+const ReferralCommissionSettingsPage = lazy(() => import('./admin/pages/ReferralCommissionSettingsPage.jsx'))
+const NotaryDashboardPage = lazy(() => import('./admin/pages/NotaryDashboardPage.jsx'))
+const RecouvrementPage = lazy(() => import('./admin/pages/RecouvrementPage.jsx'))
+const CoordinationPage = lazy(() => import('./admin/pages/CoordinationPage.jsx'))
+const ServiceJuridiquePage = lazy(() => import('./admin/pages/ServiceJuridiquePage.jsx'))
+const AdminProfilePage = lazy(() => import('./admin/pages/AdminProfilePage.jsx'))
+const CallCenterPage = lazy(() => import('./admin/pages/CallCenterPage.jsx'))
+const CallCenterCalendarPage = lazy(() => import('./admin/pages/CallCenterCalendarPage.jsx'))
+const CommercialCalendarPage = lazy(() => import('./admin/pages/CommercialCalendarPage.jsx'))
+const AccessGrantsPage = lazy(() => import('./admin/pages/AccessGrantsPage.jsx'))
+const CommissionLedgerPage = lazy(() => import('./admin/pages/CommissionLedgerPage.jsx'))
+const ClientLinkRepairPage = lazy(() => import('./admin/pages/ClientLinkRepairPage.jsx'))
 
 function LegacyMandatToVisiteRedirect() {
   const { id } = useParams()
@@ -32,27 +57,60 @@ function ScrollToTopOnRouteChange() {
 
 export default function App() {
   return (
-    <>
+    <AppErrorBoundary>
       <ScrollToTopOnRouteChange />
+      <Suspense fallback={<div className="app-loader"><div className="app-loader-spinner" /></div>}>
       <Routes>
+        {/* Public routes */}
         <Route path="/"                                element={<BrowsePage />} />
-        <Route path="/maps"                            element={<TunisMapLandingPage />} />
-        <Route path="/login"                           element={<LoginPage />} />
-        <Route path="/register"                        element={<RegisterPage />} />
-        <Route path="/forgot-password"                 element={<ForgotPasswordPage />} />
-        <Route path="/reset-password"                  element={<ResetPasswordPage />} />
         <Route path="/browse"                          element={<BrowsePage />} />
-        <Route path="/dashboard"                       element={<DashboardPage />} />
-        <Route path="/installments"                    element={<InstallmentsPage />} />
         <Route path="/project/:id"                     element={<ProjectPage />} />
-        <Route path="/project/:id/visite"               element={<PurchaseMandatPage />} />
-        <Route path="/project/:id/visite/success"       element={<VisitSuccessPage />} />
-        <Route path="/project/:id/mandat"               element={<LegacyMandatToVisiteRedirect />} />
         <Route path="/project/:projectId/plot/:plotId" element={<PlotPage />} />
-        <Route path="/owner"                           element={<Navigate to="/admin" replace />} />
-        <Route path="/admin"                           element={<AdminDashboard />} />
-        <Route path="*"                                element={<Navigate to="/browse" replace />} />
+        <Route path="/project/:id/mandat"              element={<LegacyMandatToVisiteRedirect />} />
+        <Route path="/owner"                           element={<Navigate to="/browse" replace />} />
+
+        {/* Auth pages (no guard, just UI) */}
+        <Route path="/login"            element={<LoginPage />} />
+        <Route path="/register"         element={<RegisterPage />} />
+        <Route path="/forgot-password"  element={<ForgotPasswordPage />} />
+        <Route path="/reset-password"   element={<ResetPasswordPage />} />
+
+        {/* Customer portfolio (auth required when Supabase is configured) */}
+        <Route path="/dashboard"    element={<RequireCustomerAuth><DashboardPage /></RequireCustomerAuth>} />
+        <Route path="/installments" element={<RequireCustomerAuth><InstallmentsPage /></RequireCustomerAuth>} />
+        <Route path="/project/:id/visite"         element={<PurchaseMandatPage />} />
+        <Route path="/project/:id/visite/success" element={<VisitSuccessPage />} />
+
+        {/* Admin (no auth required now) */}
+        <Route path="/admin" element={<RequireStaff><AdminLayout /></RequireStaff>}>
+          <Route index element={<AdminProfilePage />} />
+          <Route path="dashboard"            element={<AdminProfilePage />} />
+          <Route path="profile"              element={<AdminProfilePage />} />
+          <Route path="projects"             element={<ProjectsPage />} />
+          <Route path="projects/:projectId"  element={<ProjectDetailPage />} />
+          <Route path="clients"              element={<ClientsPage />} />
+          <Route path="clients/:clientId"    element={<ClientProfilePage />} />
+          <Route path="finance"              element={<FinanceDashboardPage />} />
+          <Route path="referral-settings"    element={<ReferralCommissionSettingsPage />} />
+          <Route path="commission-ledger" element={<CommissionLedgerPage />} />
+          <Route path="legal"                element={<NotaryDashboardPage />} />
+          <Route path="coordination"         element={<CoordinationPage />} />
+          <Route path="juridique"            element={<ServiceJuridiquePage />} />
+          <Route path="recouvrement"         element={<RecouvrementPage />} />
+          <Route path="users"                element={<UserManagementPage />} />
+          <Route path="client-link-repair"   element={<ClientLinkRepairPage />} />
+          <Route path="audit-log"            element={<AuditLogPage />} />
+          <Route path="access-grants"       element={<AccessGrantsPage />} />
+          <Route path="sell"                 element={<SellPage />} />
+          <Route path="cash-sales"           element={<CashSalesPage />} />
+          <Route path="call-center"          element={<CallCenterPage />} />
+          <Route path="call-center-calendar" element={<CallCenterCalendarPage />} />
+          <Route path="commercial-calendar"  element={<CommercialCalendarPage />} />
+        </Route>
+
+        <Route path="*" element={<Navigate to="/browse" replace />} />
       </Routes>
-    </>
+      </Suspense>
+    </AppErrorBoundary>
   )
 }

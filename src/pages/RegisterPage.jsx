@@ -1,10 +1,9 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../lib/AuthContext.jsx'
 import {
   IconEye,
   IconEyeOff,
-  IconFacebook,
-  IconGoogle,
   IconKey,
   IconUser,
 } from '../LoginDecor.jsx'
@@ -17,67 +16,127 @@ function IconPhone() {
   )
 }
 
-function IconIdCard() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="2" y="5" width="20" height="14" rx="2" />
-      <circle cx="9" cy="12" r="2.5" />
-      <path d="M14 10h4M14 14h3" />
-    </svg>
-  )
-}
-
 export default function RegisterPage() {
   const navigate = useNavigate()
-  const [showPassword, setShowPassword]               = useState(false)
+  const { register } = useAuth()
+  const [showPassword, setShowPassword] = useState(false)
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
-  const [loading, setLoading]                         = useState(false)
-  const [error, setError]                             = useState('')
-  const [success, setSuccess]                         = useState('')
+  const [loading, setLoading] = useState(false)
+  const [success, setSuccess] = useState('')
+  const [error, setError] = useState('')
 
   const [form, setForm] = useState({
     firstname: '',
     lastname: '',
     email: '',
-    phone: '',
-    cin: '',
+    countryCode: '+216',
+    phoneLocal: '',
     password: '',
     confirm: '',
   })
 
   function handleChange(e) {
-    setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }))
-    setError('')
+    const { name, value } = e.target
+    if (name === 'countryCode') {
+      const digits = String(value || '').replace(/\D/g, '').slice(0, 4)
+      setForm((prev) => ({ ...prev, countryCode: digits ? `+${digits}` : '+' }))
+      return
+    }
+    if (name === 'phoneLocal') {
+      setForm((prev) => ({ ...prev, phoneLocal: String(value || '').replace(/\D/g, '').slice(0, 15) }))
+      return
+    }
+    setForm((prev) => ({ ...prev, [name]: value }))
   }
 
   async function handleSubmit(e) {
     e.preventDefault()
     setError('')
     setSuccess('')
+    const firstname = String(form.firstname || '').trim()
+    const lastname = String(form.lastname || '').trim()
+    const email = String(form.email || '').trim().toLowerCase()
+    const countryCode = String(form.countryCode || '').trim()
+    const phoneDigits = String(form.phoneLocal || '').replace(/\D/g, '')
 
+    if (!firstname || !lastname) {
+      setError('Prénom et nom sont obligatoires.')
+      return
+    }
+    if (!email) {
+      setError('Adresse e-mail invalide.')
+      return
+    }
+    if (form.password.length < 8) {
+      setError('Le mot de passe doit contenir au moins 8 caractères.')
+      return
+    }
+    if (!/^\+\d{1,4}$/.test(countryCode)) {
+      setError('Indicatif pays invalide.')
+      return
+    }
+    if (phoneDigits && phoneDigits.length < 6) {
+      setError('Le numéro local doit contenir au moins 6 chiffres.')
+      return
+    }
     if (form.password !== form.confirm) {
       setError('Les mots de passe ne correspondent pas.')
       return
     }
-    if (form.password.length < 6) {
-      setError('Le mot de passe doit contenir au moins 6 caractères.')
-      return
-    }
-    if (form.cin && !/^\d{8}$/.test(form.cin)) {
-      setError('Le numéro CIN doit contenir exactement 8 chiffres.')
-      return
-    }
-    if (form.phone && !/^\d{8}$/.test(form.phone)) {
-      setError('Le numéro de téléphone doit contenir exactement 8 chiffres.')
-      return
-    }
 
     setLoading(true)
-    setSuccess('Compte créé avec succès ! Connexion en cours…')
-    setTimeout(() => {
+    try {
+      const result = await register({
+        firstname,
+        lastname,
+        email,
+        countryCode,
+        phoneLocal: phoneDigits,
+        password: form.password,
+      })
+
+      if (!result.ok) {
+        const rawError = String(result.error || '')
+        // Typed reasons from AuthContext.register take priority over the raw
+        // message so we can show exactly what's wrong (and what to do next).
+        const reason = result.reason || ''
+        let message
+        switch (reason) {
+          case 'phone_conflict':
+            message = "Ce numéro est déjà lié à un autre compte. Contactez le support pour vérification."
+            break
+          case 'email_conflict':
+            message = "Cette adresse e-mail est déjà utilisée. Essayez « Mot de passe oublié » ou utilisez une autre adresse."
+            break
+          case 'weak_password':
+            message = "Mot de passe trop faible. Utilisez au moins 8 caractères avec une combinaison lettres / chiffres."
+            break
+          case 'invalid_email':
+            message = "Adresse e-mail invalide. Vérifiez la saisie."
+            break
+          case 'profile_unavailable':
+            message = "Compte créé. Connectez-vous : le rattachement automatique du profil client sera terminé à la connexion."
+            break
+          default:
+            message = /permissions db|creation du profil client refusee/i.test(rawError)
+              ? "Compte créé. Connectez-vous : le rattachement automatique du profil client sera terminé à la connexion."
+              : (rawError || "Inscription impossible.")
+        }
+        setError(message)
+        return
+      }
+
+      if (result.needsConfirmation) {
+        setSuccess('Vérifiez votre boîte e-mail pour confirmer le compte, puis connectez-vous.')
+        setTimeout(() => navigate('/login', { replace: true }), 2500)
+        return
+      }
+
+      setSuccess('Compte créé avec succès !')
+      setTimeout(() => navigate(result.redirectTo || '/dashboard', { replace: true }), 800)
+    } finally {
       setLoading(false)
-      navigate('/browse')
-    }, 550)
+    }
   }
 
   return (
@@ -88,24 +147,12 @@ export default function RegisterPage() {
 
         <h1 className="login-title">Créer un compte</h1>
 
-        <div className="social-row login-social">
-          <button type="button" className="social-button login-social-btn">
-            <IconGoogle />
-            Google
-          </button>
-          <button type="button" className="social-button login-social-btn">
-            <IconFacebook />
-            Facebook
-          </button>
-        </div>
-
         <div className="divider login-divider">
-          <span>Ou continuer avec</span>
+          <span>Remplissez vos informations</span>
         </div>
 
-        {error && <div className="auth-alert auth-alert--error">{error}</div>}
-
-        {success && <div className="auth-alert auth-alert--ok">{success}</div>}
+        {error ? <div className="auth-alert auth-alert--error">{error}</div> : null}
+        {success ? <div className="auth-alert auth-alert--ok">{success}</div> : null}
 
         <form className="form login-form" onSubmit={handleSubmit}>
           <div className="reg-name-row">
@@ -166,34 +213,27 @@ export default function RegisterPage() {
           <div className="login-field">
             <label htmlFor="reg-phone">Numéro de téléphone</label>
             <div className="input-wrap login-input reg-phone-wrap">
-              <span className="reg-phone-prefix">+216</span>
+              <input
+                id="reg-country-code"
+                name="countryCode"
+                type="text"
+                placeholder="+216"
+                autoComplete="tel-country-code"
+                maxLength={5}
+                value={form.countryCode}
+                onChange={handleChange}
+                style={{ width: 70, border: 'none', background: 'transparent', color: 'inherit' }}
+              />
               <span className="reg-phone-sep" />
               <IconPhone />
               <input
                 id="reg-phone"
-                name="phone"
+                name="phoneLocal"
                 type="tel"
-                placeholder="XX XXX XXX"
+                placeholder="Numéro local"
                 autoComplete="tel"
-                maxLength={8}
-                value={form.phone}
-                onChange={handleChange}
-              />
-            </div>
-          </div>
-
-          <div className="login-field">
-            <label htmlFor="reg-cin">Numéro de carte d&apos;identité (CIN)</label>
-            <div className="input-wrap login-input">
-              <IconIdCard />
-              <input
-                id="reg-cin"
-                name="cin"
-                type="text"
-                placeholder="XXXXXXXX"
-                autoComplete="off"
-                maxLength={8}
-                value={form.cin}
+                maxLength={15}
+                value={form.phoneLocal}
                 onChange={handleChange}
               />
             </div>
@@ -249,11 +289,7 @@ export default function RegisterPage() {
             </div>
           </div>
 
-          <button
-            type="submit"
-            className="submit-button login-submit"
-            disabled={loading}
-          >
+          <button type="submit" className="submit-button login-submit" disabled={loading}>
             {loading ? 'Inscription en cours…' : 'S\'inscrire'}
           </button>
         </form>

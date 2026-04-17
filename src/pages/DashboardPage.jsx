@@ -1,286 +1,1024 @@
-import { useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCountUp } from '../hooks/useCountUp.js'
 import { useNavigate } from 'react-router-dom'
 import TopBar from '../TopBar.jsx'
-import { myPurchases } from '../portfolio.js'
-import { projects } from '../projects.js'
-import { loadInstallments } from '../installmentsStore.js'
+import { useAuth } from '../lib/AuthContext.jsx'
+
+
+import { supabase } from '../lib/supabase.js'
+import {
+  useAmbassadorReferralSummary,
+  useInstallmentsScoped,
+
+  useProjectsScoped,
+  useSalesBySellerClientId,
+  useSalesScoped,
+} from '../lib/useSupabase.js'
+import { addInstallmentReceiptRecord, requestAmbassadorPayout, updatePaymentStatus, uploadInstallmentReceipt } from '../lib/db.js'
+import { computeInstallmentSaleMetrics, formatMoneyTnd } from '../domain/installmentMetrics.js'
+import './dashboard-page.css'
+import './installments-page.css'
 
 const REVENUE_PER_TREE = 90
+const MAX_IMAGE_DIMENSION = 1600
+const IMAGE_QUALITY = 0.76
+const MAX_IMAGE_BYTES = 450 * 1024
+const MAX_NON_IMAGE_BYTES = 5 * 1024 * 1024
+const IMAGE_EXT_RE = /\.(png|jpe?g|webp|gif|bmp|svg)$/i
+
+function fmtDate(iso) {
+  return new Date(iso).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })
+}
+function ipStatusMeta(status) {
+  if (status === 'approved') return { label: 'Confirmé', hint: 'Paiement validé par l\'administration.', tone: 'approved' }
+  if (status === 'submitted') return { label: 'En révision', hint: 'Reçu envoyé, en attente de validation.', tone: 'submitted' }
+  if (status === 'rejected') return { label: 'Rejeté', hint: 'Action requise : corriger et renvoyer.', tone: 'rejected' }
+  return { label: 'En attente', hint: 'Vous pouvez envoyer le reçu.', tone: 'pending' }
+}
+function isPayable(status) { return status === 'pending' || status === 'rejected' || status === 'submitted' }
+function isImageUrl(url) { if (!url) return false; try { return IMAGE_EXT_RE.test(new URL(url).pathname) } catch { return IMAGE_EXT_RE.test(url) } }
+function lastReceipt(payment) {
+  if (Array.isArray(payment.receipts) && payment.receipts.length > 0) { const r = payment.receipts[0]; return { url: r.url, name: r.fileName || 'reçu', date: r.createdAt } }
+  if (payment.receiptUrl && String(payment.receiptUrl).startsWith('http')) return { url: payment.receiptUrl, name: payment.fileName || 'reçu', date: null }
+  return null
+}
+function loadImageFromFile(file) {
+  return new Promise((resolve, reject) => { const url = URL.createObjectURL(file); const img = new Image(); img.onload = () => { URL.revokeObjectURL(url); resolve(img) }; img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Impossible de lire l\'image')) }; img.src = url })
+}
+async function optimizeImageFile(file) {
+  const img = await loadImageFromFile(file)
+  const maxSide = Math.max(img.width, img.height)
+  const ratio = maxSide > MAX_IMAGE_DIMENSION ? MAX_IMAGE_DIMENSION / maxSide : 1
+  const w = Math.max(1, Math.round(img.width * ratio)), h = Math.max(1, Math.round(img.height * ratio))
+  const canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h
+  const ctx = canvas.getContext('2d', { alpha: true }); if (!ctx) throw new Error('Canvas non disponible')
+  ctx.drawImage(img, 0, 0, w, h)
+  const blob = await new Promise(r => canvas.toBlob(r, 'image/webp', IMAGE_QUALITY))
+  if (!blob) throw new Error('Échec compression image')
+  return new File([blob], `${file.name.replace(/\.[^.]+$/, '') || 'receipt'}.webp`, { type: 'image/webp' })
+}
+
+function saleInInvestorPortfolio(s) {
+  // Business rule: client portfolio exposes only finalized ownership.
+  // A sale is visible only when BOTH status and notary completion are set.
+  const statusOk = String(s?.status || '').toLowerCase() === 'completed'
+  const notaryOk = Boolean(s?.notaryCompletedAt)
+  return statusOk && notaryOk
+}
 
 export default function DashboardPage() {
   const navigate = useNavigate()
-  const [activeTab, setActiveTab] = useState('facilites')
-  const [network] = useState([
-    { id: 'm-k', name: 'Mohamed Khalil', note: 'Contrat signe (1.5 Ha)', reward: 50, state: 'complete', initials: 'MK' },
-    { id: 's-t', name: 'Sofiene Tounsi', note: 'Reservation en attente de signature', reward: 50, state: 'queued', initials: 'ST' },
-    { id: 'a-b', name: 'Ali Ben Ahmed', note: 'Inscrit, pas encore de reservation', reward: 0, state: 'pending', initials: 'AB' }
-  ])
+  const {
+    user,
+    adminUser,
+    clientProfile,
+    logout,
+    refreshAuth,
+    profileStatus,
+  } = useAuth()
 
-  // ── Owned plots stats ──
+  const displayName = adminUser?.name || user?.firstname || user?.name || 'Investisseur'
+
+  const clientId = clientProfile?.id || null
+
+  const { sales: mySalesRaw } = useSalesScoped({ clientId })
+  const { plans: myPlans, refresh: refreshPlans } = useInstallmentsScoped({ clientId })
+  const { sales: ambassadorSales } = useSalesBySellerClientId(clientId || '')
+  const showAmbassadorCard = Boolean(clientId)
+  const { summary: referralSummary, loading: referralLoading, refresh: refreshReferralSummary } =
+    useAmbassadorReferralSummary(showAmbassadorCard)
+  const [payoutBusy, setPayoutBusy] = useState(false)
+  const [payoutError, setPayoutError] = useState('')
+  const payoutIdempotencyRef = useRef(null)
+  // Hybrid rule: staff / Super Admin can ALSO buy. The buyer portfolio is
+  // visible whenever a clientProfile has resolved (clientId present); the
+  // per-sale filter below excludes sales where the current user is the seller
+  // or ambassador, so hybrid accounts never see their own sell-side work here.
+  const portfolioAllowed = Boolean(clientId)
+  const mySalesAll = useMemo(
+    () =>
+      // Dashboard portfolio is buyer-facing only.
+      // Admin/seller-style accounts should not expose owned parcel portfolio here.
+      (!portfolioAllowed ? [] : (mySalesRaw || []))
+        .filter((s) => s.status !== 'cancelled' && s.status !== 'rejected')
+        .filter((s) => {
+          if (!portfolioAllowed) return false
+          if (!clientId) return true
+          const isSellerBound =
+            String(s.ambassadorClientId || '') === String(clientId) ||
+            String(s.sellerClientId || '') === String(clientId)
+          return !isSellerBound
+        }),
+    [mySalesRaw, portfolioAllowed, clientId]
+  )
+  const mySales = useMemo(
+    () => mySalesAll.filter((s) => saleInInvestorPortfolio(s)),
+    [mySalesAll],
+  )
+  const mySalesInProgress = useMemo(
+    () => mySalesAll.filter((s) => !saleInInvestorPortfolio(s)),
+    [mySalesAll]
+  )
+  const scopedProjectIds = useMemo(
+    () => [...new Set((mySalesAll || []).map((s) => s.projectId).filter(Boolean))],
+    [mySalesAll]
+  )
+  const { projects: allProjects } = useProjectsScoped(scopedProjectIds)
+
+  const { myPurchases } = useMemo(() => {
+    const flat = []
+    for (const sale of mySales) {
+      const proj = allProjects.find((p) => p.id === sale.projectId)
+      const plotIds = Array.isArray(sale.plotIds) ? sale.plotIds : (sale.plotId ? [sale.plotId] : [])
+      for (const pid of plotIds) {
+        const plot = proj?.plots?.find((pl) => pl.id === Number(pid) || pl.id === pid)
+        const trees = plot?.trees || 0
+        const invested = plot?.totalPrice || 0
+        const annualRevenue = trees * REVENUE_PER_TREE
+        const row = {
+          saleId: sale.id,
+          projectId: sale.projectId,
+          plotId: pid,
+          city: proj?.city || '',
+          region: proj?.region || '',
+          projectTitle: proj?.title || sale.projectId,
+          trees,
+          invested,
+          annualRevenue,
+          mapUrl: plot?.mapUrl || '',
+          status: sale.status,
+          createdAt: sale.createdAt,
+        }
+        flat.push(row)
+      }
+    }
+    return { myPurchases: flat }
+  }, [mySales, allProjects])
+
+  const ambassadorReferralRows = useMemo(() => {
+    if (!clientId) return []
+    return (ambassadorSales || []).filter(
+      (s) => s.status !== 'cancelled' && s.status !== 'rejected' && saleInInvestorPortfolio(s),
+    )
+  }, [clientId, ambassadorSales])
+
+  const referralVerificationBlocked =
+    referralSummary?.identityVerificationBlocked === true
+
+  const referralSummaryIssueMessage = useMemo(() => {
+    if (!referralSummary) return ''
+    if (referralSummary.ambiguous) {
+      return 'Profil client ambigu détecté — le portefeuille affiché peut ne pas refléter l\'intégralité de vos commissions. Contactez le support.'
+    }
+    if (referralSummary.ok) return ''
+    const r = referralSummary.reason
+    // Transient / expected states — no banner.
+    if (r === 'pending' || r === 'not_enabled') return ''
+    if (referralSummary.errorMessage && r !== 'rpc_error') return referralSummary.errorMessage
+    if (r === 'ambiguous_client_profile') return 'Profil client ambigu — contactez le support.'
+    if (r === 'no_client_profile') return 'Profil client introuvable pour ce compte.'
+    if (r === 'not_authenticated') return 'Connexion requise pour afficher le portefeuille.'
+    if (r === 'supabase_not_configured') return 'Connexion base de données indisponible.'
+    if (r === 'rpc_error') return 'Impossible de charger le portefeuille pour le moment — réessayez dans un instant.'
+    return r ? `État portefeuille: ${r}` : ''
+  }, [referralSummary])
+
+  const handleAmbassadorPayout = useCallback(async () => {
+    const bal = referralSummary?.walletBalance ?? 0
+    const min = referralSummary?.minPayoutAmount ?? 0
+    if (referralVerificationBlocked || bal < min || bal <= 0) return
+    if (!payoutIdempotencyRef.current) payoutIdempotencyRef.current = crypto.randomUUID()
+    const idem = payoutIdempotencyRef.current
+    setPayoutBusy(true)
+    setPayoutError('')
+    try {
+      await requestAmbassadorPayout(bal, idem)
+      payoutIdempotencyRef.current = null
+      await refreshReferralSummary({ force: true })
+    } catch (e) {
+      setPayoutError(e?.message || 'Erreur')
+    } finally {
+      setPayoutBusy(false)
+    }
+  }, [referralSummary, refreshReferralSummary, referralVerificationBlocked])
+
+  const [activeTab, setActiveTab] = useState('portfolio')
+  const [focusedPlanId, setFocusedPlanId] = useState(null)
+  const [ipPayTarget, setIpPayTarget] = useState(null)
+  const [ipReceiptName, setIpReceiptName] = useState('')
+  const [ipReceiptFile, setIpReceiptFile] = useState(null)
+  const [ipReceiptPreview, setIpReceiptPreview] = useState('')
+  const [ipNote, setIpNote] = useState('')
+  const [ipSubmitting, setIpSubmitting] = useState(false)
+  const [ipError, setIpError] = useState('')
+  const [showProfile, setShowProfile] = useState(false)
+  const [profileForm, setProfileForm] = useState({})
+  const [profileSaving, setProfileSaving] = useState(false)
+  const [profileMsg, setProfileMsg] = useState('')
+
+  const profileFields = useMemo(() => {
+    const u = user || {}
+    const adm = adminUser || {}
+    const nameParts = (adm.name || '').split(/\s+/)
+    const admFirst = nameParts.length >= 2 ? nameParts.slice(0, -1).join(' ') : (adm.name || '')
+    const admLast = nameParts.length >= 2 ? nameParts[nameParts.length - 1] : ''
+    return [
+      { key: 'firstname', label: 'Prénom', value: admFirst || u.firstname || '' },
+      { key: 'lastname', label: 'Nom', value: admLast || u.lastname || '' },
+      { key: 'email', label: 'Email', value: adm.email || u.email || '', locked: true },
+      { key: 'phone', label: 'Téléphone', value: adm.phone || u.phone || '' },
+    ]
+  }, [user, adminUser])
+
+  const openProfile = useCallback(() => {
+    const init = {}
+    for (const f of profileFields) init[f.key] = f.value
+    setProfileForm(init)
+    setProfileMsg('')
+    setShowProfile(true)
+  }, [profileFields])
+
+  const handleProfileSave = useCallback(async () => {
+    setProfileSaving(true)
+    setProfileMsg('')
+    try {
+      const meta = {}
+      let changed = false
+      for (const f of profileFields) {
+        if (f.locked) continue
+        const original = f.value || ''
+        const current = (profileForm[f.key] || '').trim()
+        if (!original && current) {
+          meta[f.key] = current
+          changed = true
+        }
+      }
+      if (!changed) { setProfileMsg('Aucune modification.'); setProfileSaving(false); return }
+      if (meta.firstname || meta.lastname) {
+        const fn = meta.firstname || profileForm.firstname || ''
+        const ln = meta.lastname || profileForm.lastname || ''
+        meta.name = `${fn} ${ln}`.trim()
+      }
+      const { error } = await supabase.auth.updateUser({ data: meta })
+      if (error) throw error
+      refreshAuth()
+      setProfileMsg('Profil mis à jour.')
+      setShowProfile(false)
+    } catch (e) {
+      setProfileMsg(e?.message || 'Erreur.')
+    } finally {
+      setProfileSaving(false)
+    }
+  }, [profileFields, profileForm, refreshAuth])
+
+  /* ── Installment handlers (inline) ── */
+  const ipHandleReceiptChange = useCallback(async (file) => {
+    if (!file) return
+    setIpError('')
+    let finalFile = file
+    if (file.type?.startsWith('image/')) {
+      finalFile = await optimizeImageFile(file)
+      if (finalFile.size > MAX_IMAGE_BYTES) throw new Error('Image trop lourde')
+    } else if (file.size > MAX_NON_IMAGE_BYTES) throw new Error('Fichier trop volumineux (max 5 Mo)')
+    setIpReceiptFile(finalFile)
+    if (ipReceiptPreview?.startsWith('blob:')) URL.revokeObjectURL(ipReceiptPreview)
+    setIpReceiptName(finalFile.name)
+    setIpReceiptPreview(finalFile.type?.startsWith('image/') ? URL.createObjectURL(finalFile) : '')
+  }, [ipReceiptPreview])
+
+  const ipOpenPay = useCallback((plan, payment) => {
+    setIpPayTarget({ planId: plan.id, month: payment.month, amount: payment.amount, dueDate: payment.dueDate })
+    setIpReceiptName(''); setIpReceiptFile(null)
+    if (ipReceiptPreview?.startsWith('blob:')) URL.revokeObjectURL(ipReceiptPreview)
+    setIpReceiptPreview(''); setIpNote(''); setIpError('')
+  }, [ipReceiptPreview])
+
+  const ipClosePay = useCallback(() => {
+    setIpPayTarget(null); setIpReceiptName(''); setIpReceiptFile(null)
+    if (ipReceiptPreview?.startsWith('blob:')) URL.revokeObjectURL(ipReceiptPreview)
+    setIpReceiptPreview(''); setIpNote(''); setIpError('')
+  }, [ipReceiptPreview])
+
+  const ipSubmit = useCallback(async () => {
+    if (!ipPayTarget || !ipReceiptName || !ipReceiptFile || ipSubmitting) return
+    setIpSubmitting(true); setIpError('')
+    try {
+      const plan = myPlans.find(p => p.id === ipPayTarget.planId)
+      const payment = plan?.payments?.find(p => p.month === ipPayTarget.month)
+      if (!payment?.id) throw new Error('Paiement introuvable')
+      const url = await uploadInstallmentReceipt({ paymentId: payment.id, file: ipReceiptFile })
+      await addInstallmentReceiptRecord({ paymentId: payment.id, receiptUrl: url || '', fileName: ipReceiptName, note: ipNote || '' })
+      await updatePaymentStatus(payment.id, 'submitted', { receiptUrl: url || ipReceiptName })
+      await refreshPlans({ force: true })
+      ipClosePay()
+    } catch (err) { setIpError(err.message || 'Échec envoi') }
+    finally { setIpSubmitting(false) }
+  }, [ipPayTarget, ipReceiptName, ipReceiptFile, ipSubmitting, myPlans, ipNote, ipClosePay, refreshPlans])
+
+  const focusedPlan = focusedPlanId ? myPlans.find(p => p.id === focusedPlanId) : null
+  const ipStats = useMemo(() => {
+    const all = myPlans.flatMap(p => p.payments || [])
+    return { total: myPlans.length, submitted: all.filter(p => p.status === 'submitted').length, rejected: all.filter(p => p.status === 'rejected').length, approved: all.filter(p => p.status === 'approved').length }
+  }, [myPlans])
+
   const totalTrees    = myPurchases.reduce((s, p) => s + p.trees, 0)
   const totalInvested = myPurchases.reduce((s, p) => s + p.invested, 0)
   const totalRevenue  = myPurchases.reduce((s, p) => s + p.annualRevenue, 0)
-  const roi           = totalInvested > 0 ? ((totalRevenue / totalInvested) * 100).toFixed(1) : '0.0'
+  const roiTarget = useMemo(
+    () => (totalInvested > 0 ? (totalRevenue / totalInvested) * 100 : 0),
+    [totalInvested, totalRevenue]
+  )
 
-  const [plans] = useState(loadInstallments)
-  const allPayments = plans
-    .flatMap((plan) => plan.payments.map((p) => ({ ...p, planId: plan.id })))
-    .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate))
-  const nextPayment =
-    allPayments.find((p) => p.status === 'pending' || p.status === 'rejected' || p.status === 'submitted')
-    || allPayments.find((p) => p.status === 'approved')
-    || null
+  const KPI_COUNT_MS = 1300
+  const animTrees = useCountUp(totalTrees, { duration: KPI_COUNT_MS, delay: 0 })
+  const animInvested = useCountUp(totalInvested, { duration: KPI_COUNT_MS, delay: 85 })
+  const animRevenue = useCountUp(totalRevenue, { duration: KPI_COUNT_MS, delay: 170 })
+  const animRoi = useCountUp(roiTarget, { duration: KPI_COUNT_MS, delay: 255 })
 
-  const nextPaymentLabel = nextPayment
-    ? `${nextPayment.amount.toLocaleString()} DT - ${new Date(nextPayment.dueDate).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })}`
-    : 'Aucune echeance disponible'
-  const nextPaymentStatus = nextPayment
-    ? (nextPayment.status === 'approved'
-        ? 'Deja couverte'
-        : nextPayment.status === 'submitted'
-          ? 'En revision'
-          : nextPayment.status === 'rejected'
-            ? 'A renvoyer'
-            : 'A payer')
-    : 'Sans statut'
+  async function handleLogout() {
+    await logout()
+    navigate('/login', { replace: true })
+  }
 
   return (
     <main className="screen screen--app">
-      <section className="dashboard-page dash-page-skin">
+      <section className="inv-dash">
         <TopBar />
-        <div className="detail-nav" style={{ marginBottom: '0.85rem' }}>
-          <button type="button" className="back-btn" onClick={() => navigate('/browse')}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="15 18 9 12 15 6" />
-            </svg>
-            Retour a Explorer
-          </button>
-        </div>
-
-        {/* ── Greeting ── */}
-        <div className="dash-greeting dash-hero-card">
-          <div>
-            <h2 className="page-title">Bonjour, <strong>Lassaad</strong></h2>
-            <p className="page-subtitle">Voici l&apos;état de votre portefeuille d&apos;oliviers</p>
-          </div>
-          <button type="button" className="cta-primary cta-primary--gold" onClick={() => navigate('/browse')}>
-            + Ajouter des oliviers
-          </button>
-        </div>
-
-        {/* ── KPI strip ── */}
-        <div className="dash-kpi-strip">
-          <div className="dash-kpi">
-            <span className="dash-kpi-val dash-kpi-val--green">{totalTrees.toLocaleString()}</span>
-            <span className="dash-kpi-lbl">Oliviers</span>
-          </div>
-          <div className="dash-kpi-sep" />
-          <div className="dash-kpi">
-            <span className="dash-kpi-val">{totalInvested.toLocaleString()}</span>
-            <span className="dash-kpi-lbl">TND investis</span>
-          </div>
-          <div className="dash-kpi-sep" />
-          <div className="dash-kpi">
-            <span className="dash-kpi-val dash-kpi-val--green">{totalRevenue.toLocaleString()}</span>
-            <span className="dash-kpi-lbl">TND / an</span>
-          </div>
-          <div className="dash-kpi-sep" />
-          <div className="dash-kpi">
-            <span className="dash-kpi-val">{roi}%</span>
-            <span className="dash-kpi-lbl">ROI</span>
-          </div>
-        </div>
-
-        <section className="dash-invest-summary">
-          <div className="dis-head">
-            <h3>Synthese investissement</h3>
-            <span>Actif</span>
-          </div>
-          <div className="dis-grid">
-            <article>
-              <p>Patrimoine agricole</p>
-              <strong>{totalTrees.toLocaleString()} oliviers</strong>
-            </article>
-            <article>
-              <p>Revenus estimes</p>
-              <strong>{totalRevenue.toLocaleString()} DT/an</strong>
-            </article>
-          </div>
-          <div className="dis-next">
-            <div>
-              <p>Prochaine payment</p>
-              <strong>{nextPaymentLabel}</strong>
+        {/* ── Header Card ── */}
+        <div className="inv-header">
+          <div className="inv-header__top">
+            <div className="inv-header__avatar">
+              <img
+                src={`https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(displayName)}&backgroundColor=7ab020&textColor=0b150c&fontSize=40`}
+                alt={displayName}
+              />
             </div>
-            <div className="dis-next-actions">
-              <em className={`dis-next-badge dis-next-badge--${nextPayment?.status || 'none'}`}>{nextPaymentStatus}</em>
-              <button type="button" className="dis-next-link" onClick={() => navigate('/installments')}>
-                Voir echeancier
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <h2 className="inv-header__name">Bonjour, {displayName}</h2>
+              <p className="inv-header__subtitle">Votre portefeuille d&apos;oliviers</p>
+            </div>
+            <button type="button" className="inv-header__profile-btn" onClick={openProfile} aria-label="Mon profil">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            </button>
+          </div>
+          <div className="inv-header__actions">
+            <button type="button" className="inv-header__cta" onClick={() => navigate('/browse')}>
+              Prendre un rendez-vous
+            </button>
+          </div>
+        </div>
+
+        {/* ── Profile Edit Panel ── */}
+        {showProfile && (
+          <div className="inv-profile">
+            <div className="inv-profile__head">
+              <h3 className="inv-profile__title">Mon profil</h3>
+              <button type="button" className="inv-profile__close" onClick={() => setShowProfile(false)}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
               </button>
             </div>
-          </div>
-        </section>
-
-        <section className="dash-ambassador">
-          <div className="dash-wallet-card">
-            <div className="dw-head">
-              <span>Portefeuille Parrainage</span>
-              <em>Pret au retrait</em>
-            </div>
-            <div className="dw-main">
-              <h4>50 DT</h4>
-              <p>1 commission liberee</p>
-            </div>
-            <div className="dw-actions">
-              <button type="button">Retirer les gains</button>
-              <small>Commissions en attente: 100 DT</small>
-            </div>
-          </div>
-
-          <div className="dash-network">
-            <div className="dn-head">
-              <h4>Reseau investisseurs</h4>
-              <span>4 invites</span>
-            </div>
-            <div className="dn-list">
-              {network.map((person) => (
-                <article key={person.id} className={`dn-item${person.state === 'pending' ? ' dn-item--pending' : ''}${person.state === 'queued' ? ' dn-item--queued' : ''}`}>
-                  <div className="dn-id">{person.initials}</div>
-                  <div className="dn-body">
-                    <strong>{person.name}</strong>
-                    <p>{person.note}</p>
-                  </div>
-                  <div className="dn-reward">
-                    <strong>{person.reward > 0 ? `+${person.reward} DT` : '0 DT'}</strong>
-                    <span>{person.state === 'complete' ? 'Liberee' : person.state === 'queued' ? 'En attente signature' : 'En attente'}</span>
-                  </div>
-                </article>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        <div className="dash-tabs">
-          <button
-            type="button"
-            className={`dash-tab-btn${activeTab === 'facilites' ? ' dash-tab-btn--active' : ''}`}
-            onClick={() => setActiveTab('facilites')}
-          >
-            Mes facilités
-          </button>
-          <button
-            type="button"
-            className={`dash-tab-btn${activeTab === 'parcelles' ? ' dash-tab-btn--active' : ''}`}
-            onClick={() => setActiveTab('parcelles')}
-          >
-            Mes parcelles
-          </button>
-        </div>
-
-        {/* ── Mes facilités ── */}
-        {activeTab === 'facilites' && plans.length > 0 && (
-          <>
-            <h3 className="dash-section-title">Mes facilités en cours</h3>
-            <div style={{ margin: '-0.35rem 0 0.75rem' }}>
-              <button type="button" className="link-btn" onClick={() => navigate('/installments')}>
-                Gérer toutes les échéances →
-              </button>
-            </div>
-            <div className="dash-plan-cards">
-              {plans.map((plan) => {
-                const approvedCount = plan.payments.filter((p) => p.status === 'approved').length
-                const progress = (approvedCount / plan.totalMonths) * 100
+            <div className="inv-profile__fields">
+              {profileFields.map(f => {
+                const original = f.value || ''
+                const isLocked = f.locked || Boolean(original)
                 return (
-                  <button
-                    key={plan.id}
-                    type="button"
-                    className="dash-plan-card"
-                    onClick={() => navigate('/installments', { state: { planId: plan.id } })}
-                  >
-                    <div className="dash-plan-card__head">
-                      <strong>{plan.projectTitle}</strong>
-                      <span>{plan.city} · #{plan.id}</span>
+                  <div key={f.key} className="inv-profile__field">
+                    <label className="inv-profile__label">{f.label}</label>
+                    <div className="inv-profile__input-wrap">
+                      <input
+                        type={f.key === 'email' ? 'email' : 'text'}
+                        className={`inv-profile__input${isLocked ? ' inv-profile__input--locked' : ''}`}
+                        value={profileForm[f.key] ?? f.value}
+                        readOnly={isLocked}
+                        dir={f.key === 'phone' || f.key === 'email' ? 'ltr' : undefined}
+                        placeholder={isLocked ? '' : `Saisir ${f.label.toLowerCase()}…`}
+                        onChange={e => !isLocked && setProfileForm(p => ({ ...p, [f.key]: e.target.value }))}
+                      />
+                      {isLocked && <span className="inv-profile__lock">🔒</span>}
                     </div>
-                    <div className="dash-plan-card__progress">
-                      <div className="dpr-track">
-                        <div className="dpr-fill" style={{ width: `${Math.max(progress, 2)}%` }} />
-                      </div>
-                      <em>{approvedCount}/{plan.totalMonths}</em>
-                    </div>
-                    <div className="dash-plan-card__cta-strip">
-                      <span>Voir toutes les échéances (début → fin)</span>
-                      <span className="dash-plan-card__cta-arrow" aria-hidden="true">→</span>
-                    </div>
-                  </button>
+                  </div>
                 )
               })}
+            </div>
+            {profileMsg && <p className="inv-profile__msg">{profileMsg}</p>}
+            <button
+              type="button"
+              className="inv-profile__save"
+              onClick={handleProfileSave}
+              disabled={profileSaving}
+            >
+              {profileSaving ? 'Enregistrement…' : 'Enregistrer'}
+            </button>
+          </div>
+        )}
+
+        {/* ── Tabs ── */}
+        <div className="inv-tabs">
+          <button
+            type="button"
+            className={`inv-tab${activeTab === 'portfolio' ? ' inv-tab--active' : ''}`}
+            onClick={() => setActiveTab('portfolio')}
+          >
+            Mon Portefeuille
+          </button>
+          <button
+            type="button"
+            className={`inv-tab${activeTab === 'echeances' ? ' inv-tab--active' : ''}`}
+            onClick={() => setActiveTab('echeances')}
+          >
+            Mes Échéances
+          </button>
+          <button
+            type="button"
+            className={`inv-tab${activeTab === 'parrainage' ? ' inv-tab--active' : ''}`}
+            onClick={() => setActiveTab('parrainage')}
+          >
+            Parrainage
+          </button>
+        </div>
+
+        {/* ══════════════════════════════════════
+           TAB: Mon Portefeuille
+           ══════════════════════════════════════ */}
+        {activeTab === 'portfolio' && (
+          <>
+            <div className="inv-kpi-strip" aria-live="polite">
+              <div className="inv-kpi">
+                <span className="inv-kpi__value inv-kpi__value--green">
+                  {Math.round(animTrees).toLocaleString('fr-FR')}
+                </span>
+                <span className="inv-kpi__label">Oliviers</span>
+              </div>
+              <div className="inv-kpi-sep" />
+              <div className="inv-kpi">
+                <span className="inv-kpi__value">
+                  {Math.round(animInvested).toLocaleString('fr-FR')}
+                </span>
+                <span className="inv-kpi__label">TND investis</span>
+              </div>
+              <div className="inv-kpi-sep" />
+              <div className="inv-kpi">
+                <span className="inv-kpi__value inv-kpi__value--green">
+                  {Math.round(animRevenue).toLocaleString('fr-FR')}
+                </span>
+                <span className="inv-kpi__label">TND / an</span>
+              </div>
+              <div className="inv-kpi-sep" />
+              <div className="inv-kpi">
+                <span className="inv-kpi__value inv-kpi__value--blue">{animRoi.toFixed(1)}%</span>
+                <span className="inv-kpi__label">ROI</span>
+              </div>
+            </div>
+
+            <h3 className="inv-section-title">Mes parcelles</h3>
+
+            {myPurchases.length === 0 && mySalesInProgress.length > 0 && (
+              <div className="inv-progress-notice">
+                Vous avez {mySalesInProgress.length} achat{mySalesInProgress.length !== 1 ? 's' : ''} en cours de finalisation.
+                Les parcelles s&apos;affichent ici uniquement après <strong>finalisation notaire</strong>.
+              </div>
+            )}
+
+            {myPurchases.length === 0 && mySalesInProgress.length === 0 && (
+              <div className="inv-empty">
+                <strong>Aucune parcelle</strong>
+                <p>Vous ne possédez pas encore de parcelles.</p>
+                <button type="button" className="inv-empty__btn" onClick={() => navigate('/browse')}>
+                  Explorer les projets
+                </button>
+              </div>
+            )}
+
+            {myPurchases.length > 0 && (
+              <div className="inv-parcels">
+                {myPurchases.map((parcel) => {
+                  const proj = allProjects.find((p) => p.id === parcel.projectId)
+                  const plotForMap = proj?.plots?.find(
+                    (pl) => pl.id === parcel.plotId || pl.id === Number(parcel.plotId),
+                  )
+                  const mapSrc = plotForMap?.mapUrl || parcel.mapUrl
+                  const parcelTitle = `Parcelle #${parcel.plotId}`
+                  return (
+                    <div
+                      key={`${parcel.saleId}-${parcel.plotId}`}
+                      className="inv-parcel-card"
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => navigate(`/project/${parcel.projectId}/plot/${parcel.plotId}`)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          navigate(`/project/${parcel.projectId}/plot/${parcel.plotId}`)
+                        }
+                      }}
+                    >
+                      {mapSrc && (
+                        <div className="inv-parcel-card__map">
+                          <iframe title={parcelTitle} src={mapSrc} loading="lazy" tabIndex={-1} />
+                        </div>
+                      )}
+                      <div className="inv-parcel-card__body">
+                        <div className="inv-parcel-card__top">
+                          <div>
+                            <div className="inv-parcel-card__id">{parcelTitle}</div>
+                            <div className="inv-parcel-card__project">{parcel.projectTitle}</div>
+                          </div>
+                          <span className="inv-parcel-card__loc">{parcel.city}</span>
+                        </div>
+                        <div className="inv-parcel-card__stats">
+                          <div className="inv-parcel-card__stat-row">
+                            <span className="inv-parcel-card__stat-label">Arbres</span>
+                            <strong className="inv-parcel-card__stat-value">{parcel.trees}</strong>
+                          </div>
+                          <div className="inv-parcel-card__stat-row">
+                            <span className="inv-parcel-card__stat-label">Investi</span>
+                            <strong className="inv-parcel-card__stat-value">{parcel.invested.toLocaleString()} DT</strong>
+                          </div>
+                          <div className="inv-parcel-card__stat-row">
+                            <span className="inv-parcel-card__stat-label">Revenu/an</span>
+                            <strong className="inv-parcel-card__stat-value inv-green">{parcel.annualRevenue.toLocaleString()} DT</strong>
+                          </div>
+                        </div>
+                        <div className="inv-parcel-card__links" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            className="inv-link-btn"
+                            onClick={() => navigate(`/project/${parcel.projectId}/plot/${parcel.plotId}`)}
+                          >
+                            Détail #{parcel.plotId} →
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ══════════════════════════════════════
+           TAB: Mes Échéances (integrated)
+           ══════════════════════════════════════ */}
+        {activeTab === 'echeances' && (
+          <div className="ip ip--embedded">
+            {/* KPI strip */}
+            <div className="ip__hero">
+              <h1 className="ip__hero-title">Mes échéances</h1>
+              <p className="ip__hero-sub">Suivez vos facilités en temps réel</p>
+              <div className="ip__hero-kpi">
+                <div className="ip__kpi"><span className="ip__kpi-value">{ipStats.total}</span><span className="ip__kpi-label">Plans</span></div>
+                <div className="ip__kpi"><span className="ip__kpi-value">{ipStats.submitted}</span><span className="ip__kpi-label">En révision</span></div>
+                <div className="ip__kpi"><span className="ip__kpi-value">{ipStats.rejected}</span><span className="ip__kpi-label">À corriger</span></div>
+                <div className="ip__kpi"><span className="ip__kpi-value">{ipStats.approved}</span><span className="ip__kpi-label">Confirmés</span></div>
+              </div>
+            </div>
+
+            {/* ── Detail view: single plan ── */}
+            {focusedPlan ? (
+              <>
+                <button type="button" className="ip__back" onClick={() => setFocusedPlanId(null)}>← Tous les plans</button>
+                <div className="ip__detail-head">
+                  <div className="ip__detail-title">{focusedPlan.projectTitle}</div>
+                  <div className="ip__detail-ref">{focusedPlan.projectCity} · #{focusedPlan.id}</div>
+                  {(() => {
+                    const sale = (mySalesRaw || []).find((s) => String(s.id) === String(focusedPlan.saleId)) || {}
+                    const m = computeInstallmentSaleMetrics(sale, focusedPlan)
+                    return (
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8, marginTop: 12 }}>
+                        <div style={{ padding: '10px 12px', borderRadius: 12, background: '#ecfdf5', border: '1px solid #a7f3d0' }}>
+                          <div style={{ fontSize: 9, fontWeight: 800, color: '#065f46', textTransform: 'uppercase', letterSpacing: '.03em' }}>Validé</div>
+                          <div style={{ fontSize: 15, fontWeight: 800, color: '#065f46' }}>{formatMoneyTnd(m.cashValidatedStrict)}</div>
+                          <div style={{ fontSize: 10, color: '#047857' }}>Araboun + mensualités confirmées</div>
+                        </div>
+                        <div style={{ padding: '10px 12px', borderRadius: 12, background: '#eff6ff', border: '1px solid #bfdbfe' }}>
+                          <div style={{ fontSize: 9, fontWeight: 800, color: '#1e40af', textTransform: 'uppercase', letterSpacing: '.03em' }}>En révision</div>
+                          <div style={{ fontSize: 15, fontWeight: 800, color: '#1e40af' }}>{formatMoneyTnd(m.submittedAmount)}</div>
+                          <div style={{ fontSize: 10, color: '#1d4ed8' }}>Reçus envoyés, en attente</div>
+                        </div>
+                        <div style={{ padding: '10px 12px', borderRadius: 12, background: '#fef2f2', border: '1px solid #fecaca' }}>
+                          <div style={{ fontSize: 9, fontWeight: 800, color: '#991b1b', textTransform: 'uppercase', letterSpacing: '.03em' }}>À corriger</div>
+                          <div style={{ fontSize: 15, fontWeight: 800, color: '#991b1b' }}>{formatMoneyTnd(m.rejectedAmount)}</div>
+                          <div style={{ fontSize: 10, color: '#b91c1c' }}>Reçus refusés à renvoyer</div>
+                        </div>
+                        <div style={{ padding: '10px 12px', borderRadius: 12, background: '#fff', border: '1px solid #e2e8f0' }}>
+                          <div style={{ fontSize: 9, fontWeight: 800, color: '#475569', textTransform: 'uppercase', letterSpacing: '.03em' }}>Reste à valider</div>
+                          <div style={{ fontSize: 15, fontWeight: 800, color: '#0f172a' }}>{formatMoneyTnd(m.remainingStrict)}</div>
+                          <div style={{ fontSize: 10, color: '#64748b' }}>Sur un total de {formatMoneyTnd(m.saleAgreed)}</div>
+                        </div>
+                      </div>
+                    )
+                  })()}
+                </div>
+                <div className="ip__detail-hint">
+                  <strong>Mode d&apos;emploi :</strong> En attente / Rejeté = envoyez ou corrigez un reçu. En révision = attente validation. Confirmé = rien à faire.
+                </div>
+                <div className="ip__payments">
+                  {focusedPlan.payments.map(p => {
+                    const meta = ipStatusMeta(p.status)
+                    const receipt = lastReceipt(p)
+                    const receiptIsImage = receipt && isImageUrl(receipt.url)
+                    return (
+                      <div key={`${focusedPlan.id}:${p.month}`} className="ip__pay-card">
+                        <div className="ip__pay-top">
+                          <span className="ip__pay-month">Facilité {p.month}</span>
+                          <span className="ip__pay-due">{fmtDate(p.dueDate)}</span>
+                        </div>
+                        <div className="ip__pay-mid">
+                          <span className="ip__pay-amount">{p.amount.toLocaleString()} <small>DT</small></span>
+                          <span className={`ip__status ip__status--${meta.tone}`}>{meta.label}</span>
+                        </div>
+                        <div className="ip__pay-hint">{meta.hint}</div>
+                        {p.status === 'rejected' && p.rejectedNote && <div className="ip__pay-reject">⚠ {p.rejectedNote}</div>}
+                        {receipt && (
+                          <div className="ip__receipt">
+                            {receiptIsImage
+                              ? <img src={receipt.url} alt="Reçu" className="ip__receipt-thumb" />
+                              : <div className="ip__receipt-file-icon">📄</div>}
+                            <div className="ip__receipt-info">
+                              <div className="ip__receipt-name">{receipt.name}</div>
+                              {receipt.date && <div className="ip__receipt-date">{fmtDate(receipt.date)}</div>}
+                            </div>
+                            <a href={receipt.url} target="_blank" rel="noreferrer" className="ip__receipt-link">Voir</a>
+                          </div>
+                        )}
+                        {isPayable(p.status) && (
+                          <button type="button" className={`ip__pay-btn${p.status === 'submitted' ? ' ip__pay-btn--correct' : ''}`} onClick={() => ipOpenPay(focusedPlan, p)}>
+                            {p.status === 'submitted' ? '📝 Corriger le reçu' : '📤 Envoyer un reçu'}
+                          </button>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </>
+            ) : (
+              /* ── List view: all plans ── */
+              <>
+                {myPlans.length === 0 ? (
+                  <div className="ip__empty">
+                    <strong>Aucun plan d&apos;échéances</strong>
+                    Vos plans apparaîtront ici après finalisation de votre achat.
+                  </div>
+                ) : (
+                  <div className="ip__plan-list">
+                    {myPlans.map(plan => {
+                      const sale = (mySalesRaw || []).find((s) => String(s.id) === String(plan.saleId)) || {}
+                      const metrics = computeInstallmentSaleMetrics(sale, plan)
+                      const progress = metrics.approvedPct
+                      const nextAction = plan.payments.find(p => p.status === 'rejected' || p.status === 'pending' || p.status === 'submitted')
+                      return (
+                        <button key={plan.id} type="button" className="ip__plan-card" onClick={() => setFocusedPlanId(plan.id)}>
+                          <div className="ip__plan-head">
+                            <span className="ip__plan-title">{plan.projectTitle}</span>
+                            <span className="ip__plan-ref">{plan.projectCity}</span>
+                          </div>
+                          <div className="ip__plan-pills">
+                            {metrics.submittedCount > 0 && <span className="ip__pill ip__pill--submitted">{metrics.submittedCount} en révision</span>}
+                            {metrics.rejectedCount > 0 && <span className="ip__pill ip__pill--rejected">{metrics.rejectedCount} à corriger</span>}
+                            {metrics.submittedCount === 0 && metrics.rejectedCount === 0 && <span className="ip__pill ip__pill--ok">Rythme normal</span>}
+                          </div>
+                          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', fontSize: 10, color: '#475569', marginTop: 4 }}>
+                            <span>Validé : <strong style={{ color: '#065f46' }}>{formatMoneyTnd(metrics.cashValidatedStrict)}</strong></span>
+                            <span>·</span>
+                            <span>Reste : <strong style={{ color: '#0f172a' }}>{formatMoneyTnd(metrics.remainingStrict)}</strong></span>
+                          </div>
+                          <div className="ip__progress">
+                            <div className="ip__progress-track">
+                              <div className="ip__progress-fill" style={{ width: `${Math.max(progress, 2)}%` }} />
+                            </div>
+                            <span className="ip__progress-label">{metrics.approvedCount}/{metrics.totalMonths}</span>
+                          </div>
+                          <div className="ip__plan-next">
+                            {nextAction ? `Prochaine action : F.${nextAction.month} — ${ipStatusMeta(nextAction.status).label}` : 'Toutes les facilités sont confirmées.'}
+                          </div>
+                          <div className="ip__plan-cta"><span>Ouvrir le détail</span><span aria-hidden>→</span></div>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {/* ── Receipt Upload Modal ── */}
+        {ipPayTarget && (
+          <div className="ip__overlay" onClick={ipClosePay}>
+            <div className="ip__modal" onClick={e => e.stopPropagation()}>
+              <div className="ip__modal-header">
+                <div>
+                  <h3 className="ip__modal-title">Soumettre votre reçu</h3>
+                  <p className="ip__modal-sub">Validation rapide de votre mensualité</p>
+                </div>
+                <button type="button" className="ip__modal-close" onClick={ipClosePay}>✕</button>
+              </div>
+              <div className="ip__modal-body">
+                <div className="ip__modal-info ip__modal-info--receipt">
+                  <span className="ip__modal-info-kicker">Mensualité sélectionnée</span>
+                  <strong className="ip__modal-info-main">
+                    Facilité {ipPayTarget.month} · {ipPayTarget.amount.toLocaleString()} DT
+                  </strong>
+                  <span className="ip__modal-info-meta">Échéance : {fmtDate(ipPayTarget.dueDate)}</span>
+                </div>
+                <div className="ip__upload-label">Choisir le justificatif</div>
+                <div className="ip__upload-btns">
+                  <label className="ip__upload-btn">
+                    <input type="file" accept="image/*,.pdf" onChange={async e => { try { if (e.target.files?.[0]) await ipHandleReceiptChange(e.target.files[0]) } catch (err) { setIpError(err.message || 'Erreur') } }} />
+                    Fichier (image/PDF)
+                  </label>
+                  <label className="ip__upload-btn">
+                    <input type="file" accept="image/*" capture="environment" onChange={async e => { try { if (e.target.files?.[0]) await ipHandleReceiptChange(e.target.files[0]) } catch (err) { setIpError(err.message || 'Erreur') } }} />
+                    Prendre une photo
+                  </label>
+                </div>
+                {ipReceiptName ? (
+                  <div className="ip__upload-status ip__upload-status--ok">
+                    <span className="ip__upload-status-title">Fichier prêt</span>
+                    <span className="ip__upload-status-name">{ipReceiptName}</span>
+                  </div>
+                ) : (
+                  <div className="ip__upload-status ip__upload-status--empty">Aucun fichier sélectionné</div>
+                )}
+                {ipReceiptPreview && <div className="ip__upload-preview"><img src={ipReceiptPreview} alt="Aperçu" /></div>}
+                {ipReceiptFile && <div className="ip__upload-size">Taille optimisée : {(ipReceiptFile.size / 1024).toFixed(0)} Ko</div>}
+                {ipError && <div className="ip__upload-error">⚠ {ipError}</div>}
+                <div className="ip__upload-label">Note (optionnelle)</div>
+                <textarea className="ip__upload-note" placeholder="Ajouter un commentaire pour l'équipe finance…" value={ipNote} onChange={e => setIpNote(e.target.value)} />
+              </div>
+              <div className="ip__modal-footer">
+                <button type="button" className="ip__modal-cancel" onClick={ipClosePay}>Annuler</button>
+                <button type="button" className="ip__modal-submit" disabled={!ipReceiptName || ipSubmitting} onClick={ipSubmit}>
+                  {ipSubmitting ? 'Envoi…' : 'Envoyer le reçu'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ══════════════════════════════════════
+           TAB: Parrainage
+           ══════════════════════════════════════ */}
+        {activeTab === 'parrainage' && (
+          <>
+            <div className="inv-wallet">
+              <header className="inv-wallet__header">
+                <div>
+                  <h3 className="inv-wallet__title">Portefeuille Parrainage</h3>
+                  <p className="inv-wallet__lead">
+                    Commissions créditées au tampon légal, retirables selon les règles finance.
+                  </p>
+                </div>
+                <span className="inv-wallet__pill">
+                  {ambassadorReferralRows.length} filleul{ambassadorReferralRows.length !== 1 ? 's' : ''}
+                </span>
+              </header>
+
+              {!showAmbassadorCard ? (() => {
+                const reason = profileStatus?.reason || 'pending'
+                const supportRef = (user?.id || '').slice(0, 8)
+                const copy = (() => {
+                  if (reason === 'phone_conflict') return {
+                    tone: 'error',
+                    title: 'Numéro de téléphone déjà utilisé',
+                    body: "Ce numéro est déjà lié à un autre compte. Contactez le support pour vérification — votre profil ne peut pas être créé automatiquement.",
+                    showRetry: false,
+                  }
+                  if (reason === 'ambiguous_client_profile') return {
+                    tone: 'error',
+                    title: 'Profil client ambigu',
+                    body: "Plusieurs profils sont liés à ce compte. Un opérateur support doit consolider ces entrées.",
+                    showRetry: false,
+                  }
+                  if (reason === 'rpc_error') return {
+                    tone: 'error',
+                    title: 'Erreur technique — profil indisponible',
+                    body: profileStatus?.message || "Une erreur serveur empêche le chargement de votre profil. Réessayez ou contactez le support.",
+                    showRetry: true,
+                  }
+                  if (reason === 'admin_no_buyer_profile') return {
+                    // Hybrid-friendly copy: the staff session has no buyer row
+                    // linked yet, but it will appear automatically when a sale
+                    // or parrainage points to this account. Not a dead-end.
+                    tone: 'warn',
+                    title: 'Aucune activité acheteur encore rattachée',
+                    body: "Dès qu'une vente ou un parrainage sera lié à ce compte (par téléphone ou e-mail), votre portefeuille apparaîtra ici automatiquement.",
+                    showRetry: true,
+                  }
+                  return {
+                    tone: 'warn',
+                    title: 'Profil client en cours de rattachement',
+                    body: "Votre compte n'est pas encore relié à un dossier client. La synchronisation peut prendre quelques instants après inscription.",
+                    showRetry: true,
+                  }
+                })()
+                const migrated = profileStatus?.migrated
+                const migratedHasActivity = migrated && (
+                  (migrated.sales || 0) + (migrated.plans || 0) + (migrated.grants || 0)
+                  + (migrated.commissions || 0) + (migrated.wallets || 0) > 0
+                )
+                return (
+                  <div className={`inv-wallet__alert inv-wallet__alert--${copy.tone}`} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    <strong>{copy.title}</strong>
+                    <span style={{ fontSize: 12, opacity: 0.85 }}>{copy.body}</span>
+                    {supportRef && (
+                      <span style={{ fontSize: 11, opacity: 0.6 }}>
+                        ID compte (extrait) : <code>{supportRef}</code>
+                      </span>
+                    )}
+                    {migrated && (
+                      <details style={{ fontSize: 11, opacity: 0.7 }}>
+                        <summary style={{ cursor: 'pointer' }}>
+                          Détails techniques du rattachement
+                          {migratedHasActivity ? ' (activité détectée)' : ' (rien à rattacher)'}
+                        </summary>
+                        <div style={{ marginTop: 4, fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>
+                          {`ventes=${migrated.sales ?? 0}  plans=${migrated.plans ?? 0}  `}
+                          {`accès=${migrated.grants ?? 0}  commissions=${migrated.commissions ?? 0}  `}
+                          {`wallets=${migrated.wallets ?? 0}`}
+                          {profileStatus?.message ? `\nerreur: ${profileStatus.message}` : ''}
+                        </div>
+                      </details>
+                    )}
+                    {copy.showRetry && (
+                      <button
+                        type="button"
+                        className="inv-wallet__btn"
+                        style={{ alignSelf: 'flex-start' }}
+                        onClick={() => refreshAuth()}
+                      >
+                        🔄 Réessayer
+                      </button>
+                    )}
+                  </div>
+                )
+              })() : referralLoading ? (
+                <p className="inv-wallet__loading">Chargement du portefeuille…</p>
+              ) : (
+                  <>
+                    <div className="inv-wallet__hero">
+                      <span className="inv-wallet__hero-label">Disponible au retrait</span>
+                      <strong className="inv-wallet__hero-amount">
+                        {(referralSummary?.walletBalance ?? 0).toLocaleString('fr-FR', {
+                          minimumFractionDigits: 0,
+                          maximumFractionDigits: 2,
+                        })}{' '}
+                        <span className="inv-wallet__hero-currency">DT</span>
+                      </strong>
+                      <span className="inv-wallet__hero-meta">
+                        Retrait min. {referralSummary?.minPayoutAmount ?? 0} DT · virement traité par la finance
+                      </span>
+                    </div>
+
+                    <div className="inv-wallet__phases">
+                      <div className="inv-wallet__phase">
+                        <span className="inv-wallet__phase-label">Gains en attente</span>
+                        <span className="inv-wallet__phase-value">
+                          {(referralSummary?.gainsAccrued ?? 0).toLocaleString('fr-FR', {
+                            minimumFractionDigits: 0,
+                            maximumFractionDigits: 2,
+                          })}{' '}
+                          DT
+                        </span>
+                        <span className="inv-wallet__phase-hint">Avant tampon (vente non terminée)</span>
+                      </div>
+                      <div className="inv-wallet__phase">
+                        <span className="inv-wallet__phase-label">Crédit légal</span>
+                        <span className="inv-wallet__phase-value">
+                          {(referralSummary?.commissionsReleased ?? 0).toLocaleString('fr-FR', {
+                            minimumFractionDigits: 0,
+                            maximumFractionDigits: 2,
+                          })}{' '}
+                          DT
+                        </span>
+                        <span className="inv-wallet__phase-hint">Tampon légal · pas encore payé</span>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+              {showAmbassadorCard && (
+                <>
+                  {payoutError && (
+                    <p className="inv-wallet__alert inv-wallet__alert--error">{payoutError}</p>
+                  )}
+                  {!referralLoading && referralSummaryIssueMessage && (
+                    <p className="inv-wallet__alert inv-wallet__alert--warn">{referralSummaryIssueMessage}</p>
+                  )}
+                  {!referralLoading
+                    && referralSummary?.ok
+                    && !referralVerificationBlocked
+                    && (referralSummary?.walletBalance ?? 0) === 0
+                    && (referralSummary?.gainsAccrued ?? 0) === 0
+                    && (referralSummary?.commissionsReleased ?? 0) === 0 && (
+                    <>
+                      <p className="inv-wallet__alert inv-wallet__alert--warn">
+                        Aucune commission pour le moment — elles apparaîtront dès la clôture notaire des ventes liées à votre code parrain.
+                      </p>
+                      {referralSummary?.diagnostics && (() => {
+                        const d = referralSummary.diagnostics
+                        const notEligible =
+                          (d.linkedAsSeller || 0) === 0
+                          && (d.linkedAsAmbassador || 0) === 0
+                        const hasAgentSales = (d.linkedAsAgent || 0) > 0
+                        const hint = notEligible && hasAgentSales
+                          ? "Les ventes que vous avez enregistrées n'ont pas de bénéficiaire commission désigné (seller_client_id / ambassador_client_id). Un administrateur doit configurer votre rôle commercial pour que vous receviez des commissions."
+                          : notEligible
+                            ? "Aucune vente avec vous comme vendeur ou parrain. Les commissions exigent un seller_client_id ou ambassador_client_id."
+                            : (d.notaryCompleteTotal || 0) === 0
+                              ? "Vos ventes ne sont pas encore notariées. Les commissions apparaîtront après validation notaire."
+                              : "Un rattachement existe mais aucune ligne commission n'a été créée — contactez le support."
+                        return (
+                          <details style={{ fontSize: 11, marginTop: 8, opacity: 0.85 }}>
+                            <summary style={{ cursor: 'pointer' }}>Pourquoi 0 DT ? (diagnostic)</summary>
+                            <div style={{ marginTop: 6, padding: '8px 10px', background: 'rgba(255,255,255,0.04)', borderRadius: 6 }}>
+                              <div style={{ marginBottom: 6 }}>{hint}</div>
+                              <div style={{ fontFamily: 'monospace', fontSize: 10, lineHeight: 1.5 }}>
+                                {`acheteur=${d.linkedAsBuyer ?? 0}  vendeur=${d.linkedAsSeller ?? 0}  parrain=${d.linkedAsAmbassador ?? 0}  agent=${d.linkedAsAgent ?? 0}`}
+                                <br />
+                                {`notariées=${d.notaryCompleteTotal ?? 0}  commission_events=${d.commissionEventCount ?? 0}`}
+                              </div>
+                              {Array.isArray(d.latestSales) && d.latestSales.length > 0 && (
+                                <table style={{ marginTop: 8, fontSize: 10, borderCollapse: 'collapse', width: '100%' }}>
+                                  <thead>
+                                    <tr style={{ opacity: 0.6 }}>
+                                      <th style={{ textAlign: 'left', padding: '2px 6px' }}>Code</th>
+                                      <th style={{ textAlign: 'left', padding: '2px 6px' }}>Rôle</th>
+                                      <th style={{ textAlign: 'left', padding: '2px 6px' }}>Notaire</th>
+                                      <th style={{ textAlign: 'right', padding: '2px 6px' }}>Prix</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {d.latestSales.map((s) => (
+                                      <tr key={s.id}>
+                                        <td style={{ padding: '2px 6px', fontFamily: 'monospace' }}>{s.code || s.id.slice(0, 8)}</td>
+                                        <td style={{ padding: '2px 6px' }}>
+                                          {[s.as_buyer && 'acheteur', s.as_seller && 'vendeur', s.as_ambassador && 'parrain'].filter(Boolean).join(', ') || '—'}
+                                        </td>
+                                        <td style={{ padding: '2px 6px' }}>{s.notary_done ? '✓' : '—'}</td>
+                                        <td style={{ padding: '2px 6px', textAlign: 'right' }}>{Number(s.agreed_price || 0).toLocaleString('fr-FR')}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              )}
+                            </div>
+                          </details>
+                        )
+                      })()}
+                    </>
+                  )}
+                  {referralVerificationBlocked && (
+                    <p className="inv-wallet__alert inv-wallet__alert--verify">
+                      Vérification d&apos;identité requise avant tout retrait bancaire. Le portefeuille reste visible.
+                    </p>
+                  )}
+
+                  <div className="inv-wallet__actions">
+                    <button
+                      type="button"
+                      className="inv-wallet__btn"
+                      disabled={
+                        payoutBusy
+                        || referralLoading
+                        || referralVerificationBlocked
+                        || (referralSummary?.walletBalance ?? 0) < (referralSummary?.minPayoutAmount ?? 0)
+                        || (referralSummary?.walletBalance ?? 0) <= 0
+                      }
+                      onClick={handleAmbassadorPayout}
+                    >
+                      {payoutBusy ? 'Traitement…' : 'Retirer les gains'}
+                    </button>
+                    <p className="inv-wallet__actions-note">
+                      Le virement bancaire reste soumis à validation interne.
+                    </p>
+                  </div>
+                </>
+              )}
+
+              {showAmbassadorCard && clientProfile?.referralCode && (
+                <footer className="inv-wallet__code">
+                  <span className="inv-wallet__code-label">Votre code parrain</span>
+                  <code className="inv-wallet__code-value" dir="ltr">
+                    {clientProfile.referralCode}
+                  </code>
+                  <span className="inv-wallet__code-hint">
+                    Partagez ce code pour lier un nouveau dossier client.
+                  </span>
+                </footer>
+              )}
             </div>
           </>
         )}
 
-        {/* ── Mes parcelles ── */}
-        {activeTab === 'parcelles' && <h3 className="dash-section-title" style={{ marginTop: '1.25rem' }}>Mes parcelles</h3>}
-
-        {activeTab === 'parcelles' && myPurchases.length === 0 ? (
-          <div className="empty-state">
-            <p>Vous ne possédez pas encore de parcelles.</p>
-            <button className="cta-primary" onClick={() => navigate('/browse')}>Explorer les projets</button>
-          </div>
-        ) : activeTab === 'parcelles' ? (
-          <div className="dash-parcels">
-            {myPurchases.map((purchase) => {
-              const proj        = projects.find((p) => p.id === purchase.projectId)
-              const plot        = proj?.plots.find((pl) => pl.id === purchase.plotId)
-              const yearsHeld   = new Date().getFullYear() - parseInt(purchase.since.split('-')[0])
-              const totalEarned = yearsHeld * purchase.annualRevenue
-              return (
-                <div key={`${purchase.projectId}-${purchase.plotId}`}
-                  className="dash-parcel-card"
-                  onClick={() => navigate(`/project/${purchase.projectId}/plot/${purchase.plotId}`)}>
-
-                  {/* map thumbnail */}
-                  {plot?.mapUrl && (
-                    <div className="dash-parcel-map">
-                      <iframe title={`Parcelle ${purchase.plotId}`} src={plot.mapUrl} loading="lazy" tabIndex={-1} />
-                    </div>
-                  )}
-
-                  {/* info */}
-                  <div className="dash-parcel-body">
-                    {/* title row */}
-                    <div className="dash-parcel-header">
-                      <div>
-                        <span className="dash-parcel-id">Parcelle #{purchase.plotId}</span>
-                        <p className="dash-parcel-name">{proj?.title}</p>
-                      </div>
-                      <span className="dash-parcel-loc">
-                        📍 {purchase.city}
-                      </span>
-                    </div>
-
-                    {/* stats row */}
-                    <div className="dash-parcel-stats">
-                      <div className="dash-ps"><span>Arbres</span><strong>{purchase.trees}</strong></div>
-                      <div className="dash-ps"><span>Investi</span><strong>{purchase.invested.toLocaleString()} DT</strong></div>
-                      <div className="dash-ps"><span>Revenu/an</span><strong className="green-text">{purchase.annualRevenue.toLocaleString()} DT</strong></div>
-                      <div className="dash-ps"><span>Gains cumulés</span><strong className="green-text">~{totalEarned.toLocaleString()} DT</strong></div>
-                    </div>
-                  </div>
-
-                  {/* cta */}
-                  <div className="dash-parcel-cta">→</div>
-                </div>
-              )
-            })}
-          </div>
-        ) : null}
-
-        <footer className="dash-logout-footer">
-          <button type="button" className="dash-logout-btn" onClick={() => navigate('/login')}>
+        {/* ── Footer ── */}
+        <footer className="inv-footer">
+          <button type="button" className="inv-footer__btn" onClick={handleLogout}>
             Se déconnecter
           </button>
         </footer>
       </section>
-
     </main>
   )
 }

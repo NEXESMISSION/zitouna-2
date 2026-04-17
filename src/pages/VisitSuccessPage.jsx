@@ -23,8 +23,8 @@ export default function VisitSuccessPage() {
             Notre equipe vous rappellera tres bientot pour confirmer.
           </p>
 
-          <button type="button" className="cta-primary visit-success-btn" onClick={() => navigate('/dashboard')}>
-            Aller au dashboard
+          <button type="button" className="cta-primary visit-success-btn" onClick={() => navigate('/browse')}>
+            Aller à l'accueil
           </button>
         </div>
       </section>

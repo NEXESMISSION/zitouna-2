@@ -1,0 +1,240 @@
+.adm-cal {
+  --adm-cal-accent: #2563eb;
+  font-size: 12px;
+  border: 1px solid var(--adm-border, #e2e8f0);
+  border-radius: 12px;
+  background: var(--adm-surface, #fff);
+  padding: 12px;
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+.adm-cal__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.adm-cal__toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.adm-cal__month {
+  font-weight: 600;
+  color: var(--adm-text, #0f172a);
+  text-transform: capitalize;
+  min-width: 120px;
+  text-align: center;
+}
+
+.adm-cal__nav {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: 1px solid var(--adm-border, #e2e8f0);
+  background: #f8fafc;
+  color: #475569;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.adm-cal__nav:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.adm-cal__today {
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--adm-cal-accent);
+  background: color-mix(in srgb, var(--adm-cal-accent) 12%, white);
+  color: var(--adm-cal-accent);
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.adm-cal__mode {
+  display: flex;
+  gap: 4px;
+  background: #f1f5f9;
+  padding: 3px;
+  border-radius: 10px;
+}
+
+.adm-cal__mode-btn {
+  border: none;
+  background: transparent;
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  cursor: pointer;
+}
+
+.adm-cal__mode-btn--on {
+  background: #fff;
+  color: var(--adm-cal-accent);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.adm-cal__weekhead {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+  margin-bottom: 4px;
+}
+
+.adm-cal__weekhead-cell {
+  text-align: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.adm-cal__grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+
+.adm-cal__cell {
+  aspect-ratio: 1;
+  min-height: 36px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: #f8fafc;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 4px 2px;
+  gap: 2px;
+}
+
+.adm-cal__cell--muted {
+  opacity: 0.35;
+}
+
+.adm-cal__cell--sel {
+  border-color: var(--adm-cal-accent);
+  background: color-mix(in srgb, var(--adm-cal-accent) 10%, white);
+}
+
+.adm-cal__cell:hover:not(.adm-cal__cell--muted) {
+  border-color: #cbd5e1;
+}
+
+.adm-cal__cell-num {
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+}
+
+.adm-cal__dots {
+  display: flex;
+  gap: 2px;
+  justify-content: center;
+}
+
+.adm-cal__dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--adm-cal-accent);
+}
+
+.adm-cal__day-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.adm-cal__day-pills {
+  display: flex;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.adm-cal__pill {
+  flex: 0 0 auto;
+  font-size: 10px;
+  padding: 6px 8px;
+  border-radius: 999px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  color: #64748b;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.adm-cal__pill--on {
+  border-color: var(--adm-cal-accent);
+  background: color-mix(in srgb, var(--adm-cal-accent) 12%, white);
+  color: var(--adm-cal-accent);
+  font-weight: 600;
+}
+
+.adm-cal__agenda-head {
+  font-weight: 600;
+  color: #0f172a;
+  margin-bottom: 10px;
+  text-transform: capitalize;
+}
+
+.adm-cal__empty {
+  text-align: center;
+  padding: 24px 12px;
+  color: #94a3b8;
+  font-size: 12px;
+  border: 1px dashed #e2e8f0;
+  border-radius: 10px;
+}
+
+.adm-cal__agenda {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.adm-cal__agenda-item {
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #fafafa;
+}
+
+.adm-cal__agenda-default {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.adm-cal__agenda-time {
+  font-weight: 700;
+  color: var(--adm-cal-accent);
+  min-width: 48px;
+}
+
+.adm-cal__agenda-title {
+  color: #334155;
+  font-weight: 500;
+}

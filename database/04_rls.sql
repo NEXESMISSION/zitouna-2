@@ -1,0 +1,575 @@
+-- =============================================================================
+-- ZITOUNA — 04_rls.sql
+-- Row-level security policies (public catalog + private app), baseline grants,
+-- and a one-shot auth ↔ client recovery block. Safe to re-run.
+-- Apply after 03_functions.sql.
+-- =============================================================================
+
+DO $zit$
+BEGIN
+  IF to_regclass('public.clients') IS NULL THEN
+    RAISE EXCEPTION 'ZITOUNA: run 02_schema.sql before 04_rls.sql.';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public' AND p.proname = 'is_active_staff'
+  ) THEN
+    RAISE EXCEPTION 'ZITOUNA: run 03_functions.sql before 04_rls.sql.';
+  END IF;
+END;
+$zit$;
+
+-- ============================================================================
+-- Public catalog (anon + authenticated read-only; staff CRUD)
+-- ============================================================================
+
+-- projects
+alter table public.projects enable row level security;
+drop policy if exists public_select_projects on public.projects;
+create policy public_select_projects on public.projects
+  for select to anon using (true);
+drop policy if exists public_select_projects_auth on public.projects;
+create policy public_select_projects_auth on public.projects
+  for select to authenticated using (true);
+drop policy if exists staff_projects_crud on public.projects;
+create policy staff_projects_crud on public.projects
+  for all to authenticated
+  using (public.is_active_staff()) with check (public.is_active_staff());
+
+-- parcels
+alter table public.parcels enable row level security;
+drop policy if exists public_select_parcels on public.parcels;
+create policy public_select_parcels on public.parcels
+  for select to anon using (true);
+drop policy if exists public_select_parcels_auth on public.parcels;
+create policy public_select_parcels_auth on public.parcels
+  for select to authenticated using (true);
+drop policy if exists staff_parcels_crud on public.parcels;
+create policy staff_parcels_crud on public.parcels
+  for all to authenticated
+  using (public.is_active_staff()) with check (public.is_active_staff());
+
+-- parcel_tree_batches
+alter table public.parcel_tree_batches enable row level security;
+drop policy if exists public_select_parcel_tree_batches on public.parcel_tree_batches;
+create policy public_select_parcel_tree_batches on public.parcel_tree_batches
+  for select to anon using (true);
+drop policy if exists public_select_parcel_tree_batches_auth on public.parcel_tree_batches;
+create policy public_select_parcel_tree_batches_auth on public.parcel_tree_batches
+  for select to authenticated using (true);
+drop policy if exists staff_parcel_tree_batches_crud on public.parcel_tree_batches;
+create policy staff_parcel_tree_batches_crud on public.parcel_tree_batches
+  for all to authenticated
+  using (public.is_active_staff()) with check (public.is_active_staff());
+
+-- project_offers
+alter table public.project_offers enable row level security;
+drop policy if exists public_select_project_offers on public.project_offers;
+create policy public_select_project_offers on public.project_offers
+  for select to anon using (true);
+drop policy if exists public_select_project_offers_auth on public.project_offers;
+create policy public_select_project_offers_auth on public.project_offers
+  for select to authenticated using (true);
+drop policy if exists staff_project_offers_crud on public.project_offers;
+create policy staff_project_offers_crud on public.project_offers
+  for all to authenticated
+  using (public.is_active_staff()) with check (public.is_active_staff());
+
+-- project_workflow_settings, project_signature_checklist_items, project_commission_rules
+alter table public.project_workflow_settings enable row level security;
+drop policy if exists public_select_project_workflow_settings on public.project_workflow_settings;
+create policy public_select_project_workflow_settings on public.project_workflow_settings
+  for select to authenticated using (true);
+drop policy if exists staff_project_workflow_settings_crud on public.project_workflow_settings;
+create policy staff_project_workflow_settings_crud on public.project_workflow_settings
+  for all to authenticated
+  using (public.is_active_staff()) with check (public.is_active_staff());
+
+alter table public.project_signature_checklist_items enable row level security;
+drop policy if exists public_select_project_checklist_items on public.project_signature_checklist_items;
+create policy public_select_project_checklist_items on public.project_signature_checklist_items
+  for select to authenticated using (true);
+drop policy if exists staff_project_checklist_items_crud on public.project_signature_checklist_items;
+create policy staff_project_checklist_items_crud on public.project_signature_checklist_items
+  for all to authenticated
+  using (public.is_active_staff()) with check (public.is_active_staff());
+
+alter table public.project_commission_rules enable row level security;
+drop policy if exists public_select_project_commission_rules on public.project_commission_rules;
+create policy public_select_project_commission_rules on public.project_commission_rules
+  for select to authenticated using (true);
+drop policy if exists staff_project_commission_rules_crud on public.project_commission_rules;
+create policy staff_project_commission_rules_crud on public.project_commission_rules
+  for all to authenticated
+  using (public.is_active_staff()) with check (public.is_active_staff());
+
+alter table public.project_health_reports enable row level security;
+drop policy if exists public_select_project_health_reports on public.project_health_reports;
+create policy public_select_project_health_reports on public.project_health_reports
+  for select to authenticated using (true);
+drop policy if exists staff_project_health_reports_crud on public.project_health_reports;
+create policy staff_project_health_reports_crud on public.project_health_reports
+  for all to authenticated
+  using (public.is_active_staff()) with check (public.is_active_staff());
+
+-- visit_slot_options (public form reads + staff CRUD)
+alter table public.visit_slot_options enable row level security;
+drop policy if exists public_select_visit_slot_options on public.visit_slot_options;
+create policy public_select_visit_slot_options on public.visit_slot_options
+  for select to anon using (true);
+drop policy if exists public_select_visit_slot_options_auth on public.visit_slot_options;
+create policy public_select_visit_slot_options_auth on public.visit_slot_options
+  for select to authenticated using (true);
+drop policy if exists staff_visit_slot_options_crud on public.visit_slot_options;
+create policy staff_visit_slot_options_crud on public.visit_slot_options
+  for all to authenticated
+  using (public.is_active_staff()) with check (public.is_active_staff());
+
+-- ============================================================================
+-- Private app (buyer self-access + staff CRUD)
+-- ============================================================================
+
+-- admin_users (staff-only; buyers must not see the staff directory)
+alter table public.admin_users enable row level security;
+drop policy if exists staff_admin_users_crud on public.admin_users;
+create policy staff_admin_users_crud on public.admin_users
+  for all to authenticated
+  using (public.is_active_staff()) with check (public.is_active_staff());
+
+-- clients: staff CRUD + buyer self-select / self-insert / safe-self-update
+alter table public.clients enable row level security;
+drop policy if exists staff_clients_crud on public.clients;
+create policy staff_clients_crud on public.clients
+  for all to authenticated
+  using (public.is_active_staff()) with check (public.is_active_staff());
+
+drop policy if exists client_select_own_profile on public.clients;
+create policy client_select_own_profile on public.clients
+  for select to authenticated
+  using (public.clients.auth_user_id = auth.uid());
+
+drop policy if exists client_insert_own_profile on public.clients;
+create policy client_insert_own_profile on public.clients
+  for insert to authenticated
+  with check (public.clients.auth_user_id = auth.uid());
+
+drop policy if exists client_update_safe_self on public.clients;
+create policy client_update_safe_self on public.clients
+  for update to authenticated
+  using (public.clients.auth_user_id = auth.uid())
+  with check (
+    public.clients.auth_user_id = auth.uid()
+    and public.clients.allowed_pages         is not distinct from (select c.allowed_pages         from public.clients c where c.id = public.clients.id)
+    and public.clients.allowed_project_ids   is not distinct from (select c.allowed_project_ids   from public.clients c where c.id = public.clients.id)
+    and public.clients.suspended_at          is not distinct from (select c.suspended_at          from public.clients c where c.id = public.clients.id)
+    and public.clients.suspended_by          is not distinct from (select c.suspended_by          from public.clients c where c.id = public.clients.id)
+    and public.clients.suspension_reason     is not distinct from (select c.suspension_reason     from public.clients c where c.id = public.clients.id)
+    and public.clients.status                is not distinct from (select c.status                from public.clients c where c.id = public.clients.id)
+    and public.clients.seller_enabled        is not distinct from (select c.seller_enabled        from public.clients c where c.id = public.clients.id)
+    and public.clients.seller_parcel_quota   is not distinct from (select c.seller_parcel_quota   from public.clients c where c.id = public.clients.id)
+    and public.clients.seller_parcels_sold_count is not distinct from (select c.seller_parcels_sold_count from public.clients c where c.id = public.clients.id)
+    and public.clients.seller_enabled_at     is not distinct from (select c.seller_enabled_at     from public.clients c where c.id = public.clients.id)
+    and public.clients.seller_enabled_by     is not distinct from (select c.seller_enabled_by     from public.clients c where c.id = public.clients.id)
+  );
+
+-- client_phone_identities: self + staff
+alter table public.client_phone_identities enable row level security;
+drop policy if exists staff_phone_identities_crud on public.client_phone_identities;
+create policy staff_phone_identities_crud on public.client_phone_identities
+  for all to authenticated
+  using (public.is_active_staff()) with check (public.is_active_staff());
+
+drop policy if exists client_select_own_phone_identity on public.client_phone_identities;
+create policy client_select_own_phone_identity on public.client_phone_identities
+  for select to authenticated
+  using (
+    public.client_phone_identities.client_id = public.current_client_id()
+    or public.client_phone_identities.auth_user_id = auth.uid()
+  );
+
+drop policy if exists client_insert_own_phone_identity on public.client_phone_identities;
+create policy client_insert_own_phone_identity on public.client_phone_identities
+  for insert to authenticated
+  with check (public.client_phone_identities.auth_user_id = auth.uid());
+
+drop policy if exists client_update_own_phone_identity on public.client_phone_identities;
+create policy client_update_own_phone_identity on public.client_phone_identities
+  for update to authenticated
+  using (public.client_phone_identities.auth_user_id = auth.uid())
+  with check (public.client_phone_identities.auth_user_id = auth.uid());
+
+-- sales
+alter table public.sales enable row level security;
+drop policy if exists staff_sales_crud on public.sales;
+create policy staff_sales_crud on public.sales
+  for all to authenticated
+  using (public.is_active_staff()) with check (public.is_active_staff());
+
+drop policy if exists client_select_own_sales on public.sales;
+create policy client_select_own_sales on public.sales
+  for select to authenticated
+  using (public.sales.client_id = public.current_client_id());
+
+-- sale_reservation_events (staff-only read/write; derived audit rows)
+alter table public.sale_reservation_events enable row level security;
+drop policy if exists staff_sale_reservation_events_crud on public.sale_reservation_events;
+create policy staff_sale_reservation_events_crud on public.sale_reservation_events
+  for all to authenticated
+  using (public.is_active_staff()) with check (public.is_active_staff());
+
+-- installment_plans
+alter table public.installment_plans enable row level security;
+drop policy if exists staff_plans_crud on public.installment_plans;
+create policy staff_plans_crud on public.installment_plans
+  for all to authenticated
+  using (public.is_active_staff()) with check (public.is_active_staff());
+
+drop policy if exists client_select_own_plans on public.installment_plans;
+create policy client_select_own_plans on public.installment_plans
+  for select to authenticated
+  using (public.installment_plans.client_id = public.current_client_id());
+
+-- installment_payments: self-read + submit-only transitions (approval is staff)
+alter table public.installment_payments enable row level security;
+drop policy if exists staff_payments_crud on public.installment_payments;
+create policy staff_payments_crud on public.installment_payments
+  for all to authenticated
+  using (public.is_active_staff()) with check (public.is_active_staff());
+
+drop policy if exists client_select_own_payments on public.installment_payments;
+create policy client_select_own_payments on public.installment_payments
+  for select to authenticated
+  using (
+    exists (
+      select 1 from public.installment_plans p
+      where p.id = public.installment_payments.plan_id
+        and p.client_id = public.current_client_id()
+    )
+  );
+
+drop policy if exists client_update_own_payment_submit on public.installment_payments;
+create policy client_update_own_payment_submit on public.installment_payments
+  for update to authenticated
+  using (
+    exists (
+      select 1 from public.installment_plans p
+      where p.id = public.installment_payments.plan_id
+        and p.client_id = public.current_client_id()
+    )
+  )
+  with check (
+    exists (
+      select 1 from public.installment_plans p
+      where p.id = public.installment_payments.plan_id
+        and p.client_id = public.current_client_id()
+    )
+    and public.installment_payments.status in ('pending','submitted','rejected')
+  );
+
+-- installment_payment_receipts
+alter table public.installment_payment_receipts enable row level security;
+drop policy if exists staff_receipts_crud on public.installment_payment_receipts;
+create policy staff_receipts_crud on public.installment_payment_receipts
+  for all to authenticated
+  using (public.is_active_staff()) with check (public.is_active_staff());
+
+drop policy if exists client_select_own_receipts on public.installment_payment_receipts;
+create policy client_select_own_receipts on public.installment_payment_receipts
+  for select to authenticated
+  using (
+    exists (
+      select 1
+      from public.installment_payments pm
+      join public.installment_plans p on p.id = pm.plan_id
+      where pm.id = public.installment_payment_receipts.payment_id
+        and p.client_id = public.current_client_id()
+    )
+  );
+
+drop policy if exists client_insert_own_receipt on public.installment_payment_receipts;
+create policy client_insert_own_receipt on public.installment_payment_receipts
+  for insert to authenticated
+  with check (
+    exists (
+      select 1
+      from public.installment_payments pm
+      join public.installment_plans p on p.id = pm.plan_id
+      where pm.id = public.installment_payment_receipts.payment_id
+        and p.client_id = public.current_client_id()
+    )
+  );
+
+-- page_access_grants
+alter table public.page_access_grants enable row level security;
+drop policy if exists staff_page_access_grants_crud on public.page_access_grants;
+create policy staff_page_access_grants_crud on public.page_access_grants
+  for all to authenticated
+  using (public.is_active_staff()) with check (public.is_active_staff());
+
+drop policy if exists client_select_own_grants on public.page_access_grants;
+create policy client_select_own_grants on public.page_access_grants
+  for select to authenticated
+  using (public.page_access_grants.client_id = public.current_client_id());
+
+-- ============================================================================
+-- Commissions + payouts + ambassador wallet
+-- ============================================================================
+alter table public.commission_events enable row level security;
+drop policy if exists staff_commission_events_crud on public.commission_events;
+create policy staff_commission_events_crud on public.commission_events
+  for all to authenticated
+  using (public.is_active_staff()) with check (public.is_active_staff());
+drop policy if exists client_select_own_commission_events on public.commission_events;
+create policy client_select_own_commission_events on public.commission_events
+  for select to authenticated
+  using (public.commission_events.beneficiary_client_id = public.current_client_id());
+
+alter table public.commission_payout_requests enable row level security;
+drop policy if exists staff_commission_payout_requests_crud on public.commission_payout_requests;
+create policy staff_commission_payout_requests_crud on public.commission_payout_requests
+  for all to authenticated
+  using (public.is_active_staff()) with check (public.is_active_staff());
+drop policy if exists client_select_own_payout_requests on public.commission_payout_requests;
+create policy client_select_own_payout_requests on public.commission_payout_requests
+  for select to authenticated
+  using (public.commission_payout_requests.beneficiary_client_id = public.current_client_id());
+
+alter table public.commission_payout_request_items enable row level security;
+drop policy if exists staff_commission_payout_items_crud on public.commission_payout_request_items;
+create policy staff_commission_payout_items_crud on public.commission_payout_request_items
+  for all to authenticated
+  using (public.is_active_staff()) with check (public.is_active_staff());
+drop policy if exists client_select_own_payout_items on public.commission_payout_request_items;
+create policy client_select_own_payout_items on public.commission_payout_request_items
+  for select to authenticated
+  using (
+    exists (
+      select 1 from public.commission_payout_requests pr
+      where pr.id = public.commission_payout_request_items.request_id
+        and pr.beneficiary_client_id = public.current_client_id()
+    )
+  );
+
+alter table public.ambassador_wallets enable row level security;
+drop policy if exists staff_ambassador_wallets_crud on public.ambassador_wallets;
+create policy staff_ambassador_wallets_crud on public.ambassador_wallets
+  for all to authenticated
+  using (public.is_active_staff()) with check (public.is_active_staff());
+drop policy if exists client_select_own_wallet on public.ambassador_wallets;
+create policy client_select_own_wallet on public.ambassador_wallets
+  for select to authenticated
+  using (public.ambassador_wallets.client_id = public.current_client_id());
+
+-- ============================================================================
+-- Seller relations / seller parcel assignments
+-- ============================================================================
+alter table public.seller_relations enable row level security;
+drop policy if exists staff_seller_relations_crud on public.seller_relations;
+create policy staff_seller_relations_crud on public.seller_relations
+  for all to authenticated
+  using (public.is_active_staff()) with check (public.is_active_staff());
+drop policy if exists client_select_own_seller_relations on public.seller_relations;
+create policy client_select_own_seller_relations on public.seller_relations
+  for select to authenticated
+  using (
+    public.seller_relations.child_client_id  = public.current_client_id()
+    or public.seller_relations.parent_client_id = public.current_client_id()
+  );
+
+alter table public.seller_parcel_assignments enable row level security;
+drop policy if exists staff_seller_parcel_assignments_crud on public.seller_parcel_assignments;
+create policy staff_seller_parcel_assignments_crud on public.seller_parcel_assignments
+  for all to authenticated
+  using (public.is_active_staff()) with check (public.is_active_staff());
+drop policy if exists client_select_own_seller_parcel_assignments on public.seller_parcel_assignments;
+create policy client_select_own_seller_parcel_assignments on public.seller_parcel_assignments
+  for select to authenticated
+  using (public.seller_parcel_assignments.client_id = public.current_client_id());
+
+-- ============================================================================
+-- Appointments, audit, legal, notifications, verification queues (staff-only)
+-- ============================================================================
+alter table public.appointments enable row level security;
+drop policy if exists staff_appointments_crud on public.appointments;
+create policy staff_appointments_crud on public.appointments
+  for all to authenticated
+  using (public.is_active_staff()) with check (public.is_active_staff());
+
+alter table public.audit_logs enable row level security;
+drop policy if exists staff_audit_logs_crud on public.audit_logs;
+create policy staff_audit_logs_crud on public.audit_logs
+  for all to authenticated
+  using (public.is_active_staff()) with check (public.is_active_staff());
+
+alter table public.legal_stamps enable row level security;
+drop policy if exists staff_legal_stamps_crud on public.legal_stamps;
+create policy staff_legal_stamps_crud on public.legal_stamps
+  for all to authenticated
+  using (public.is_active_staff()) with check (public.is_active_staff());
+
+alter table public.legal_notices enable row level security;
+drop policy if exists staff_legal_notices_crud on public.legal_notices;
+create policy staff_legal_notices_crud on public.legal_notices
+  for all to authenticated
+  using (public.is_active_staff()) with check (public.is_active_staff());
+
+alter table public.data_access_requests enable row level security;
+drop policy if exists staff_data_access_requests_crud on public.data_access_requests;
+create policy staff_data_access_requests_crud on public.data_access_requests
+  for all to authenticated
+  using (public.is_active_staff()) with check (public.is_active_staff());
+drop policy if exists client_select_own_dar on public.data_access_requests;
+create policy client_select_own_dar on public.data_access_requests
+  for select to authenticated
+  using (public.data_access_requests.user_id = auth.uid());
+drop policy if exists client_insert_own_dar on public.data_access_requests;
+create policy client_insert_own_dar on public.data_access_requests
+  for insert to authenticated
+  with check (public.data_access_requests.user_id = auth.uid());
+
+alter table public.phone_access_requests enable row level security;
+drop policy if exists staff_phone_access_requests_crud on public.phone_access_requests;
+create policy staff_phone_access_requests_crud on public.phone_access_requests
+  for all to authenticated
+  using (public.is_active_staff()) with check (public.is_active_staff());
+drop policy if exists client_select_own_par on public.phone_access_requests;
+create policy client_select_own_par on public.phone_access_requests
+  for select to authenticated
+  using (public.phone_access_requests.user_id = auth.uid());
+drop policy if exists client_insert_own_par on public.phone_access_requests;
+create policy client_insert_own_par on public.phone_access_requests
+  for insert to authenticated
+  with check (public.phone_access_requests.user_id = auth.uid());
+
+alter table public.phone_access_otp_codes enable row level security;
+drop policy if exists staff_phone_otp_codes_crud on public.phone_access_otp_codes;
+create policy staff_phone_otp_codes_crud on public.phone_access_otp_codes
+  for all to authenticated
+  using (public.is_active_staff()) with check (public.is_active_staff());
+
+alter table public.phone_verifications enable row level security;
+drop policy if exists staff_phone_verifications_crud on public.phone_verifications;
+create policy staff_phone_verifications_crud on public.phone_verifications
+  for all to authenticated
+  using (public.is_active_staff()) with check (public.is_active_staff());
+drop policy if exists client_select_own_phone_verif on public.phone_verifications;
+create policy client_select_own_phone_verif on public.phone_verifications
+  for select to authenticated
+  using (public.phone_verifications.user_id = auth.uid());
+
+alter table public.user_notifications enable row level security;
+drop policy if exists staff_user_notifications_crud on public.user_notifications;
+create policy staff_user_notifications_crud on public.user_notifications
+  for all to authenticated
+  using (public.is_active_staff()) with check (public.is_active_staff());
+drop policy if exists user_select_own_notifications on public.user_notifications;
+create policy user_select_own_notifications on public.user_notifications
+  for select to authenticated
+  using (public.user_notifications.user_id = auth.uid());
+drop policy if exists user_update_own_notifications on public.user_notifications;
+create policy user_update_own_notifications on public.user_notifications
+  for update to authenticated
+  using (public.user_notifications.user_id = auth.uid())
+  with check (public.user_notifications.user_id = auth.uid());
+
+-- ============================================================================
+-- Baseline grants + default privileges
+-- ============================================================================
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO authenticated;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO authenticated;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO authenticated;
+
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO anon;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO anon;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO anon;
+
+GRANT ALL ON ALL TABLES IN SCHEMA public TO service_role;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO service_role;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO service_role;
+
+DO $$
+BEGIN
+  ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO authenticated;
+  ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT USAGE, SELECT ON SEQUENCES TO authenticated;
+  ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT EXECUTE ON FUNCTIONS TO authenticated;
+
+  ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT SELECT ON TABLES TO anon;
+  ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT USAGE, SELECT ON SEQUENCES TO anon;
+  ALTER DEFAULT PRIVILEGES IN SCHEMA public
+    GRANT EXECUTE ON FUNCTIONS TO anon;
+
+  ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES    TO service_role;
+  ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO service_role;
+  ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO service_role;
+EXCEPTION WHEN insufficient_privilege THEN NULL;
+END $$;
+
+-- Explicit grants for critical helpers/RPCs (idempotent; function must exist).
+GRANT EXECUTE ON FUNCTION public.current_client_id()                              TO authenticated;
+GRANT EXECUTE ON FUNCTION public.current_client_id_is_ambiguous()                 TO authenticated;
+GRANT EXECUTE ON FUNCTION public.ensure_current_client_profile()                  TO authenticated;
+GRANT EXECUTE ON FUNCTION public.is_active_staff()                                TO authenticated;
+GRANT EXECUTE ON FUNCTION public.list_seller_assignments(uuid)                    TO authenticated;
+GRANT EXECUTE ON FUNCTION public.get_my_referral_summary()                        TO authenticated;
+GRANT EXECUTE ON FUNCTION public.request_ambassador_payout(numeric, text)         TO authenticated;
+GRANT EXECUTE ON FUNCTION public.increment_ambassador_wallet_balance(uuid, numeric) TO authenticated;
+
+-- ============================================================================
+-- Auth ↔ client recovery (safe to re-run): links existing clients to auth.users
+-- and creates missing rows + phone identities. Idempotent.
+-- ============================================================================
+UPDATE public.clients c
+SET auth_user_id = au.id, updated_at = now()
+FROM auth.users au
+WHERE c.auth_user_id IS NULL
+  AND c.email IS NOT NULL
+  AND LOWER(c.email) = LOWER(au.email);
+
+INSERT INTO public.clients (code, auth_user_id, full_name, email, phone, status)
+SELECT
+  'CL-' || UPPER(SUBSTRING(REPLACE(au.id::text, '-', '') FROM 1 FOR 10)),
+  au.id,
+  COALESCE(
+    NULLIF(TRIM(CONCAT(au.raw_user_meta_data->>'firstname', ' ', au.raw_user_meta_data->>'lastname')), ''),
+    NULLIF(au.raw_user_meta_data->>'name', ''),
+    NULLIF(split_part(au.email, '@', 1), ''),
+    'Client'
+  ),
+  NULLIF(LOWER(au.email), ''),
+  NULLIF(au.raw_user_meta_data->>'phone', ''),
+  'active'
+FROM auth.users au
+LEFT JOIN public.clients c ON c.auth_user_id = au.id
+WHERE c.id IS NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM public.clients c2
+    WHERE c2.email IS NOT NULL AND LOWER(c2.email) = LOWER(au.email)
+  );
+
+INSERT INTO public.client_phone_identities (
+  country_code, phone_local, phone_canonical, client_id, auth_user_id, verification_status
+)
+SELECT
+  CASE
+    WHEN COALESCE(c.phone, '') ~ '^\s*\+\d+'
+      THEN '+' || COALESCE(NULLIF(SUBSTRING(REGEXP_REPLACE(c.phone, '\D', '', 'g') FROM 1 FOR 3), ''), '216')
+    ELSE '+216'
+  END,
+  REGEXP_REPLACE(COALESCE(c.phone, ''), '\D', '', 'g'),
+  '+' || REGEXP_REPLACE(COALESCE(c.phone, ''), '\D', '', 'g'),
+  c.id,
+  c.auth_user_id,
+  'verified'
+FROM public.clients c
+WHERE COALESCE(REGEXP_REPLACE(COALESCE(c.phone, ''), '\D', '', 'g'), '') <> ''
+ON CONFLICT (phone_canonical) DO UPDATE
+SET
+  client_id    = COALESCE(public.client_phone_identities.client_id,    EXCLUDED.client_id),
+  auth_user_id = COALESCE(public.client_phone_identities.auth_user_id, EXCLUDED.auth_user_id),
+  updated_at   = now();

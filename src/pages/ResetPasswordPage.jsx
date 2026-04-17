@@ -1,5 +1,7 @@
-import { useState } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { useAuth } from '../lib/AuthContext.jsx'
+import { supabase } from '../lib/supabase.js'
 import appLogo from '../../logo2.png'
 import { IconEye, IconEyeOff, IconKey } from '../LoginDecor.jsx'
 
@@ -18,27 +20,79 @@ function IconShield() {
 
 export default function ResetPasswordPage() {
   const navigate = useNavigate()
-  const { state } = useLocation()
-  const email = state?.email || ''
-
+  const { resetPassword } = useAuth()
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
+  const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
+  const [hasSession, setHasSession] = useState(false)
+  const [checking, setChecking] = useState(true)
 
-  const handleSubmit = (e) => {
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setHasSession(Boolean(session))
+      setChecking(false)
+    })
+  }, [])
+
+  async function handleSubmit(e) {
     e.preventDefault()
     setError('')
-    if (password.length < 6) {
-      setError('Le mot de passe doit contenir au moins 6 caractères.')
+    setSuccess('')
+
+    if (password.length < 8) {
+      setError('Le mot de passe doit contenir au moins 8 caractères.')
       return
     }
     if (password !== confirm) {
       setError('Les mots de passe ne correspondent pas.')
       return
     }
-    navigate('/login')
+
+    setLoading(true)
+    try {
+      const result = await resetPassword(password)
+      if (!result.ok) {
+        setError(result.error || 'Impossible de réinitialiser le mot de passe.')
+        return
+      }
+      setSuccess('Mot de passe modifié avec succès ! Redirection…')
+      setTimeout(() => navigate('/login', { replace: true }), 1500)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (checking) {
+    return (
+      <main className="screen screen--login reset-password-page">
+        <div className="login-content" style={{ textAlign: 'center', padding: '4rem 2rem' }}>
+          <div className="app-loader-spinner" />
+        </div>
+      </main>
+    )
+  }
+
+  if (!hasSession) {
+    return (
+      <main className="screen screen--login reset-password-page">
+        <div className="auth-bg auth-bg--one" aria-hidden="true" />
+        <div className="auth-bg auth-bg--two" aria-hidden="true" />
+        <div className="login-content" style={{ textAlign: 'center' }}>
+          <h1 className="login-title">Lien expiré</h1>
+          <p style={{ color: 'var(--color-text-secondary, #ccc)', marginBottom: '1.5rem' }}>
+            Ce lien de réinitialisation n'est plus valide ou a expiré.<br />
+            Demandez un nouveau lien.
+          </p>
+          <button className="submit-button login-submit" onClick={() => navigate('/forgot-password', { replace: true })}>
+            Demander un nouveau lien
+          </button>
+        </div>
+      </main>
+    )
   }
 
   return (
@@ -51,13 +105,9 @@ export default function ResetPasswordPage() {
           <img src={appLogo} alt="" className="forgot-shield-logo" aria-hidden="true" />
         </div>
         <h1 className="login-title">Réinitialiser le mot de passe</h1>
-        {email ? (
-          <p className="login-signup" style={{ marginTop: 0, marginBottom: '0.75rem' }}>
-            Compte: <strong style={{ color: '#d7b45a' }}>{email}</strong>
-          </p>
-        ) : null}
 
         {error ? <div className="auth-alert auth-alert--error">{error}</div> : null}
+        {success ? <div className="auth-alert auth-alert--ok">{success}</div> : null}
 
         <form className="form login-form" onSubmit={handleSubmit}>
           <div className="login-field login-field--password">
@@ -108,12 +158,17 @@ export default function ResetPasswordPage() {
             </div>
           </div>
 
-          <button type="submit" className="submit-button login-submit">
-            Confirmer et se connecter
+          <button type="submit" className="submit-button login-submit" disabled={loading}>
+            {loading ? 'Modification…' : 'Confirmer et se connecter'}
           </button>
         </form>
+
+        <div className="forgot-bottom">
+          <button type="button" className="forgot-nav-btn" onClick={() => navigate('/login')}>
+            ← Retour à la connexion
+          </button>
+        </div>
       </div>
     </main>
   )
 }
-

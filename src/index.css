@@ -15,6 +15,7 @@ body {
   min-height: 100vh;
   overflow-x: hidden;
   background: #1d2915;
+  color: #d7e5d8;
 }
 
 #root {

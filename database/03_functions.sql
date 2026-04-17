@@ -1,0 +1,1128 @@
+-- =============================================================================
+-- ZITOUNA — 03_functions.sql
+-- Stored functions and RPCs consumed by the app.
+-- Apply after 02_schema.sql (needs the tables).
+-- Safe to re-run (all CREATE OR REPLACE).
+-- =============================================================================
+
+-- Prerequisite: schema applied.
+DO $zit$
+BEGIN
+  IF to_regclass('public.clients') IS NULL THEN
+    RAISE EXCEPTION 'ZITOUNA: run 02_schema.sql before 03_functions.sql.';
+  END IF;
+END;
+$zit$;
+
+-- ============================================================================
+-- Helper predicates
+-- ============================================================================
+
+-- "is active staff": admin_users row matching the JWT email.
+-- Case-insensitive + trim on BOTH sides so "Email@Example.com" in admin_users
+-- matches "email@example.com" in the JWT (and vice-versa). Historically the
+-- raw equality caused RLS denials on clients/sales INSERT for staff whose
+-- email casing drifted between the two tables.
+create or replace function public.is_active_staff()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.admin_users au
+    where lower(trim(coalesce(au.email, ''))) = lower(trim(coalesce(auth.email(), '')))
+      and au.status = 'active'
+      and coalesce(trim(auth.email()), '') <> ''
+  );
+$$;
+
+-- Current client id from auth.uid(). Null when the caller is not a buyer.
+-- Deterministic: if multiple clients rows ever share the same auth_user_id
+-- (which ux_clients_auth_user should prevent, but historical data may have it),
+-- always return the oldest row by created_at, then by id, so the resolution is
+-- stable across sessions. current_client_id_is_ambiguous() lets callers
+-- diagnose the duplicate case explicitly.
+create or replace function public.current_client_id()
+returns uuid
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select c.id from public.clients c
+  where c.auth_user_id = auth.uid()
+  order by c.created_at asc, c.id asc
+  limit 1;
+$$;
+
+create or replace function public.current_client_id_is_ambiguous()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select (select count(*) from public.clients c where c.auth_user_id = auth.uid()) > 1;
+$$;
+
+-- Mirrors src/lib/phone.js `normalizePhone` (E.164-style + TN country handling).
+create or replace function public.normalize_phone_e164(raw text)
+returns text
+language plpgsql
+immutable
+as $$
+declare
+  s text;
+  digits text;
+begin
+  if raw is null then return null; end if;
+  s := trim(raw);
+  if s = '' then return null; end if;
+  s := regexp_replace(s, '\s+', '', 'g');
+  digits := regexp_replace(s, '\D', '', 'g');
+  if coalesce(digits, '') = '' then return null; end if;
+  if s ~ '^\+' then return '+' || digits; end if;
+  if length(digits) = 8 and substring(s from 1 for 3) <> '216' then
+    return '+216' || digits;
+  end if;
+  if substring(digits from 1 for 3) = '216' then return '+' || digits; end if;
+  return '+' || digits;
+end;
+$$;
+
+-- ============================================================================
+-- Profile self-heal: ensures a public.clients row linked to the current JWT,
+-- and re-attaches sales / installment plans / page grants / commission events /
+-- ambassador wallet rows that were created against a pre-signup stub client
+-- (phone-based lookup).
+--
+-- Returns jsonb:
+--   { ok: boolean, reason: text|null, clientId: uuid|null, ambiguous: boolean,
+--     phoneConflict: boolean, migrated: { sales, plans, grants, commissions,
+--     wallets } }
+--
+-- Distinct reasons let the UI differentiate "profil absent" vs "profil ambigu"
+-- vs "téléphone déjà lié à un autre compte" instead of a generic "en cours".
+-- ============================================================================
+create or replace function public.ensure_current_client_profile()
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, auth
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_email text := nullif(lower(auth.email()), '');
+  v_name text := 'Client';
+  v_phone text := null;
+  v_client_id uuid := null;
+  v_code text;
+  v_phone_digits text;
+  v_cc text;
+  v_cl_phone text;
+  v_cl_pn text;
+  v_candidates text[];
+  v_ambiguous boolean := false;
+  v_phone_conflict boolean := false;
+  v_existing_auth_owner uuid := null;
+  v_migrated_sales int := 0;
+  v_migrated_plans int := 0;
+  v_migrated_grants int := 0;
+  v_migrated_commissions int := 0;
+  v_migrated_wallets int := 0;
+begin
+  if v_uid is null then
+    return jsonb_build_object(
+      'ok', false, 'reason', 'not_authenticated',
+      'clientId', null, 'ambiguous', false, 'phoneConflict', false,
+      'migrated', jsonb_build_object('sales',0,'plans',0,'grants',0,'commissions',0,'wallets',0)
+    );
+  end if;
+
+  select
+    coalesce(
+      nullif(trim(concat(au.raw_user_meta_data->>'firstname', ' ', au.raw_user_meta_data->>'lastname')), ''),
+      nullif(au.raw_user_meta_data->>'name', ''),
+      nullif(split_part(au.email, '@', 1), ''),
+      'Client'
+    ),
+    nullif(au.raw_user_meta_data->>'phone', '')
+  into v_name, v_phone
+  from auth.users au
+  where au.id = v_uid;
+
+  -- Link existing client row by email if not already linked.
+  update public.clients c
+  set auth_user_id = v_uid, updated_at = now()
+  where c.auth_user_id is null
+    and v_email is not null
+    and c.email is not null
+    and lower(c.email) = v_email;
+
+  select c.id into v_client_id
+  from public.clients c where c.auth_user_id = v_uid limit 1;
+
+  if v_client_id is null then
+    v_code := 'CL-' || upper(substring(replace(v_uid::text, '-', '') from 1 for 10));
+    insert into public.clients (code, full_name, email, phone, auth_user_id, status)
+    values (v_code, coalesce(v_name, 'Client'), v_email, v_phone, v_uid, 'active')
+    on conflict (email) do update
+      set auth_user_id = excluded.auth_user_id, updated_at = now()
+    returning id into v_client_id;
+  end if;
+
+  -- Register the phone identity for future phone-based linking.
+  if coalesce(trim(v_phone), '') <> '' then
+    v_phone_digits := regexp_replace(v_phone, '\D', '', 'g');
+    if v_phone_digits <> '' then
+      if v_phone ~ '^\s*\+\d+' then
+        v_cc := '+' || coalesce(nullif(substring(v_phone_digits from 1 for 3), ''), '216');
+      else
+        v_cc := '+216';
+      end if;
+      insert into public.client_phone_identities (
+        country_code, phone_local, phone_canonical, client_id, auth_user_id, verification_status
+      )
+      values (v_cc, v_phone_digits, '+' || v_phone_digits, v_client_id, v_uid, 'verified')
+      on conflict (phone_canonical) do update
+        set
+          client_id = coalesce(public.client_phone_identities.client_id, excluded.client_id),
+          auth_user_id = coalesce(public.client_phone_identities.auth_user_id, excluded.auth_user_id),
+          updated_at = now();
+    end if;
+  end if;
+
+  -- Detect duplicate clients rows bound to the same auth user (historical data
+  -- pre-ux_clients_auth_user). current_client_id() already picks the oldest,
+  -- but we flag the caller so the UI can surface a diagnostic instead of
+  -- silently using one branch's data.
+  v_ambiguous := (
+    select count(*) > 1
+    from public.clients c where c.auth_user_id = v_uid
+  );
+
+  -- Detect phone conflict: the canonical phone identity for this phone points
+  -- at a different auth user than the current one. Surface it so the UI can
+  -- show "numéro déjà lié à un autre compte" instead of "en cours".
+  if coalesce(trim(v_phone), '') <> '' then
+    select cpi.auth_user_id into v_existing_auth_owner
+    from public.client_phone_identities cpi
+    where cpi.phone_canonical = '+' || coalesce(
+      nullif(regexp_replace(v_phone, '\D', '', 'g'), ''), ''
+    )
+    limit 1;
+    if v_existing_auth_owner is not null
+       and v_existing_auth_owner is distinct from v_uid then
+      v_phone_conflict := true;
+    end if;
+  end if;
+
+  -- Re-attach sales owned by a stub client that matches this buyer's phone.
+  select c.phone, c.phone_normalized::text into v_cl_phone, v_cl_pn
+  from public.clients c where c.id = v_client_id;
+
+  select coalesce(array_agg(distinct x), '{}'::text[]) into v_candidates
+  from (
+    select public.normalize_phone_e164(v_phone) as x
+    union all select public.normalize_phone_e164(v_cl_phone)
+    union all select public.normalize_phone_e164(v_cl_pn)
+    union all
+    select cpi.phone_canonical
+    from public.client_phone_identities cpi
+    where cpi.client_id = v_client_id or cpi.auth_user_id = v_uid
+  ) q
+  where x is not null and x <> '';
+
+  if v_candidates is not null and cardinality(v_candidates) > 0 then
+    update public.sales s
+    set
+      client_id = v_client_id,
+      buyer_auth_user_id = coalesce(s.buyer_auth_user_id, v_uid),
+      buyer_phone_normalized = coalesce(
+        nullif(trim(both from s.buyer_phone_normalized), ''),
+        public.normalize_phone_e164(c_old.phone),
+        public.normalize_phone_e164(c_old.phone_normalized::text)
+      ),
+      updated_at = now()
+    from public.clients c_old
+    where s.client_id = c_old.id
+      and s.client_id is distinct from v_client_id
+      and (s.buyer_auth_user_id is null or s.buyer_auth_user_id = v_uid)
+      and (c_old.auth_user_id is null or c_old.auth_user_id = v_uid)
+      and (
+        (
+          coalesce(nullif(trim(both from s.buyer_phone_normalized), ''), '') <> ''
+          and (
+            s.buyer_phone_normalized = any (v_candidates)
+            or regexp_replace(s.buyer_phone_normalized, '\D', '', 'g') = any (
+              select regexp_replace(t, '\D', '', 'g') from unnest(v_candidates) as t
+            )
+            or (
+              length(regexp_replace(s.buyer_phone_normalized, '\D', '', 'g')) >= 8
+              and right(regexp_replace(s.buyer_phone_normalized, '\D', '', 'g'), 8) = any (
+                select right(regexp_replace(t, '\D', '', 'g'), 8)
+                from unnest(v_candidates) as t
+                where length(regexp_replace(t, '\D', '', 'g')) >= 8
+              )
+            )
+          )
+        )
+        or (
+          coalesce(nullif(trim(both from s.buyer_phone_normalized), ''), '') = ''
+          and (
+            public.normalize_phone_e164(c_old.phone) = any (v_candidates)
+            or public.normalize_phone_e164(c_old.phone_normalized::text) = any (v_candidates)
+            or regexp_replace(coalesce(c_old.phone, ''), '\D', '', 'g')
+              = any (select regexp_replace(t, '\D', '', 'g') from unnest(v_candidates) as t)
+            or (
+              length(regexp_replace(coalesce(c_old.phone, ''), '\D', '', 'g')) >= 8
+              and right(regexp_replace(coalesce(c_old.phone, ''), '\D', '', 'g'), 8) = any (
+                select right(regexp_replace(t, '\D', '', 'g'), 8)
+                from unnest(v_candidates) as t
+                where length(regexp_replace(t, '\D', '', 'g')) >= 8
+              )
+            )
+          )
+        )
+      );
+    GET DIAGNOSTICS v_migrated_sales = ROW_COUNT;
+  end if;
+
+  -- Keep installment_plans.client_id aligned with its sale.
+  update public.installment_plans p
+  set client_id = v_client_id, updated_at = now()
+  from public.sales s
+  where p.sale_id = s.id
+    and s.client_id = v_client_id
+    and p.client_id is distinct from v_client_id;
+  GET DIAGNOSTICS v_migrated_plans = ROW_COUNT;
+
+  -- Re-point commission_events whose underlying sale now belongs to v_client_id
+  -- but whose beneficiary_client_id is still on the old stub client. Only move
+  -- rows whose current beneficiary has no independent auth user — we never
+  -- steal commissions from another authenticated buyer's account.
+  --
+  -- Note: Postgres forbids joining the UPDATE target (ce) as a secondary table
+  -- in the FROM clause, so the "old beneficiary is unclaimed" check must go
+  -- through an EXISTS / NOT EXISTS subquery correlated on ce.beneficiary_client_id.
+  update public.commission_events ce
+  set beneficiary_client_id = v_client_id, updated_at = now()
+  from public.sales s
+  where ce.sale_id = s.id
+    and s.client_id = v_client_id
+    and ce.beneficiary_client_id is distinct from v_client_id
+    and (
+      not exists (
+        select 1 from public.clients oc where oc.id = ce.beneficiary_client_id
+      )
+      or exists (
+        select 1 from public.clients oc
+        where oc.id = ce.beneficiary_client_id
+          and (oc.auth_user_id is null or oc.auth_user_id = v_uid)
+      )
+    );
+  GET DIAGNOSTICS v_migrated_commissions = ROW_COUNT;
+
+  -- Merge ambassador_wallets rows that belonged to old stubs of this user into
+  -- the canonical v_client_id row.
+  with candidates as (
+    select w.client_id, w.balance
+    from public.ambassador_wallets w
+    join public.clients oc on oc.id = w.client_id
+    where oc.id <> v_client_id
+      and (oc.auth_user_id is null or oc.auth_user_id = v_uid)
+      and exists (
+        select 1 from public.commission_events ce
+        join public.sales s on s.id = ce.sale_id
+        where s.client_id = v_client_id
+          and ce.beneficiary_client_id = oc.id
+      )
+  ), merged as (
+    insert into public.ambassador_wallets (client_id, balance, updated_at)
+    select v_client_id, coalesce(sum(c.balance), 0), now() from candidates c
+    on conflict (client_id) do update
+      set balance = public.ambassador_wallets.balance + excluded.balance,
+          updated_at = now()
+    returning client_id
+  ), deleted as (
+    delete from public.ambassador_wallets w
+    using candidates c where w.client_id = c.client_id
+    returning w.client_id
+  )
+  select count(*) into v_migrated_wallets from deleted;
+
+  -- Re-point checklist page grants that still reference the old stub.
+  update public.page_access_grants g
+  set client_id = v_client_id
+  from public.sales s
+  where g.source_sale_id = s.id
+    and s.client_id = v_client_id
+    and g.revoked_at is null
+    and g.client_id is distinct from v_client_id
+    and not exists (
+      select 1 from public.clients oc
+      where oc.id = g.client_id
+        and oc.auth_user_id is not null
+        and oc.auth_user_id is distinct from v_uid
+    )
+    and not exists (
+      select 1 from public.page_access_grants ex
+      where ex.client_id = v_client_id and ex.page_key = g.page_key and ex.revoked_at is null
+    );
+
+  -- Copy any still-active grants owned by an old stub onto v_client_id. Two old
+  -- grants for the same (client_id, page_key) can both pass the NOT EXISTS
+  -- pre-check against the pre-statement snapshot, so we also guard with
+  -- ON CONFLICT on the partial unique index to avoid unique violations.
+  insert into public.page_access_grants (client_id, page_key, source_sale_id, source_checklist_key)
+  select v_client_id, g.page_key, g.source_sale_id, g.source_checklist_key
+  from public.page_access_grants g
+  inner join public.sales s on s.id = g.source_sale_id
+  where s.client_id = v_client_id
+    and g.revoked_at is null
+    and g.client_id is distinct from v_client_id
+    and not exists (
+      select 1 from public.page_access_grants ex
+      where ex.client_id = v_client_id and ex.page_key = g.page_key and ex.revoked_at is null
+    )
+  on conflict do nothing;
+  GET DIAGNOSTICS v_migrated_grants = ROW_COUNT;
+
+  -- Audit trail: leave a trace whenever the heal actually migrated something.
+  -- Zero-row runs stay quiet to keep audit_logs manageable. This lets support
+  -- correlate "mysterious" wallet/parrainage recoveries to a specific login.
+  if (v_migrated_sales + v_migrated_plans + v_migrated_grants
+       + v_migrated_commissions + v_migrated_wallets) > 0
+     or v_ambiguous or v_phone_conflict then
+    insert into public.audit_logs (
+      actor_user_id, actor_email, action, entity, entity_id,
+      details, metadata, category, source, subject_user_id
+    ) values (
+      null, v_email, 'client_profile_heal', 'client',
+      coalesce(v_client_id::text, v_uid::text),
+      case
+        when v_ambiguous then 'Heal: doublons clients détectés'
+        when v_phone_conflict then 'Heal: conflit téléphone détecté'
+        else 'Heal: rattachement effectué'
+      end,
+      jsonb_build_object(
+        'auth_user_id', v_uid,
+        'client_id', v_client_id,
+        'ambiguous', v_ambiguous,
+        'phone_conflict', v_phone_conflict,
+        'migrated', jsonb_build_object(
+          'sales', v_migrated_sales,
+          'plans', v_migrated_plans,
+          'grants', v_migrated_grants,
+          'commissions', v_migrated_commissions,
+          'wallets', v_migrated_wallets
+        )
+      ),
+      'governance', 'database', v_uid
+    );
+  end if;
+
+  return jsonb_build_object(
+    'ok', not (v_ambiguous or v_phone_conflict),
+    'reason', case
+      when v_ambiguous then 'ambiguous_client_profile'
+      when v_phone_conflict then 'phone_conflict'
+      else null
+    end,
+    'clientId', v_client_id,
+    'ambiguous', v_ambiguous,
+    'phoneConflict', v_phone_conflict,
+    'migrated', jsonb_build_object(
+      'sales', v_migrated_sales,
+      'plans', v_migrated_plans,
+      'grants', v_migrated_grants,
+      'commissions', v_migrated_commissions,
+      'wallets', v_migrated_wallets
+    )
+  );
+end;
+$$;
+
+-- ============================================================================
+-- Seller parcel assignments listing (staff or self).
+-- ============================================================================
+create or replace function public.list_seller_assignments(p_client_id uuid)
+returns table (
+  assignment_id uuid,
+  client_id uuid,
+  client_name text,
+  project_id text,
+  project_title text,
+  parcel_id bigint,
+  parcel_number int,
+  active boolean,
+  note text,
+  assigned_by uuid,
+  assigned_by_name text,
+  assigned_at timestamptz,
+  revoked_by uuid,
+  revoked_by_name text,
+  revoked_at timestamptz,
+  revoked_reason text
+)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    spa.id, spa.client_id, c.full_name, spa.project_id, pr.title,
+    spa.parcel_id, pa.parcel_number, spa.active, spa.note,
+    spa.assigned_by, au1.full_name, spa.assigned_at,
+    spa.revoked_by, au2.full_name, spa.revoked_at, spa.revoked_reason
+  from public.seller_parcel_assignments spa
+  join public.clients c on c.id = spa.client_id
+  left join public.projects pr on pr.id = spa.project_id
+  left join public.parcels pa on pa.id = spa.parcel_id
+  left join public.admin_users au1 on au1.id = spa.assigned_by
+  left join public.admin_users au2 on au2.id = spa.revoked_by
+  where p_client_id is not null
+    and spa.client_id = p_client_id
+    and (public.is_active_staff() or p_client_id = public.current_client_id())
+  order by spa.assigned_at desc;
+$$;
+
+-- ============================================================================
+-- Referral wallet summary: consumed by the buyer dashboard "Parrainage" card.
+-- Aggregates commission events without requiring a precomputed wallet table,
+-- so numbers stay correct even if ambassador_wallets isn't maintained.
+-- ============================================================================
+create or replace function public.get_my_referral_summary()
+returns jsonb
+language plpgsql
+security definer
+stable
+set search_path = public
+as $$
+declare
+  v_client_id uuid := public.current_client_id();
+  v_ambiguous boolean := public.current_client_id_is_ambiguous();
+  v_gains numeric(14,2) := 0;
+  v_released numeric(14,2) := 0;
+  v_wallet numeric(14,2) := 0;
+  v_min_payout numeric(14,2) := 0;
+  v_project_ids text[];
+  v_max_depth int := 0;
+  -- Diagnostic counters: let the UI explain why the wallet is empty
+  -- ("you're not the seller on any sale", "no notary yet", etc.).
+  v_linked_as_buyer int := 0;
+  v_linked_as_seller int := 0;
+  v_linked_as_ambassador int := 0;
+  v_linked_as_agent int := 0;
+  v_notary_complete_total int := 0;
+  v_commission_event_count int := 0;
+  v_latest_sale_summary jsonb := '[]'::jsonb;
+begin
+  if v_client_id is null then
+    return jsonb_build_object(
+      'ok', false,
+      'reason', 'no_client_profile',
+      'clientId', null,
+      'ambiguous', false,
+      'gainsAccrued', 0,
+      'commissionsReleased', 0,
+      'walletBalance', 0,
+      'minPayoutAmount', 0,
+      'fieldDepositMin', 0,
+      'fullDepositTarget', 0,
+      'referralGross', 0,
+      'referralGrossPerLevel', 0,
+      'parrainageMaxDepth', 0,
+      'rsRatePct', 0,
+      'levelGrossRules', '[]'::jsonb,
+      'identityVerificationBlocked', false,
+      'diagnostics', jsonb_build_object(
+        'linkedAsBuyer', 0, 'linkedAsSeller', 0, 'linkedAsAmbassador', 0,
+        'linkedAsAgent', 0, 'notaryCompleteTotal', 0, 'commissionEventCount', 0,
+        'latestSales', '[]'::jsonb
+      )
+    );
+  end if;
+
+  -- gainsAccrued: commissions on sales whose notary step isn't completed yet
+  -- (real "in-progress" money — independent of the commission_events.status
+  -- enum, which the current flow inserts directly as 'payable').
+  select coalesce(sum(ce.amount), 0) into v_gains
+  from public.commission_events ce
+  join public.sales s on s.id = ce.sale_id
+  where ce.beneficiary_client_id = v_client_id
+    and ce.status in ('pending', 'payable')
+    and s.notary_completed_at is null;
+
+  -- commissionsReleased: notary-stamped, not yet paid.
+  select coalesce(sum(ce.amount), 0) into v_released
+  from public.commission_events ce
+  join public.sales s on s.id = ce.sale_id
+  where ce.beneficiary_client_id = v_client_id
+    and ce.status in ('payable')
+    and s.notary_completed_at is not null;
+
+  -- walletBalance: payable and NOT locked in an open/approved payout request.
+  select coalesce(sum(ce.amount), 0) into v_wallet
+  from public.commission_events ce
+  where ce.beneficiary_client_id = v_client_id
+    and ce.status = 'payable'
+    and not exists (
+      select 1
+      from public.commission_payout_request_items pri
+      join public.commission_payout_requests pr on pr.id = pri.request_id
+      where pri.commission_event_id = ce.id
+        and pr.status in ('pending_review', 'approved')
+    );
+
+  -- minPayoutAmount: highest threshold across projects the beneficiary has events in.
+  select array_agg(distinct s.project_id) into v_project_ids
+  from public.commission_events ce
+  join public.sales s on s.id = ce.sale_id
+  where ce.beneficiary_client_id = v_client_id;
+
+  if v_project_ids is not null and array_length(v_project_ids, 1) > 0 then
+    -- Use the LOWEST project threshold across the beneficiary's projects so a
+    -- cross-project wallet can cash out once any one project's floor is met
+    -- (matches maxMinPayoutThresholdForSaleIds in db.js). Ignores zero/NULL
+    -- thresholds.
+    select coalesce(min(nullif(wf.minimum_payout_threshold, 0)), 0) into v_min_payout
+    from public.project_workflow_settings wf
+    where wf.project_id = any(v_project_ids)
+      and wf.minimum_payout_threshold is not null
+      and wf.minimum_payout_threshold > 0;
+
+    select coalesce(max(pcr.level), 0) into v_max_depth
+    from public.project_commission_rules pcr
+    where pcr.project_id = any(v_project_ids);
+  end if;
+
+  -- Diagnostic counters: compute how this client is actually linked so the
+  -- dashboard can explain a zero wallet ("0 ventes avec seller_client_id
+  -- = vous → pas de commission possible", etc.) instead of just showing 0 DT.
+  select count(*) into v_linked_as_buyer
+  from public.sales s where s.client_id = v_client_id;
+
+  select count(*) into v_linked_as_seller
+  from public.sales s where s.seller_client_id = v_client_id;
+
+  select count(*) into v_linked_as_ambassador
+  from public.sales s where s.ambassador_client_id = v_client_id;
+
+  -- Agent linkage goes through admin_users: only fills if the current email
+  -- maps to an admin_users.id AND that id appears as sales.agent_id.
+  select count(*) into v_linked_as_agent
+  from public.sales s
+  join public.admin_users au on au.id = s.agent_id
+  where au.email = lower(trim(coalesce(auth.email(), '')));
+
+  select count(*) into v_notary_complete_total
+  from public.sales s
+  where (s.client_id = v_client_id
+      or s.seller_client_id = v_client_id
+      or s.ambassador_client_id = v_client_id)
+    and s.notary_completed_at is not null;
+
+  select count(*) into v_commission_event_count
+  from public.commission_events ce
+  where ce.beneficiary_client_id = v_client_id;
+
+  -- Last 5 linked sales with the fields that matter for commission eligibility.
+  -- Using jsonb_build_object explicitly instead of row_to_jsonb(subquery) which
+  -- doesn't always resolve under a restricted search_path.
+  with recent as (
+    select
+      s.id,
+      s.code,
+      s.status,
+      s.notary_completed_at is not null as notary_done,
+      s.client_id = v_client_id as as_buyer,
+      s.seller_client_id = v_client_id as as_seller,
+      s.ambassador_client_id = v_client_id as as_ambassador,
+      s.agreed_price,
+      s.created_at
+    from public.sales s
+    where s.client_id = v_client_id
+       or s.seller_client_id = v_client_id
+       or s.ambassador_client_id = v_client_id
+    order by s.created_at desc
+    limit 5
+  )
+  select coalesce(
+    jsonb_agg(
+      jsonb_build_object(
+        'id', r.id,
+        'code', r.code,
+        'status', r.status,
+        'notary_done', r.notary_done,
+        'as_buyer', r.as_buyer,
+        'as_seller', r.as_seller,
+        'as_ambassador', r.as_ambassador,
+        'agreed_price', r.agreed_price,
+        'created_at', r.created_at
+      )
+      order by r.created_at desc
+    ),
+    '[]'::jsonb
+  )
+  into v_latest_sale_summary
+  from recent r;
+
+  return jsonb_build_object(
+    'ok', not v_ambiguous,
+    'reason', case when v_ambiguous then 'ambiguous_client_profile' else null end,
+    'clientId', v_client_id,
+    'ambiguous', v_ambiguous,
+    'gainsAccrued', v_gains,
+    'commissionsReleased', v_released,
+    'walletBalance', v_wallet,
+    'minPayoutAmount', v_min_payout,
+    'fieldDepositMin', 0,
+    'fullDepositTarget', 0,
+    'referralGross', 0,
+    'referralGrossPerLevel', 0,
+    'parrainageMaxDepth', v_max_depth,
+    'rsRatePct', 0,
+    'levelGrossRules', '[]'::jsonb,
+    'identityVerificationBlocked', false,
+    'diagnostics', jsonb_build_object(
+      'linkedAsBuyer', v_linked_as_buyer,
+      'linkedAsSeller', v_linked_as_seller,
+      'linkedAsAmbassador', v_linked_as_ambassador,
+      'linkedAsAgent', v_linked_as_agent,
+      'notaryCompleteTotal', v_notary_complete_total,
+      'commissionEventCount', v_commission_event_count,
+      'latestSales', v_latest_sale_summary
+    )
+  );
+end;
+$$;
+
+-- ============================================================================
+-- Ambassador payout request: aggregates unlocked payable events up to p_amount.
+-- Idempotent when p_idempotency_key is provided (looked up in audit_logs).
+-- ============================================================================
+create or replace function public.request_ambassador_payout(
+  p_amount numeric,
+  p_idempotency_key text default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_client_id uuid := public.current_client_id();
+  v_request_id uuid;
+  v_code text;
+  v_sum numeric(14,2) := 0;
+  v_existing_id uuid;
+  v_event_ids uuid[];
+begin
+  if v_client_id is null then
+    raise exception 'NOT_AUTHENTICATED' using errcode = '42501';
+  end if;
+  if p_amount is null or p_amount <= 0 then
+    raise exception 'INVALID_AMOUNT' using errcode = '22023';
+  end if;
+
+  -- Idempotency: same key from same client returns the prior request id.
+  if coalesce(trim(p_idempotency_key), '') <> '' then
+    select (metadata->>'request_id')::uuid
+    into v_existing_id
+    from public.audit_logs
+    where action = 'payout_request_submitted'
+      and metadata->>'client_id' = v_client_id::text
+      and metadata->>'idempotency_key' = p_idempotency_key
+    order by created_at desc
+    limit 1;
+    if v_existing_id is not null then
+      return jsonb_build_object('ok', true, 'requestId', v_existing_id, 'idempotent', true);
+    end if;
+  end if;
+
+  -- Collect unlocked payable events in chronological order.
+  select array_agg(ev_id order by created_at), coalesce(sum(amt), 0)
+  into v_event_ids, v_sum
+  from (
+    select ce.id as ev_id, ce.amount as amt, ce.created_at as created_at
+    from public.commission_events ce
+    where ce.beneficiary_client_id = v_client_id
+      and ce.status = 'payable'
+      and not exists (
+        select 1
+        from public.commission_payout_request_items pri
+        join public.commission_payout_requests pr on pr.id = pri.request_id
+        where pri.commission_event_id = ce.id
+          and pr.status in ('pending_review', 'approved')
+      )
+  ) t;
+
+  if v_event_ids is null or array_length(v_event_ids, 1) = 0 then
+    raise exception 'NO_PAYABLE_EVENTS' using errcode = 'P0001';
+  end if;
+  if v_sum < p_amount then
+    raise exception 'INSUFFICIENT_BALANCE' using errcode = 'P0001';
+  end if;
+
+  v_code := 'PR-' || to_char(now(), 'YYYYMMDD') || '-' ||
+            upper(substring(replace(gen_random_uuid()::text, '-', '') from 1 for 6));
+
+  insert into public.commission_payout_requests (code, beneficiary_client_id, gross_amount, status)
+  values (v_code, v_client_id, p_amount, 'pending_review')
+  returning id into v_request_id;
+
+  insert into public.commission_payout_request_items (request_id, commission_event_id)
+  select v_request_id, evid from unnest(v_event_ids) as t(evid);
+
+  insert into public.audit_logs (actor_user_id, action, entity, entity_id, details, metadata, category, source)
+  values (
+    null, 'payout_request_submitted', 'commission_payout_request', v_request_id::text,
+    'Demande de paiement initiée par le client',
+    jsonb_build_object(
+      'client_id', v_client_id,
+      'idempotency_key', p_idempotency_key,
+      'request_id', v_request_id,
+      'amount', p_amount,
+      'event_ids', v_event_ids
+    ),
+    'business', 'database'
+  );
+
+  return jsonb_build_object('ok', true, 'requestId', v_request_id, 'code', v_code, 'amount', p_amount);
+end;
+$$;
+
+-- ============================================================================
+-- Commission events — DB-side backstop
+--
+-- Mirrors computeCommissionEventPayloads (src/lib/db.js) so that even if a
+-- sale gets its notary_completed_at set by a code path that doesn't call
+-- insertCommissionEventsForCompletedSale, commissions are still created.
+--
+-- Rules:
+--   * Fires AFTER UPDATE when notary_completed_at transitions to non-null.
+--   * Idempotent: skips when commission_events already exist for the sale.
+--   * Mirror of JS guard: L1 never credited to the buyer; upline walks
+--     seller_relations up to the deepest configured rule level.
+--   * Rules come from sales.commission_rule_snapshot->'levels' when present,
+--     otherwise from project_commission_rules for the sale's project.
+-- ============================================================================
+create or replace function public.compute_and_insert_commissions_for_sale(p_sale_id uuid)
+returns int
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_sale record;
+  v_buyer uuid;
+  v_seller uuid;
+  v_has_real_seller boolean;
+  v_walk uuid;
+  v_parent uuid;
+  v_chain uuid[] := '{}';
+  v_i int;
+  v_steps int := 0;
+  v_level int;
+  v_max_level int := 0;
+  v_rule jsonb;
+  v_rules jsonb;
+  v_amount numeric(14,2);
+  v_base numeric(14,2);
+  v_inserted int := 0;
+  v_beneficiary uuid;
+  v_cap numeric(14,2);
+  v_rule_type text;
+  v_rule_value numeric(14,4);
+begin
+  select * into v_sale from public.sales where id = p_sale_id;
+  if not found then return 0; end if;
+
+  -- Idempotent guard: do nothing if any commission already exists.
+  if exists (select 1 from public.commission_events where sale_id = p_sale_id) then
+    return 0;
+  end if;
+
+  v_buyer  := v_sale.client_id;
+  v_seller := v_sale.seller_client_id;
+  v_has_real_seller := v_seller is not null and v_seller <> v_buyer;
+
+  -- Build rules: prefer per-sale snapshot; otherwise project-level rules.
+  v_rules := coalesce(v_sale.commission_rule_snapshot -> 'levels', '[]'::jsonb);
+  if jsonb_array_length(v_rules) = 0 then
+    select jsonb_agg(jsonb_build_object(
+      'level', pcr.level,
+      'rule_type', pcr.rule_type,
+      'value', pcr.value,
+      'maxCapAmount', pcr.max_cap_amount
+    ) order by pcr.level)
+    into v_rules
+    from public.project_commission_rules pcr
+    where pcr.project_id = v_sale.project_id;
+    v_rules := coalesce(v_rules, '[]'::jsonb);
+  end if;
+  if jsonb_array_length(v_rules) = 0 then return 0; end if;
+
+  -- Upline walk: start at seller (if real) else at buyer; drop buyer from
+  -- the chain so L1 never credits the buyer.
+  v_walk := case when v_has_real_seller then v_seller else v_buyer end;
+  while v_walk is not null and v_steps < 40 loop
+    if v_walk = any (v_chain) then exit; end if;
+    v_chain := v_chain || v_walk;
+    select sr.parent_client_id into v_parent
+    from public.seller_relations sr where sr.child_client_id = v_walk limit 1;
+    v_walk := v_parent;
+    v_parent := null;
+    v_steps := v_steps + 1;
+  end loop;
+
+  if not v_has_real_seller then
+    -- Drop the buyer from the front of the chain.
+    v_chain := array_remove(v_chain, v_buyer);
+  end if;
+
+  if array_length(v_chain, 1) is null then return 0; end if;
+
+  -- Determine max level from rules.
+  select max((elem ->> 'level')::int) into v_max_level
+  from jsonb_array_elements(v_rules) as elem;
+
+  v_base := coalesce(v_sale.agreed_price, 0);
+
+  for v_i in 1 .. coalesce(array_length(v_chain, 1), 0) loop
+    v_level := v_i;
+    if v_max_level > 0 and v_level > v_max_level then exit; end if;
+    v_beneficiary := v_chain[v_i];
+    if v_beneficiary is null then continue; end if;
+
+    -- Find matching rule by level, fallback to the v_i-th element.
+    select elem into v_rule
+    from jsonb_array_elements(v_rules) as elem
+    where (elem ->> 'level')::int = v_level
+    limit 1;
+    if v_rule is null then
+      v_rule := v_rules -> (v_i - 1);
+    end if;
+    if v_rule is null then continue; end if;
+
+    v_rule_type := coalesce(v_rule ->> 'rule_type', v_rule ->> 'ruleType', 'fixed');
+    v_rule_value := coalesce((v_rule ->> 'value')::numeric, 0);
+    v_cap := nullif(v_rule ->> 'maxCapAmount', '')::numeric;
+
+    if v_rule_type = 'percent' then
+      v_amount := round(v_base * v_rule_value / 100, 2);
+    else
+      v_amount := round(v_rule_value, 2);
+    end if;
+    if v_cap is not null then v_amount := least(v_amount, v_cap); end if;
+    if v_amount <= 0 then continue; end if;
+
+    insert into public.commission_events (
+      sale_id, beneficiary_client_id, level, rule_snapshot, amount, status, payable_at
+    ) values (
+      p_sale_id, v_beneficiary, v_level,
+      jsonb_build_object(
+        'source', 'db_trigger',
+        'rule', v_rule,
+        'meta', jsonb_build_object(
+          'saleId', p_sale_id,
+          'saleProjectId', v_sale.project_id,
+          'buyerClientId', v_buyer,
+          'level', v_level,
+          'beneficiaryClientId', v_beneficiary,
+          'directSeller', case when v_has_real_seller then v_seller::text else null end,
+          'fallbackFromBuyerUpline', not v_has_real_seller,
+          'chainPath', to_jsonb(v_chain[1:v_i]),
+          'computedAmount', v_amount,
+          'amountBase', v_base,
+          'computedAt', now()
+        )
+      ),
+      v_amount, 'payable', coalesce(v_sale.notary_completed_at, now())
+    );
+    v_inserted := v_inserted + 1;
+  end loop;
+
+  if v_inserted > 0 then
+    insert into public.audit_logs (action, entity, entity_id, details, metadata, category, source)
+    values (
+      'commission_events_created', 'sale', p_sale_id::text,
+      'DB backstop created ' || v_inserted || ' commission line(s).',
+      jsonb_build_object('source', 'db_trigger', 'count', v_inserted),
+      'business', 'database'
+    );
+  end if;
+  return v_inserted;
+end;
+$$;
+
+create or replace function public.trg_sales_notary_commissions()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if NEW.notary_completed_at is not null
+     and (OLD.notary_completed_at is null or OLD.notary_completed_at is distinct from NEW.notary_completed_at) then
+    perform public.compute_and_insert_commissions_for_sale(NEW.id);
+  end if;
+  return NEW;
+end;
+$$;
+
+drop trigger if exists trg_sales_notary_commissions on public.sales;
+create trigger trg_sales_notary_commissions
+  after update of notary_completed_at on public.sales
+  for each row execute function public.trg_sales_notary_commissions();
+
+-- ============================================================================
+-- ambassador_wallets: transactional projection
+--
+-- The "truth" for available balance lives in commission_events minus events
+-- locked in an active payout request. Previously ambassador_wallets was an
+-- unused mirror; now we keep it in sync via triggers on commission_events and
+-- commission_payout_request_items, so downstream consumers (BI, dashboards)
+-- can read a stable denormalized row without re-running the aggregation.
+--
+-- Rules:
+--   * One row per beneficiary_client_id.
+--   * balance = sum(amount) where status='payable' AND not locked in a
+--     pending_review/approved payout request.
+--   * Triggers recompute the affected client's row on any change.
+-- ============================================================================
+create or replace function public.recompute_ambassador_wallet(p_client_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_balance numeric(14,2) := 0;
+begin
+  if p_client_id is null then return; end if;
+  select coalesce(sum(ce.amount), 0) into v_balance
+  from public.commission_events ce
+  where ce.beneficiary_client_id = p_client_id
+    and ce.status = 'payable'
+    and not exists (
+      select 1
+      from public.commission_payout_request_items pri
+      join public.commission_payout_requests pr on pr.id = pri.request_id
+      where pri.commission_event_id = ce.id
+        and pr.status in ('pending_review', 'approved')
+    );
+  insert into public.ambassador_wallets (client_id, balance, updated_at)
+  values (p_client_id, v_balance, now())
+  on conflict (client_id) do update
+    set balance = excluded.balance, updated_at = now();
+end;
+$$;
+
+create or replace function public.trg_ambassador_wallet_from_event()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if (TG_OP = 'DELETE') then
+    perform public.recompute_ambassador_wallet(OLD.beneficiary_client_id);
+    return OLD;
+  end if;
+  perform public.recompute_ambassador_wallet(NEW.beneficiary_client_id);
+  if TG_OP = 'UPDATE' and NEW.beneficiary_client_id is distinct from OLD.beneficiary_client_id then
+    perform public.recompute_ambassador_wallet(OLD.beneficiary_client_id);
+  end if;
+  return NEW;
+end;
+$$;
+
+drop trigger if exists trg_commission_events_wallet on public.commission_events;
+create trigger trg_commission_events_wallet
+  after insert or update or delete on public.commission_events
+  for each row execute function public.trg_ambassador_wallet_from_event();
+
+create or replace function public.trg_ambassador_wallet_from_payout_item()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_client uuid;
+begin
+  if (TG_OP = 'DELETE') then
+    select ce.beneficiary_client_id into v_client
+    from public.commission_events ce where ce.id = OLD.commission_event_id;
+    if v_client is not null then perform public.recompute_ambassador_wallet(v_client); end if;
+    return OLD;
+  end if;
+  select ce.beneficiary_client_id into v_client
+  from public.commission_events ce where ce.id = NEW.commission_event_id;
+  if v_client is not null then perform public.recompute_ambassador_wallet(v_client); end if;
+  return NEW;
+end;
+$$;
+
+drop trigger if exists trg_payout_items_wallet on public.commission_payout_request_items;
+create trigger trg_payout_items_wallet
+  after insert or update or delete on public.commission_payout_request_items
+  for each row execute function public.trg_ambassador_wallet_from_payout_item();
+
+create or replace function public.trg_ambassador_wallet_from_payout_status()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if (TG_OP = 'UPDATE' and NEW.status is distinct from OLD.status) or TG_OP = 'INSERT' or TG_OP = 'DELETE' then
+    perform public.recompute_ambassador_wallet(coalesce(NEW.beneficiary_client_id, OLD.beneficiary_client_id));
+  end if;
+  if TG_OP = 'DELETE' then return OLD; end if;
+  return NEW;
+end;
+$$;
+
+drop trigger if exists trg_payout_req_wallet on public.commission_payout_requests;
+create trigger trg_payout_req_wallet
+  after insert or update or delete on public.commission_payout_requests
+  for each row execute function public.trg_ambassador_wallet_from_payout_status();
+
+-- ============================================================================
+-- Staff-only wallet delta helper (optional; wallet balance is derived by
+-- get_my_referral_summary, this is here for manual adjustments / migrations).
+-- ============================================================================
+create or replace function public.increment_ambassador_wallet_balance(
+  p_client_id uuid,
+  p_delta numeric
+)
+returns numeric
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_new numeric(14,2);
+begin
+  if p_client_id is null or p_delta is null then
+    raise exception 'INVALID_PARAMS' using errcode = '22023';
+  end if;
+  if not public.is_active_staff() then
+    raise exception 'FORBIDDEN' using errcode = '42501';
+  end if;
+
+  insert into public.ambassador_wallets (client_id, balance, updated_at)
+  values (p_client_id, p_delta, now())
+  on conflict (client_id) do update
+    set balance = public.ambassador_wallets.balance + excluded.balance,
+        updated_at = now()
+  returning balance into v_new;
+
+  return v_new;
+end;
+$$;

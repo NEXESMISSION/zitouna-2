@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(rm -f schema.sql seed.sql full_reset.sql full_reset_keep_accounts.sql rls_public_catalog_policies.sql rls_private_app_policies.sql migration_notary_checklist_signed.sql manual_create_user_saifelleuchi127.sql)",
+      "Bash(rmdir migrations *)",
+      "Bash(node --check src/lib/AuthContext.jsx)",
+      "Bash(node --check src/lib/db.js)",
+      "Bash(npx vite *)",
+      "Bash(npx eslint *)",
+      "Bash(tee /tmp/eslint_output.txt)"
+    ]
+  }
+}

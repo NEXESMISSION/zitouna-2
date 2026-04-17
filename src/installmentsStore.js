@@ -1,29 +1,31 @@
-import { myInstallments } from './installments.js'
+function toIsoDate(d) {
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10)
+}
 
-const STORAGE_KEY = 'zitouna_installments_v1'
+export function generatePaymentSchedule({
+  totalPrice = 0,
+  downPayment = 0,
+  totalMonths = 12,
+  startDate = toIsoDate(new Date()),
+}) {
+  const months = Math.max(1, Number(totalMonths) || 1)
+  const remain = Math.max(0, Math.round((Number(totalPrice) - Number(downPayment)) * 100) / 100)
+  const baseMonthly = Math.round((remain / months) * 100) / 100
+  const priorSum = Math.round(baseMonthly * (months - 1) * 100) / 100
+  const lastMonthly = Math.round((remain - priorSum) * 100) / 100
+  const start = new Date(startDate)
 
-function safeParse(json) {
-  try {
-    return JSON.parse(json)
-  } catch {
-    return null
+  const payments = []
+  for (let i = 0; i < months; i += 1) {
+    const due = new Date(start)
+    due.setMonth(due.getMonth() + i)
+    payments.push({
+      month: i + 1,
+      dueDate: toIsoDate(due),
+      amount: i === months - 1 ? lastMonthly : baseMonthly,
+      status: 'pending',
+    })
   }
-}
-
-function cloneDefaults() {
-  return JSON.parse(JSON.stringify(myInstallments))
-}
-
-export function loadInstallments() {
-  if (typeof window === 'undefined') return cloneDefaults()
-  const raw = window.localStorage.getItem(STORAGE_KEY)
-  if (!raw) return cloneDefaults()
-  const parsed = safeParse(raw)
-  return Array.isArray(parsed) ? parsed : cloneDefaults()
-}
-
-export function saveInstallments(plans) {
-  if (typeof window === 'undefined') return
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(plans))
+  return payments
 }
 

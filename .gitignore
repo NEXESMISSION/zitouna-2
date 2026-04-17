@@ -5,6 +5,9 @@ node_modules/
 dist/
 dist-ssr/
 
+# Local auth API store (password hashes — never commit)
+backend/data/auth.json
+
 # Environment variables
 .env
 .env.local
