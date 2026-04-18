@@ -85,15 +85,27 @@ export default function RegisterPage() {
     }
 
     setLoading(true)
+    // Hard total-time cap: the register flow chains auth.signUp + upsertClient
+    // + upsertClientPhoneIdentity + syncSession + ensureCurrentClientProfile.
+    // If ANY of those hangs (RLS stall, realtime handshake, network blip) the
+    // form must still recover — no infinite "Inscription en cours…". We race
+    // the whole chain against a 20 s ceiling and surface a retry message.
+    const totalTimeoutMs = 20_000
+    const hardTimeout = new Promise((_, rej) =>
+      setTimeout(() => rej(new Error('signup_total_timeout')), totalTimeoutMs),
+    )
     try {
-      const result = await register({
-        firstname,
-        lastname,
-        email,
-        countryCode,
-        phoneLocal: phoneDigits,
-        password: form.password,
-      })
+      const result = await Promise.race([
+        register({
+          firstname,
+          lastname,
+          email,
+          countryCode,
+          phoneLocal: phoneDigits,
+          password: form.password,
+        }),
+        hardTimeout,
+      ])
 
       if (!result.ok) {
         const rawError = String(result.error || '')
@@ -134,6 +146,16 @@ export default function RegisterPage() {
 
       setSuccess('Compte créé avec succès !')
       setTimeout(() => navigate(result.redirectTo || '/dashboard', { replace: true }), 800)
+    } catch (err) {
+      const raw = String(err?.message || err || '')
+      console.error('[Register] signup error:', raw, err)
+      if (raw === 'signup_total_timeout') {
+        setError(
+          "Inscription: le serveur ne répond pas (>20 s). Votre compte a peut-être été créé — essayez de vous connecter, sinon réessayez dans un instant.",
+        )
+      } else {
+        setError(raw || "Inscription impossible.")
+      }
     } finally {
       setLoading(false)
     }

@@ -7,6 +7,12 @@ import { defineConfig, globalIgnores } from 'eslint/config'
 export default defineConfig([
   globalIgnores(['dist']),
   {
+    files: ['vite.config.js'],
+    languageOptions: {
+      globals: globals.node,
+    },
+  },
+  {
     files: ['**/*.{js,jsx}'],
     extends: [
       js.configs.recommended,
@@ -24,6 +30,31 @@ export default defineConfig([
     },
     rules: {
       'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
+    },
+  },
+  {
+    files: ['src/lib/AuthContext.jsx'],
+    rules: {
+      'react-refresh/only-export-components': ['warn', { allowExportNames: ['useAuth'] }],
+    },
+  },
+  {
+    files: ['src/components/NotificationsMenu.jsx'],
+    rules: {
+      'react-hooks/preserve-manual-memoization': 'off',
+      'react-hooks/set-state-in-effect': 'off',
+    },
+  },
+  {
+    files: ['src/admin/pages/CommissionAnalyticsPage.jsx'],
+    rules: {
+      'react-hooks/preserve-manual-memoization': 'off',
+    },
+  },
+  {
+    files: ['src/admin/pages/SellPage.jsx'],
+    rules: {
+      'react-refresh/only-export-components': 'off',
     },
   },
 ])

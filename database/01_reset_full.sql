@@ -10,6 +10,19 @@
 -- =============================================================================
 
 -- ---- 1. auth schema: sessions / identities / users ----
+--
+-- NOTE: Zitouna installs two triggers on auth.users (see 03_functions.sql)
+-- that call public.trg_auth_users_autolink_clients. Because the DROP SCHEMA
+-- public CASCADE below removes that function but NOT the auth.users trigger,
+-- any subsequent INSERT into auth.users would fail until 03_functions.sql
+-- is re-applied. Dropping the triggers here keeps the reset idempotent.
+DO $$
+BEGIN
+  DROP TRIGGER IF EXISTS zitouna_auth_users_autolink_insert ON auth.users;
+  DROP TRIGGER IF EXISTS zitouna_auth_users_autolink_update ON auth.users;
+EXCEPTION WHEN undefined_table THEN NULL;
+END $$;
+
 DO $$
 DECLARE
   _count bigint;

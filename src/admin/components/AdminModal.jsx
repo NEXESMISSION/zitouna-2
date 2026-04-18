@@ -19,7 +19,7 @@ export default function AdminModal({ open, onClose, title, children, footer, wid
     return () => {
       window.removeEventListener('keydown', onKey, true)
       if (lockEl === document.body) {
-        const otherOverlay = document.querySelector('.adm-drawer-overlay')
+        const otherOverlay = document.querySelector('.zadm-drawer-overlay, .adm-drawer-overlay')
         if (!otherOverlay) lockEl.style.overflow = hadOverflow || ''
       } else {
         lockEl.style.overflow = hadOverflow || ''
@@ -30,22 +30,22 @@ export default function AdminModal({ open, onClose, title, children, footer, wid
   if (!open) return null
 
   return (
-    <div className="adm-modal-overlay" ref={overlayRef} onClick={(e) => { if (e.target === overlayRef.current) onClose() }}>
-      <div className="adm-modal" style={{ maxWidth: width }}>
+    <div className="zadm-modal-overlay" ref={overlayRef} onClick={(e) => { if (e.target === overlayRef.current) onClose() }}>
+      <div className="zadm-modal" style={{ maxWidth: width }} role="dialog" aria-modal="true">
         {title ? (
-          <header className="adm-modal-header">
-            <h3 className="adm-modal-title">{title}</h3>
-            <button className="adm-modal-close" onClick={onClose} aria-label="Fermer">
+          <header className="zadm-modal__header">
+            <h3 className="zadm-modal__title">{title}</h3>
+            <button type="button" className="zadm-modal__close" onClick={onClose} aria-label="Fermer">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
             </button>
           </header>
         ) : (
-          <button className="adm-modal-close adm-modal-close--floating" onClick={onClose} aria-label="Fermer">
+          <button type="button" className="zadm-modal__close zadm-modal__close--floating" onClick={onClose} aria-label="Fermer">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
           </button>
         )}
-        <div className="adm-modal-body">{children}</div>
-        {footer && <div className="adm-modal-footer">{footer}</div>}
+        <div className="zadm-modal__body">{children}</div>
+        {footer && <div className="zadm-modal__footer">{footer}</div>}
       </div>
     </div>
   )

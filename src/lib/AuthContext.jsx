@@ -15,6 +15,18 @@ function isExpectedNoSessionError(errorLike) {
   return msg.includes('auth session missing') || msg.includes('session missing') || msg.includes('no verified user')
 }
 
+/**
+ * Await a promise with a hard cap. If it doesn't settle within `ms`, reject
+ * with an Error tagged by `label`. Used throughout AuthContext to ensure no
+ * single Supabase call can make the whole auth flow hang indefinitely.
+ */
+function withAuthTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, rej) => setTimeout(() => rej(new Error(`auth_timeout:${label}`)), ms)),
+  ])
+}
+
 function isTransientAuthLockError(errorLike) {
   const name = String(errorLike?.name || '')
   const msg = String(errorLike?.message || errorLike || '').toLowerCase()
@@ -435,13 +447,17 @@ export function AuthProvider({ children }) {
     const local = normalizePhoneLocal(phoneLocal || phone || '')
     const phoneE164 = cc && local ? `${cc}${local}` : ''
 
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: { firstname, lastname, name: fullName, phone: phoneE164 },
-      },
-    })
+    const { data, error } = await withAuthTimeout(
+      supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: { firstname, lastname, name: fullName, phone: phoneE164 },
+        },
+      }),
+      10_000,
+      'signUp',
+    ).catch((e) => ({ data: null, error: e }))
 
     if (error) {
       registrationInProgressRef.current = false
@@ -458,23 +474,31 @@ export function AuthProvider({ children }) {
 
     if (signedInUser && session) {
       try {
-        const savedClient = await upsertClient({
-          authUserId: signedInUser.id,
-          name: fullName,
-          email,
-          phone: phoneE164,
-          phoneCountryCode: cc,
-          phoneLocal: local,
-        })
-        if (cc && local) {
-          await upsertClientPhoneIdentity({
-            countryCode: cc,
-            phoneLocal: local,
-            clientId: savedClient?.id || null,
+        const savedClient = await withAuthTimeout(
+          upsertClient({
             authUserId: signedInUser.id,
-            verificationStatus: 'verified',
-            verificationReason: null,
-          })
+            name: fullName,
+            email,
+            phone: phoneE164,
+            phoneCountryCode: cc,
+            phoneLocal: local,
+          }),
+          6_000,
+          'upsertClient',
+        )
+        if (cc && local) {
+          await withAuthTimeout(
+            upsertClientPhoneIdentity({
+              countryCode: cc,
+              phoneLocal: local,
+              clientId: savedClient?.id || null,
+              authUserId: signedInUser.id,
+              verificationStatus: 'verified',
+              verificationReason: null,
+            }),
+            6_000,
+            'upsertClientPhoneIdentity',
+          )
         }
       } catch (e) {
         console.error('register: upsertClient failed', e)
@@ -505,7 +529,7 @@ export function AuthProvider({ children }) {
         // Do not hard-fail registration on profile-write race/permission issues.
         // Try server-side self-heal and continue if profile becomes resolvable.
         try {
-          const healed = await ensureCurrentClientProfile()
+          const healed = await withAuthTimeout(ensureCurrentClientProfile(), 5_000, 'ensureCurrentClientProfile')
           if (healed?.reason === 'phone_conflict') {
             await supabase.auth.signOut()
             clearState()
@@ -532,7 +556,9 @@ export function AuthProvider({ children }) {
             "Compte cree mais profil client encore indisponible. Connectez-vous ensuite et le rattachement automatique par telephone sera rejoue.",
         }
       }
-      const { admin, client, error: profileErr } = await syncSession(signedInUser)
+      const { admin, client, error: profileErr } = await withAuthTimeout(
+        syncSession(signedInUser), 6_000, 'syncSession',
+      )
       registrationInProgressRef.current = false
       if (!admin && !client) {
         await supabase.auth.signOut()
@@ -557,8 +583,15 @@ export function AuthProvider({ children }) {
   }, [syncSession, clearState])
 
   const logout = useCallback(async () => {
-    await supabase.auth.signOut()
-    clearState()
+    // signOut() can stall on a flaky network or orphaned nav lock — always
+    // clear local state regardless so the UI doesn't appear still logged-in.
+    try {
+      await withAuthTimeout(supabase.auth.signOut(), 5_000, 'signOut')
+    } catch (e) {
+      console.warn('[auth] signOut failed or timed out — clearing state anyway:', e?.message || e)
+    } finally {
+      clearState()
+    }
     return { ok: true }
   }, [clearState])
 

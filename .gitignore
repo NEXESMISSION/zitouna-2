@@ -19,6 +19,10 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# Cursor / Claude (local permissions & machine paths)
+.claude/
+**/.claude/
+
 # Editor
 .vscode/
 .idea/

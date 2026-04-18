@@ -92,45 +92,48 @@ export default function CommercialCalendarPage() {
   }
 
   return (
-    <div className="cc-page commercial-calendar-page" dir="ltr">
-      <div className="cc-page__column">
-        <button type="button" className="ds-back-btn" onClick={() => navigate('/admin')}>
-          <span className="ds-back-btn__icon" aria-hidden>←</span>
-          <span className="ds-back-btn__label">Retour</span>
-        </button>
-
-        <section className="cc-hero">
-          <div className="cc-hero__left">
-            <span className="cc-hero__icon" aria-hidden>
-              <CalendarDays size={18} />
-            </span>
-            <div>
-              <p className="cc-hero__kicker">Acquisition commerciale</p>
-              <h1>Agenda commercial terrain</h1>
-              <p className="cc-hero__sub">Calendrier des visites planifiees et suivi quotidien.</p>
-            </div>
-          </div>
-          <button type="button" className="cc-hero__cta" onClick={() => navigate('/admin/call-center')}>
-            <Phone size={15} /> CRM
+    <div className="zadm-page commercial-calendar-page" dir="ltr">
+      <header className="zadm-page__head">
+        <div className="zadm-page__head-text">
+          <button
+            type="button"
+            className="zadm-btn zadm-btn--ghost zadm-btn--sm"
+            onClick={() => navigate('/admin')}
+            style={{ marginBottom: 8, paddingLeft: 0 }}
+          >
+            <span aria-hidden>←</span> Retour
           </button>
-        </section>
+          <h1 className="zadm-page__title">Agenda commercial terrain</h1>
+          <p className="zadm-page__subtitle">Calendrier des visites planifiées et suivi quotidien.</p>
+        </div>
+        <div className="zadm-page__head-actions">
+          <button
+            type="button"
+            className="zadm-btn zadm-btn--primary"
+            onClick={() => navigate('/admin/call-center')}
+          >
+            <Phone size={15} aria-hidden /> CRM
+          </button>
+        </div>
+      </header>
 
-        <section className="cc-kpis cc-kpis--strip" aria-label="Statistiques visites">
-          <div className="cc-kpi cc-kpi--strip">
-            <span className="cc-kpi__lbl">Total</span>
-            <span className="cc-kpi__num">{stats.total}</span>
+      <div className="zadm-page__body">
+        <section className="zadm-kpi-grid" aria-label="Statistiques visites">
+          <div className="zadm-kpi">
+            <span className="zadm-kpi__label">Total</span>
+            <span className="zadm-kpi__value">{stats.total}</span>
           </div>
-          <div className="cc-kpi cc-kpi--strip">
-            <span className="cc-kpi__lbl">Aujourd&apos;hui</span>
-            <span className="cc-kpi__num">{stats.today}</span>
+          <div className="zadm-kpi">
+            <span className="zadm-kpi__label">Aujourd&apos;hui</span>
+            <span className="zadm-kpi__value">{stats.today}</span>
           </div>
-          <div className="cc-kpi cc-kpi--strip">
-            <span className="cc-kpi__lbl">Motorisés</span>
-            <span className="cc-kpi__num">{stats.motorise}</span>
+          <div className="zadm-kpi">
+            <span className="zadm-kpi__label">Motorisés</span>
+            <span className="zadm-kpi__value">{stats.motorise}</span>
           </div>
-          <div className="cc-kpi cc-kpi--strip">
-            <span className="cc-kpi__lbl">Non motorisés</span>
-            <span className="cc-kpi__num">{stats.nonMotorise}</span>
+          <div className="zadm-kpi">
+            <span className="zadm-kpi__label">Non motorisés</span>
+            <span className="zadm-kpi__value">{stats.nonMotorise}</span>
           </div>
         </section>
 

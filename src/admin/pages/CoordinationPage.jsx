@@ -1,17 +1,24 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../lib/AuthContext.jsx'
-import { useClients, useSales, useProjects, useWorkspaceAudit } from '../../lib/useSupabase.js'
+import { useClients, useSales, useProjects, useAdminUsers } from '../../lib/useSupabase.js'
 import * as db from '../../lib/db.js'
 import { getSaleStatusMeta, canonicalSaleStatus } from '../../domain/workflowModel.js'
 import SaleSnapshotTracePanel from '../components/SaleSnapshotTracePanel.jsx'
+import AdminModal from '../components/AdminModal.jsx'
 import './coordination-page.css'
 import './zitouna-admin-page.css'
 
 const SLOT_OPTIONS = ['09:00', '10:30', '12:00', '14:00', '15:30', '17:00']
 
 function todayIso() {
-  return new Date().toISOString().slice(0, 10)
+  // Local-date ISO (YYYY-MM-DD) — NOT toISOString(), which converts to UTC
+  // and can return yesterday around midnight for users east of UTC.
+  const d = new Date()
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
 }
 
 function fmtDate(iso) {
@@ -86,6 +93,18 @@ function addMonths(d, n) {
   return new Date(d.getFullYear(), d.getMonth() + n, 1)
 }
 
+function getPagerPages(current, total) {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1)
+  const out = [1]
+  const left = Math.max(2, current - 1)
+  const right = Math.min(total - 1, current + 1)
+  if (left > 2) out.push('…')
+  for (let i = left; i <= right; i++) out.push(i)
+  if (right < total - 1) out.push('…')
+  out.push(total)
+  return out
+}
+
 function monthGrid(anchorDate) {
   const first = startOfMonth(anchorDate)
   const startWeekday = (first.getDay() + 6) % 7
@@ -103,13 +122,34 @@ function monthGrid(anchorDate) {
 export default function CoordinationPage() {
   const navigate = useNavigate()
   const { adminUser, user } = useAuth()
-  const { sales, update: salesUpdate } = useSales()
+  const { sales, loading: salesLoading, update: salesUpdate } = useSales()
   const { clients } = useClients()
+  const { adminUsers } = useAdminUsers()
   const { updateParcelStatus } = useProjects()
-  const { append: appendAuditLog } = useWorkspaceAudit()
+  // Write-only audit: call db directly. Avoids useWorkspaceAudit() eagerly fetching 8000 log rows we never display here.
+  const appendAuditLog = useCallback(async (entry) => {
+    try {
+      await db.appendAuditEntry({
+        action: entry.action,
+        entity: entry.entity,
+        entityId: entry.entityId != null ? String(entry.entityId) : '',
+        details: entry.details || '',
+        metadata: entry.metadata && typeof entry.metadata === 'object' ? entry.metadata : {},
+        actorUserId: entry.actorUserId || null,
+        user: entry.actorEmail || entry.user || '',
+        actorEmail: entry.actorEmail || entry.user || '',
+        subjectUserId: entry.subjectUserId || null,
+        severity: entry.severity || 'info',
+        category: entry.category || 'business',
+        source: entry.source || 'admin_ui',
+      })
+    } catch (e) { console.error('appendAuditEntry', e) }
+  }, [])
 
   const [query, setQuery] = useState('')
   const [view, setView] = useState('sales')
+  const [page, setPage] = useState(1)
+  const COORD_PER_PAGE = 10
   const [monthAnchor, setMonthAnchor] = useState(() => startOfMonth(new Date()))
   const [selectedDate, setSelectedDate] = useState(() => toIsoDate(new Date()))
   const [scheduler, setScheduler] = useState({
@@ -122,6 +162,7 @@ export default function CoordinationPage() {
   })
   const [selectedAppointment, setSelectedAppointment] = useState(null)
   const [schedulingSaving, setSchedulingSaving] = useState(false)
+  const [detailSale, setDetailSale] = useState(null)
 
   const appointments = useMemo(() => {
     const agentName = adminUser?.name || user?.name || 'Equipe coordination'
@@ -187,6 +228,16 @@ export default function CoordinationPage() {
       .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
   }, [sales, query])
 
+  const coordPageCount = Math.max(1, Math.ceil(salesForCoordination.length / COORD_PER_PAGE))
+  useEffect(() => {
+    if (page > coordPageCount) setPage(1)
+  }, [page, coordPageCount])
+  useEffect(() => { setPage(1) }, [query])
+  const pagedSales = useMemo(
+    () => salesForCoordination.slice((page - 1) * COORD_PER_PAGE, page * COORD_PER_PAGE),
+    [salesForCoordination, page],
+  )
+
   const planningBySale = useMemo(() => {
     const map = new Map()
     for (const apt of appointments) {
@@ -238,19 +289,28 @@ export default function CoordinationPage() {
     }
     else patch.coordinationJuridiqueAt = atIso
     setSchedulingSaving(true)
+    const withTimeout = (p, ms, label) => Promise.race([
+      p,
+      new Promise((_, rej) => setTimeout(() => rej(new Error(`${label}_timeout`)), ms)),
+    ])
     try {
-      await salesUpdate(sale.id, patch)
-      await appendAuditLog({
-        action: 'coordination_appointment_set',
-        entity: 'sale',
-        entityId: String(sale.id),
-        actorUserId: adminUser?.id || null,
-        actorEmail: adminUser?.email || '',
-        details: `${tag} ${scheduler.date} ${scheduler.time}`,
-      })
+      await withTimeout(salesUpdate(sale.id, patch), 15_000, 'salesUpdate')
+      // audit log is best-effort — never block the appointment save on it.
+      withTimeout(
+        appendAuditLog({
+          action: 'coordination_appointment_set',
+          entity: 'sale',
+          entityId: String(sale.id),
+          actorUserId: adminUser?.id || null,
+          actorEmail: adminUser?.email || '',
+          details: `${tag} ${scheduler.date} ${scheduler.time}`,
+        }),
+        8_000,
+        'appendAuditLog',
+      ).catch((e) => console.warn('[Coord] appendAuditLog (non-blocking):', e?.message || e))
       closeScheduler()
     } catch (e) {
-      console.error(e)
+      console.error('[Coord] confirmSchedule failed:', e?.message || e, e)
     } finally {
       setSchedulingSaving(false)
     }
@@ -537,7 +597,32 @@ export default function CoordinationPage() {
           </div>
 
           <section className="cp-queue">
-            {salesForCoordination.length === 0 ? (
+            {salesLoading && salesForCoordination.length === 0 ? (
+              Array.from({ length: 5 }).map((_, i) => (
+                <article key={`cp-sk-${i}`} className="cp-card cp-card--skeleton" aria-hidden>
+                  <div className="cp-card__top">
+                    <span className="cp-card__initials cp-sk-box" />
+                    <div className="cp-card__info">
+                      <p className="cp-sk-line cp-sk-line--title" />
+                      <p className="cp-sk-line cp-sk-line--sub" />
+                    </div>
+                    <span className="cp-sk-line cp-sk-line--badge" />
+                  </div>
+                  <div className="cp-card__grid">
+                    <div><span className="cp-sk-line cp-sk-line--cell" /></div>
+                    <div><span className="cp-sk-line cp-sk-line--cell" /></div>
+                    <div><span className="cp-sk-line cp-sk-line--cell" /></div>
+                    <div><span className="cp-sk-line cp-sk-line--cell" /></div>
+                  </div>
+                  <div className="cp-card__actions">
+                    <div className="cp-card__actions-inline">
+                      <span className="cp-sk-line cp-sk-line--btn" />
+                      <span className="cp-sk-line cp-sk-line--btn" />
+                    </div>
+                  </div>
+                </article>
+              ))
+            ) : salesForCoordination.length === 0 ? (
               <div className="cp-empty">
                 <div className="cp-empty__ico" aria-hidden>📭</div>
                 <p className="cp-empty__title">Aucun dossier à coordonner</p>
@@ -553,14 +638,26 @@ export default function CoordinationPage() {
                 </button>
               </div>
             ) : (
-              salesForCoordination.map((sale) => {
+              pagedSales.map((sale) => {
                 const client = clients.find((c) => String(c.id) === String(sale.clientId))
+                const sellerClient = sale.sellerClientId ? clients.find((c) => String(c.id) === String(sale.sellerClientId)) : null
+                const sellerAgent = sale.agentId ? adminUsers.find((u) => String(u.id) === String(sale.agentId)) : null
+                const sellerName = sellerClient?.name || sellerAgent?.name || sellerAgent?.email || '—'
+                const sellerPhone = sellerClient?.phone || sellerAgent?.phone || ''
                 const statusMeta = getSaleStatusMeta(sale.status)
                 const plotLabel = normalizePlotIds(sale).map((id) => `#${id}`).join(', ') || '—'
                 const financePlan = planningBySale.get(`${sale.id}:finance`)
                 const juridiquePlan = planningBySale.get(`${sale.id}:juridique`)
                 return (
-                  <article key={sale.id} className="cp-card">
+                  <article
+                    key={sale.id}
+                    className={`cp-card cp-card--${statusMeta.badge || 'gray'}`}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setDetailSale({ sale, client, sellerClient, sellerAgent })}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setDetailSale({ sale, client, sellerClient, sellerAgent }) } }}
+                    style={{ cursor: 'pointer' }}
+                  >
                     <div className="cp-card__top">
                       <span className="cp-card__initials" aria-hidden>{initials(sale.clientName)}</span>
                       <div className="cp-card__info">
@@ -603,8 +700,17 @@ export default function CoordinationPage() {
                         <div className="cp-card__lbl">Contact client</div>
                         <div className="cp-card__val">
                           {client?.phone
-                            ? <a href={`tel:${client.phone}`} className="cp-card__phone">{client.phone}</a>
+                            ? <a href={`tel:${client.phone}`} className="cp-card__phone" onClick={(e) => e.stopPropagation()}>{client.phone}</a>
                             : <span className="cp-card__muted">Non renseigné</span>}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="cp-card__lbl" title="Qui a réalisé cette vente">Vendeur</div>
+                        <div className="cp-card__val" style={{ fontWeight: 600 }}>
+                          {sellerName}
+                          {sellerPhone && (
+                            <div className="cp-card__muted" style={{ fontWeight: 400, fontSize: 11, marginTop: 2 }}>{sellerPhone}</div>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -627,13 +733,13 @@ export default function CoordinationPage() {
                       </div>
                     </div>
 
-                    <div className="cp-card__actions cp-card__actions--stack">
+                    <div className="cp-card__actions cp-card__actions--stack" onClick={(e) => e.stopPropagation()}>
                       <div className="cp-card__actions-inline">
                         <button
                           type="button"
                           className={`cp-card__btn${financePlan ? ' cp-card__btn--secondary' : ''}`}
                           title="Fixer (ou modifier) le rendez-vous Finance"
-                          onClick={() => openScheduler(sale, 'finance')}
+                          onClick={(e) => { e.stopPropagation(); openScheduler(sale, 'finance') }}
                         >
                           {financePlan ? 'Modifier Finance' : 'Planifier Finance'}
                         </button>
@@ -641,7 +747,7 @@ export default function CoordinationPage() {
                           type="button"
                           className={`cp-card__btn${juridiquePlan ? ' cp-card__btn--secondary' : ''}`}
                           title="Fixer (ou modifier) le rendez-vous Juridique"
-                          onClick={() => openScheduler(sale, 'juridique')}
+                          onClick={(e) => { e.stopPropagation(); openScheduler(sale, 'juridique') }}
                         >
                           {juridiquePlan ? 'Modifier Juridique' : 'Planifier Juridique'}
                         </button>
@@ -652,6 +758,46 @@ export default function CoordinationPage() {
               })
             )}
           </section>
+          {salesForCoordination.length > COORD_PER_PAGE && (
+            <div className="cp-pager" role="navigation" aria-label="Pagination">
+              <button
+                type="button"
+                className="cp-pager__btn cp-pager__btn--nav"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                aria-label="Page précédente"
+              >
+                ‹
+              </button>
+              {getPagerPages(page, coordPageCount).map((p, i) =>
+                p === '…' ? (
+                  <span key={`dots-${i}`} className="cp-pager__ellipsis" aria-hidden>…</span>
+                ) : (
+                  <button
+                    key={p}
+                    type="button"
+                    className={`cp-pager__btn${p === page ? ' cp-pager__btn--active' : ''}`}
+                    onClick={() => setPage(p)}
+                    aria-current={p === page ? 'page' : undefined}
+                  >
+                    {p}
+                  </button>
+                ),
+              )}
+              <button
+                type="button"
+                className="cp-pager__btn cp-pager__btn--nav"
+                disabled={page >= coordPageCount}
+                onClick={() => setPage((p) => Math.min(coordPageCount, p + 1))}
+                aria-label="Page suivante"
+              >
+                ›
+              </button>
+              <span className="cp-pager__info">
+                {(page - 1) * COORD_PER_PAGE + 1}–{Math.min(page * COORD_PER_PAGE, salesForCoordination.length)} / {salesForCoordination.length}
+              </span>
+            </div>
+          )}
         </>
       )}
 
@@ -744,52 +890,202 @@ export default function CoordinationPage() {
         </section>
       )}
 
-      {scheduler.open && scheduler.sale && (
-        <div className="cp-overlay" role="presentation" onClick={closeScheduler}>
-          <div className="cp-sheet" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
-            <div className="cp-sheet__head">
-              <h3 className="cp-sheet__title">Planifier {typeLabel(scheduler.type)}</h3>
-              <button type="button" className="cp-sheet__close" onClick={closeScheduler}>✕</button>
+      <AdminModal open={Boolean(detailSale)} onClose={() => setDetailSale(null)} title="Détails de la vente" width={560}>
+        {detailSale && (() => {
+          const s = detailSale.sale
+          const c = detailSale.client
+          const sc = detailSale.sellerClient
+          const sa = detailSale.sellerAgent
+          const plots = normalizePlotIds(s).map((id) => `#${id}`).join(', ') || '—'
+          const stMeta = getSaleStatusMeta(s.status)
+          return (
+            <div className="cp-detail" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <div style={{ fontWeight: 700, fontSize: 16 }}>{s.clientName || 'Client'}</div>
+                  <span className={`cp-card__badge cp-detail__badge--${stMeta.badge || 'gray'}`}>{stMeta.label}</span>
+                </div>
+                <div style={{ color: 'var(--adm-text-dim)', fontSize: 13 }}>Code vente : <code>{s.code || s.id}</code></div>
+              </div>
+
+              <section style={{ border: '1px solid var(--adm-border)', borderRadius: 8, padding: 12 }}>
+                <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 13, letterSpacing: 0.3 }}>VENDEUR</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', rowGap: 6, fontSize: 13 }}>
+                  <div style={{ color: 'var(--adm-text-dim)' }}>Nom</div>
+                  <div style={{ fontWeight: 600 }}>{sc?.name || sa?.name || sa?.email || '—'}</div>
+                  <div style={{ color: 'var(--adm-text-dim)' }}>Rôle</div>
+                  <div>{sa?.role ? `Staff — ${sa.role}` : (sc ? 'Vendeur délégué (client)' : '—')}</div>
+                  {(sc?.phone || sa?.phone) && (<>
+                    <div style={{ color: 'var(--adm-text-dim)' }}>Téléphone</div>
+                    <div style={{ direction: 'ltr' }}>{sc?.phone || sa?.phone}</div>
+                  </>)}
+                  {(sc?.email || sa?.email) && (<>
+                    <div style={{ color: 'var(--adm-text-dim)' }}>Email</div>
+                    <div>{sc?.email || sa?.email}</div>
+                  </>)}
+                </div>
+              </section>
+
+              <section style={{ border: '1px solid var(--adm-border)', borderRadius: 8, padding: 12 }}>
+                <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 13, letterSpacing: 0.3 }}>ACHETEUR</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', rowGap: 6, fontSize: 13 }}>
+                  <div style={{ color: 'var(--adm-text-dim)' }}>Nom</div>
+                  <div style={{ fontWeight: 600 }}>{c?.name || s.clientName || '—'}</div>
+                  <div style={{ color: 'var(--adm-text-dim)' }}>Téléphone</div>
+                  <div style={{ direction: 'ltr' }}>{c?.phone || s.buyerPhoneNormalized || '—'}</div>
+                  {c?.cin && (<>
+                    <div style={{ color: 'var(--adm-text-dim)' }}>CIN</div>
+                    <div style={{ direction: 'ltr', fontFamily: 'ui-monospace, monospace' }}>{c.cin}</div>
+                  </>)}
+                  {c?.email && (<>
+                    <div style={{ color: 'var(--adm-text-dim)' }}>Email</div>
+                    <div>{c.email}</div>
+                  </>)}
+                  {c?.city && (<>
+                    <div style={{ color: 'var(--adm-text-dim)' }}>Ville</div>
+                    <div>{c.city}</div>
+                  </>)}
+                </div>
+              </section>
+
+              <section style={{ border: '1px solid var(--adm-border)', borderRadius: 8, padding: 12 }}>
+                <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 13, letterSpacing: 0.3 }}>PROJET & PARCELLES</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', rowGap: 6, fontSize: 13 }}>
+                  <div style={{ color: 'var(--adm-text-dim)' }}>Projet</div>
+                  <div style={{ fontWeight: 600 }}>{s.projectTitle || s.projectId || '—'}</div>
+                  <div style={{ color: 'var(--adm-text-dim)' }}>Parcelle(s)</div>
+                  <div>{plots}</div>
+                </div>
+              </section>
+
+              <section style={{ border: '1px solid var(--adm-border)', borderRadius: 8, padding: 12 }}>
+                <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 13, letterSpacing: 0.3 }}>MONTANTS</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', rowGap: 6, fontSize: 13 }}>
+                  <div style={{ color: 'var(--adm-text-dim)' }}>Prix convenu</div>
+                  <div style={{ fontWeight: 600 }}>{fmtMoney(s.agreedPrice)}</div>
+                  <div style={{ color: 'var(--adm-text-dim)' }}>Acompte</div>
+                  <div>{fmtMoney(s.deposit)}</div>
+                  <div style={{ color: 'var(--adm-text-dim)' }}>Mode</div>
+                  <div>{s.paymentType === 'installments' ? `Échelonné — ${s.offerName || ''}` : 'Comptant'}</div>
+                  {s.paymentType === 'installments' && (<>
+                    <div style={{ color: 'var(--adm-text-dim)' }}>Durée</div>
+                    <div>{s.offerDuration || 0} mois · {s.offerDownPayment || 0}% apport</div>
+                  </>)}
+                </div>
+              </section>
+
+              <section style={{ border: '1px solid var(--adm-border)', borderRadius: 8, padding: 12 }}>
+                <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 13, letterSpacing: 0.3 }}>PLANIFICATION</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', rowGap: 6, fontSize: 13 }}>
+                  <div style={{ color: 'var(--adm-text-dim)' }}>Finance</div>
+                  <div>{s.coordinationFinanceAt ? `${fmtDate(s.coordinationFinanceAt)} ${new Date(s.coordinationFinanceAt).toTimeString().slice(0, 5)}` : <span className="cp-card__muted">À planifier</span>}</div>
+                  <div style={{ color: 'var(--adm-text-dim)' }}>Juridique</div>
+                  <div>{s.coordinationJuridiqueAt ? `${fmtDate(s.coordinationJuridiqueAt)} ${new Date(s.coordinationJuridiqueAt).toTimeString().slice(0, 5)}` : <span className="cp-card__muted">À planifier</span>}</div>
+                </div>
+                {s.coordinationNotes && (
+                  <div style={{ marginTop: 10, padding: 8, background: 'var(--adm-bg-subtle, #f8f9fa)', borderRadius: 6, fontSize: 12, whiteSpace: 'pre-wrap' }}>
+                    {s.coordinationNotes}
+                  </div>
+                )}
+              </section>
+
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button className="adm-btn adm-btn--secondary" onClick={() => setDetailSale(null)}>Fermer</button>
+                <button className="adm-btn adm-btn--primary" onClick={() => { setDetailSale(null); openScheduler(s, 'finance') }}>Planifier Finance</button>
+                <button className="adm-btn adm-btn--primary" onClick={() => { setDetailSale(null); openScheduler(s, 'juridique') }}>Planifier Juridique</button>
+              </div>
             </div>
+          )
+        })()}
+      </AdminModal>
+
+      {scheduler.open && scheduler.sale && (() => {
+        // Validation: the chosen date/time must be in the future.
+        const chosen = scheduler.date && scheduler.time
+          ? new Date(`${scheduler.date}T${scheduler.time}:00`)
+          : null
+        const dateError = chosen && chosen.getTime() < Date.now()
+          ? 'La date et l’heure doivent être dans le futur.'
+          : ''
+        return (
+        <div className="cp-overlay" role="presentation" onClick={closeScheduler}>
+          <div className="cp-sheet cp-sheet--v2" role="dialog" aria-modal="true" aria-labelledby="cp-sheet-title" onClick={(e) => e.stopPropagation()}>
+            <div className="cp-sheet__head">
+              <h3 id="cp-sheet-title" className="cp-sheet__title">
+                Planifier un rendez-vous {typeLabel(scheduler.type)}
+              </h3>
+              <button
+                type="button"
+                className="cp-sheet__close"
+                aria-label="Fermer"
+                onClick={closeScheduler}
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="cp-sheet__lede">
+              Choisissez le type, la date et l’heure. Le rendez-vous apparaîtra immédiatement dans le calendrier.
+            </p>
+
             <div className="cp-sheet__recap">
-              <div className="cp-sheet__recap-lbl">Vente selectionnee</div>
+              <div className="cp-sheet__recap-lbl">Dossier concerné</div>
               <div className="cp-sheet__recap-line">
                 <strong>{scheduler.sale.clientName || 'Client'}</strong>
                 <span className="cp-recap-dim">• {scheduler.sale.projectTitle || 'Projet'}</span>
               </div>
-              <div className="cp-sheet__recap-meta">Montant: {fmtMoney(scheduler.sale.agreedPrice)}</div>
+              <div className="cp-sheet__recap-meta">Montant convenu : {fmtMoney(scheduler.sale.agreedPrice)}</div>
             </div>
 
             <div style={{ margin: '0 0 12px' }}>
               <SaleSnapshotTracePanel sale={scheduler.sale} />
             </div>
 
-            <label className="cp-sheet__label">Type de rendez-vous</label>
-            <div className="cp-sheet__pills">
-              <button type="button" className={`cp-pill${scheduler.type === 'finance' ? ' cp-pill--on' : ''}`} onClick={() => setScheduler((p) => ({ ...p, type: 'finance' }))}>
+            <label className="cp-sheet__label" htmlFor="cp-type">
+              Type de rendez-vous
+              <span className="cp-sheet__hint"> — Finance valide le paiement, Juridique prépare le contrat.</span>
+            </label>
+            <div id="cp-type" className="cp-sheet__pills" role="radiogroup" aria-label="Type de rendez-vous">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={scheduler.type === 'finance'}
+                className={`cp-pill${scheduler.type === 'finance' ? ' cp-pill--on' : ''}`}
+                onClick={() => setScheduler((p) => ({ ...p, type: 'finance' }))}
+              >
                 Finance
               </button>
-              <button type="button" className={`cp-pill${scheduler.type === 'juridique' ? ' cp-pill--on' : ''}`} onClick={() => setScheduler((p) => ({ ...p, type: 'juridique' }))}>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={scheduler.type === 'juridique'}
+                className={`cp-pill${scheduler.type === 'juridique' ? ' cp-pill--on' : ''}`}
+                onClick={() => setScheduler((p) => ({ ...p, type: 'juridique' }))}
+              >
                 Juridique
               </button>
             </div>
 
-            <label className="cp-sheet__label">Date</label>
+            <label className="cp-sheet__label" htmlFor="cp-date">Date du rendez-vous</label>
             <input
-              className="cp-sheet__date-input"
+              id="cp-date"
+              className={`cp-sheet__date-input${dateError ? ' cp-sheet__date-input--err' : ''}`}
               type="date"
               value={scheduler.date}
               min={todayIso()}
+              aria-invalid={Boolean(dateError)}
               onChange={(e) => setScheduler((p) => ({ ...p, date: e.target.value }))}
             />
-            <div className="cp-sheet__date-hint">Choisissez le jour du rendez-vous.</div>
+            <div className="cp-sheet__date-hint">Sélectionnez le jour souhaité (aujourd’hui ou plus tard).</div>
 
-            <label className="cp-sheet__label">Heure</label>
-            <div className="cp-sheet__times">
+            <label className="cp-sheet__label">Créneau horaire</label>
+            <div className="cp-sheet__times" role="radiogroup" aria-label="Créneau horaire">
               {SLOT_OPTIONS.map((slot) => (
                 <button
                   key={slot}
                   type="button"
+                  role="radio"
+                  aria-checked={scheduler.time === slot}
                   className={`cp-time${scheduler.time === slot ? ' cp-time--on' : ''}`}
                   onClick={() => setScheduler((p) => ({ ...p, time: slot }))}
                 >
@@ -798,34 +1094,43 @@ export default function CoordinationPage() {
               ))}
             </div>
 
-            <label className="cp-sheet__label">Notes (optionnel)</label>
+            <label className="cp-sheet__label" htmlFor="cp-notes">Notes (facultatif)</label>
             <textarea
+              id="cp-notes"
               className="cp-sheet__date-input"
               rows={3}
               value={scheduler.notes}
               onChange={(e) => setScheduler((p) => ({ ...p, notes: e.target.value }))}
-              placeholder="Contexte du rendez-vous, pieces demandees..."
+              placeholder="Ex. : pièces à apporter, contexte particulier…"
             />
 
+            {dateError ? (
+              <div className="cp-sheet__error" role="alert">
+                <span aria-hidden>⚠</span>
+                <div>{dateError}</div>
+              </div>
+            ) : null}
+
             <div className="cp-sheet__notice">
-              <span>ℹ</span>
+              <span aria-hidden>ℹ</span>
               <div>
-                Le rendez-vous sera ajoute au calendrier de coordination.
-                <strong> Vous pouvez le reprogrammer a tout moment.</strong>
+                Le rendez-vous sera ajouté au calendrier de coordination.
+                <strong> Vous pouvez le modifier plus tard.</strong>
               </div>
             </div>
 
             <button
               type="button"
               className="cp-sheet__confirm"
-              disabled={schedulingSaving}
+              disabled={schedulingSaving || Boolean(dateError)}
               onClick={() => void confirmSchedule()}
             >
               {schedulingSaving ? 'Enregistrement…' : 'Confirmer le rendez-vous'}
             </button>
           </div>
         </div>
-      )}
+        )
+      })()}
 
       {selectedAppointment && (
         <div className="cp-overlay" role="presentation" onClick={() => setSelectedAppointment(null)}>

@@ -33,6 +33,9 @@ export const NAV_ITEMS = [
   // Commissions & controle
   { to: '/admin/referral-settings', label: 'Regles de commission', icon: 'tag' },
   { to: '/admin/commission-ledger', label: 'Journal des commissions', icon: 'wallet' },
+  { to: '/admin/commissions', label: 'Commissions', icon: 'git-branch' },
+  { to: '/admin/commissions/analytics', label: 'Analyses commissions', icon: 'tag' },
+  { to: '/admin/commissions/anomalies', label: 'Anomalies parrainage', icon: 'shield' },
   { to: '/admin/audit-log', label: "Journal d'activite", icon: 'file-text' },
   { to: '/admin/access-grants', label: "Droits d'acces pages", icon: 'key' },
 

@@ -1,6 +1,7 @@
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import headerLogo from '../logo-header2.png'
 import { useAuth } from './lib/AuthContext.jsx'
+import NotificationsMenu from './components/NotificationsMenu.jsx'
 
 export default function TopBar() {
   const navigate = useNavigate()
@@ -57,6 +58,8 @@ export default function TopBar() {
               </svg>
             </button>
           )}
+
+          <NotificationsMenu />
 
           <button
             type="button"

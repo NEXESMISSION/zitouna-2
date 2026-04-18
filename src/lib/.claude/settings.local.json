@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(npx vite *)",
-      "Bash(python3 -c ' *)",
-      "Bash(python -c ' *)"
-    ]
-  }
-}

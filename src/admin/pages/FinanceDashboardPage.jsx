@@ -225,54 +225,84 @@ export default function FinanceDashboardPage() {
             <section className="fd-hero">
               <div className="fd-hero__top">
                 <div className="fd-hero__user">
-                  <div className="fd-hero__icon">💰</div>
+                  <div className="fd-hero__icon" aria-hidden>💰</div>
                   <div>
-                    <h1 className="fd-hero__name">Direction financiere (CFO)</h1>
-                    <p className="fd-hero__role">{adminUser?.name || 'Equipe finance'}</p>
+                    <h1 className="fd-hero__name">Validation finance</h1>
+                    <p className="fd-hero__role">Bonjour {adminUser?.name || 'équipe finance'}</p>
                   </div>
                 </div>
               </div>
-              <div className="fd-hero__kpi">
-                <div className="fd-hero__kpi-block">
+              <div className="fd-hero__hint">
+                Vérifiez les dossiers ci-dessous, confirmez l'encaissement, puis transmettez au notaire.
+              </div>
+              <div className="fd-hero__kpi" role="group" aria-label="Résumé des dossiers en attente">
+                <div className="fd-hero__kpi-block" title="Nombre de dossiers en attente de validation">
                   <span className="fd-hero__kpi-num">{pendingSales.length}</span>
                   <span className="fd-hero__kpi-unit">Dossiers</span>
                 </div>
-                <span className="fd-hero__kpi-sep" />
-                <div className="fd-hero__kpi-block">
+                <span className="fd-hero__kpi-sep" aria-hidden />
+                <div className="fd-hero__kpi-block" title="Montant total des ventes à encaisser">
                   <span className="fd-hero__kpi-num">{fmtMoney(totalPendingAmount)}</span>
                   <span className="fd-hero__kpi-unit">Total ventes</span>
                 </div>
-                <span className="fd-hero__kpi-sep" />
-                <div className="fd-hero__kpi-block">
+                <span className="fd-hero__kpi-sep" aria-hidden />
+                <div className="fd-hero__kpi-block" title="Avances déjà versées par les clients">
                   <span className="fd-hero__kpi-num">{fmtMoney(totalAdvance)}</span>
-                  <span className="fd-hero__kpi-unit">Avance recue</span>
+                  <span className="fd-hero__kpi-unit">Avances reçues</span>
                 </div>
               </div>
             </section>
 
             {/* Tabs: Liste / Calendrier */}
-            <div className="fd-tabs">
-              <button type="button" className={`fd-tab${view === 'list' ? ' fd-tab--on' : ''}`} onClick={() => setView('list')}>Liste</button>
-              <button type="button" className={`fd-tab${view === 'calendar' ? ' fd-tab--on' : ''}`} onClick={() => setView('calendar')}>Calendrier</button>
+            <div className="fd-tabs" role="tablist" aria-label="Mode d'affichage">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={view === 'list'}
+                className={`fd-tab${view === 'list' ? ' fd-tab--on' : ''}`}
+                onClick={() => setView('list')}
+                title="Afficher la liste des dossiers en attente"
+              >
+                <span className="fd-tab__ico" aria-hidden>📋</span>
+                <span>Liste des dossiers</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={view === 'calendar'}
+                className={`fd-tab${view === 'calendar' ? ' fd-tab--on' : ''}`}
+                onClick={() => setView('calendar')}
+                title="Afficher le calendrier des dossiers"
+              >
+                <span className="fd-tab__ico" aria-hidden>📅</span>
+                <span>Calendrier</span>
+              </button>
             </div>
 
             {view === 'list' && (
               <>
+                <p className="fd-section-hint">
+                  Cliquez sur un dossier pour consulter le détail financier et valider le paiement.
+                </p>
                 <div className="fd-search">
-                  <span className="fd-search__ico">🔎</span>
+                  <span className="fd-search__ico" aria-hidden>🔎</span>
                   <input
                     className="fd-search__input"
-                    placeholder="Rechercher client, projet, parcelle..."
+                    placeholder="Rechercher par client, projet, parcelle ou référence…"
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
+                    aria-label="Rechercher un dossier"
                   />
                 </div>
 
-                <section className="fd-queue">
+                <section className="fd-queue" aria-label="Liste des dossiers en attente">
                   {pendingSales.length === 0 ? (
                     <div className="fd-queue__empty">
-                      <strong>Aucune vente en attente finance</strong>
-                      Les ventes validees par le commercial apparaitront ici.
+                      <span className="fd-queue__empty-ico" aria-hidden>✅</span>
+                      <strong>{query ? 'Aucun résultat' : 'Aucun dossier à valider'}</strong>
+                      {query
+                        ? 'Essayez un autre mot-clé ou effacez la recherche.'
+                        : 'Les ventes envoyées par la coordination apparaîtront ici automatiquement.'}
                     </div>
                   ) : (
                     pendingSales.map(renderSaleCard)
@@ -283,32 +313,52 @@ export default function FinanceDashboardPage() {
 
             {view === 'calendar' && (
               <>
+                <p className="fd-section-hint">
+                  Sélectionnez une date pour voir les dossiers créés ce jour.
+                </p>
                 <div className="fd-cal-wrap">
                   <div className="fd-cal-toolbar">
-                    <button type="button" className="fd-cal-nav" onClick={() => setMonthAnchor((d) => addMonths(d, -1))}>‹</button>
+                    <button
+                      type="button"
+                      className="fd-cal-nav"
+                      onClick={() => setMonthAnchor((d) => addMonths(d, -1))}
+                      aria-label="Mois précédent"
+                      title="Mois précédent"
+                    >‹</button>
                     <span className="fd-cal-month">{monthLabel}</span>
-                    <button type="button" className="fd-cal-nav" onClick={() => setMonthAnchor((d) => addMonths(d, 1))}>›</button>
+                    <button
+                      type="button"
+                      className="fd-cal-nav"
+                      onClick={() => setMonthAnchor((d) => addMonths(d, 1))}
+                      aria-label="Mois suivant"
+                      title="Mois suivant"
+                    >›</button>
                   </div>
 
-                  <div className="fd-cal-weekhead">
+                  <div className="fd-cal-weekhead" aria-hidden>
                     {['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'].map((d) => (
                       <span key={d} className="fd-cal-weekday">{d}</span>
                     ))}
                   </div>
-                  <div className="fd-cal-grid-month">
+                  <div className="fd-cal-grid-month" role="grid" aria-label="Calendrier">
                     {monthCells.map((cell) => {
                       const iso = toIsoDate(cell.date)
                       const count = (salesByDate.get(iso) || []).length
                       const isSel = iso === selectedDate
+                      const dayTitle = count > 0
+                        ? `${fmtDate(iso)} — ${count} dossier${count > 1 ? 's' : ''}`
+                        : fmtDate(iso)
                       return (
                         <button
                           key={`${iso}-${cell.inMonth ? 'in' : 'out'}`}
                           type="button"
                           className={`fd-cal-day${cell.inMonth ? '' : ' fd-cal-day--muted'}${isSel ? ' fd-cal-day--selected' : ''}`}
                           onClick={() => setSelectedDate(iso)}
+                          title={dayTitle}
+                          aria-pressed={isSel}
                         >
                           <span className="fd-cal-day__num">{cell.date.getDate()}</span>
-                          {count > 0 ? <span className="fd-cal-day__dot">{count}</span> : null}
+                          {count > 0 ? <span className="fd-cal-day__dot" aria-label={`${count} dossier${count > 1 ? 's' : ''}`}>{count}</span> : null}
                         </button>
                       )
                     })}
@@ -317,7 +367,7 @@ export default function FinanceDashboardPage() {
                   <div className="fd-cal-agenda">
                     <div className="fd-cal-agenda__head">{fmtDate(selectedDate)}</div>
                     {dayAgenda.length === 0 ? (
-                      <div className="fd-cal-agenda__empty">Aucun dossier finance ce jour.</div>
+                      <div className="fd-cal-agenda__empty">Aucun dossier à valider ce jour-là.</div>
                     ) : (
                       dayAgenda.map(renderSaleCard)
                     )}

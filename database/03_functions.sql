@@ -519,6 +519,12 @@ declare
   v_notary_complete_total int := 0;
   v_commission_event_count int := 0;
   v_latest_sale_summary jsonb := '[]'::jsonb;
+  -- Referral gross (commissions earned per level, from commission_events).
+  v_referral_gross numeric(14,2) := 0;
+  v_referral_gross_per_level jsonb := '[]'::jsonb;
+  v_level_gross_rules jsonb := '[]'::jsonb;
+  v_l1_total numeric(14,2) := 0;
+  v_l2_total numeric(14,2) := 0;
 begin
   if v_client_id is null then
     return jsonb_build_object(
@@ -533,10 +539,12 @@ begin
       'fieldDepositMin', 0,
       'fullDepositTarget', 0,
       'referralGross', 0,
-      'referralGrossPerLevel', 0,
+      'referralGrossPerLevel', '[]'::jsonb,
       'parrainageMaxDepth', 0,
       'rsRatePct', 0,
       'levelGrossRules', '[]'::jsonb,
+      'l1Total', 0,
+      'l2Total', 0,
       'identityVerificationBlocked', false,
       'diagnostics', jsonb_build_object(
         'linkedAsBuyer', 0, 'linkedAsSeller', 0, 'linkedAsAmbassador', 0,
@@ -670,6 +678,68 @@ begin
   into v_latest_sale_summary
   from recent r;
 
+  -- Referral gross: total and per-level breakdown from commission_events.
+  -- "Gross" = sum of commission_events.amount for this beneficiary across all
+  -- statuses (pending, payable, paid, etc.) so the dashboard shows lifetime
+  -- earnings, not just unlocked wallet balance.
+  select coalesce(sum(ce.amount), 0) into v_referral_gross
+  from public.commission_events ce
+  where ce.beneficiary_client_id = v_client_id;
+
+  -- Per-level breakdown: one object per level with total amount and count.
+  with by_level as (
+    select ce.level as lvl,
+           coalesce(sum(ce.amount), 0) as total,
+           count(*) as event_count
+    from public.commission_events ce
+    where ce.beneficiary_client_id = v_client_id
+    group by ce.level
+    order by ce.level
+  )
+  select coalesce(
+    jsonb_agg(
+      jsonb_build_object(
+        'level', lvl,
+        'total', total,
+        'count', event_count
+      )
+      order by lvl
+    ),
+    '[]'::jsonb
+  )
+  into v_referral_gross_per_level
+  from by_level;
+
+  -- levelGrossRules: per-level amount (distinct values) observed on events,
+  -- useful for the UI to display what each level pays today.
+  with rules_by_level as (
+    select ce.level as lvl,
+           coalesce(sum(ce.amount), 0) as total
+    from public.commission_events ce
+    where ce.beneficiary_client_id = v_client_id
+    group by ce.level
+  )
+  select coalesce(
+    jsonb_agg(
+      jsonb_build_object('level', lvl, 'grossAmount', total)
+      order by lvl
+    ),
+    '[]'::jsonb
+  )
+  into v_level_gross_rules
+  from rules_by_level;
+
+  -- L1 / L2 totals for quick access.
+  select coalesce(sum(ce.amount), 0) into v_l1_total
+  from public.commission_events ce
+  where ce.beneficiary_client_id = v_client_id
+    and ce.level = 1;
+
+  select coalesce(sum(ce.amount), 0) into v_l2_total
+  from public.commission_events ce
+  where ce.beneficiary_client_id = v_client_id
+    and ce.level = 2;
+
   return jsonb_build_object(
     'ok', not v_ambiguous,
     'reason', case when v_ambiguous then 'ambiguous_client_profile' else null end,
@@ -681,11 +751,13 @@ begin
     'minPayoutAmount', v_min_payout,
     'fieldDepositMin', 0,
     'fullDepositTarget', 0,
-    'referralGross', 0,
-    'referralGrossPerLevel', 0,
+    'referralGross', v_referral_gross,
+    'referralGrossPerLevel', v_referral_gross_per_level,
     'parrainageMaxDepth', v_max_depth,
     'rsRatePct', 0,
-    'levelGrossRules', '[]'::jsonb,
+    'levelGrossRules', v_level_gross_rules,
+    'l1Total', v_l1_total,
+    'l2Total', v_l2_total,
     'identityVerificationBlocked', false,
     'diagnostics', jsonb_build_object(
       'linkedAsBuyer', v_linked_as_buyer,
@@ -823,6 +895,9 @@ declare
   v_has_real_seller boolean;
   v_walk uuid;
   v_parent uuid;
+  v_parent_from_sr uuid;
+  v_parent_from_legacy uuid;
+  v_parent_source text;
   v_chain uuid[] := '{}';
   v_i int;
   v_steps int := 0;
@@ -868,12 +943,58 @@ begin
 
   -- Upline walk: start at seller (if real) else at buyer; drop buyer from
   -- the chain so L1 never credits the buyer.
+  --
+  -- Parent resolution strategy:
+  --   1. Prefer public.seller_relations (authoritative upline tree).
+  --   2. Safety net: if no seller_relations row exists for this child, fall
+  --      back to clients.referred_by_client_id (legacy column that drifts).
+  --      The backfill function public.backfill_seller_relations_from_referred_by()
+  --      is the real fix — this fallback exists so L2 chains don't silently
+  --      break if the backfill hasn't run yet or a new signup skipped it.
+  --   Cycle detection via v_chain membership is preserved for both sources.
   v_walk := case when v_has_real_seller then v_seller else v_buyer end;
   while v_walk is not null and v_steps < 40 loop
     if v_walk = any (v_chain) then exit; end if;
     v_chain := v_chain || v_walk;
-    select sr.parent_client_id into v_parent
+
+    v_parent_from_sr := null;
+    v_parent_from_legacy := null;
+    v_parent_source := null;
+
+    select sr.parent_client_id into v_parent_from_sr
     from public.seller_relations sr where sr.child_client_id = v_walk limit 1;
+
+    if v_parent_from_sr is not null then
+      v_parent := v_parent_from_sr;
+      v_parent_source := 'seller_relations';
+    else
+      -- Safety net: consult legacy clients.referred_by_client_id.
+      select c.referred_by_client_id into v_parent_from_legacy
+      from public.clients c where c.id = v_walk limit 1;
+
+      if v_parent_from_legacy is not null and v_parent_from_legacy <> v_walk then
+        v_parent := v_parent_from_legacy;
+        v_parent_source := 'clients.referred_by_client_id';
+
+        insert into public.audit_logs (action, entity, entity_id, details, metadata, category, source)
+        values (
+          'commission_upline_legacy_fallback', 'sale', p_sale_id::text,
+          'Upline resolution fell back to clients.referred_by_client_id (no seller_relations row).',
+          jsonb_build_object(
+            'source', 'db_trigger',
+            'saleId', p_sale_id,
+            'childClientId', v_walk,
+            'parentClientId', v_parent_from_legacy,
+            'step', v_steps + 1,
+            'fallbackReason', 'missing_seller_relations_row'
+          ),
+          'business', 'database'
+        );
+      else
+        v_parent := null;
+      end if;
+    end if;
+
     v_walk := v_parent;
     v_parent := null;
     v_steps := v_steps + 1;
@@ -1126,3 +1247,1181 @@ begin
   return v_new;
 end;
 $$;
+
+-- ============================================================================
+-- Admin page path normalizer (mirrors src/admin/adminNavConfig.js).
+-- Lowercased, leading slash, no trailing slash, collapse duplicate slashes.
+-- ============================================================================
+create or replace function public.normalize_admin_page_path(raw text)
+returns text
+language plpgsql
+immutable
+as $$
+declare
+  s text;
+begin
+  if raw is null then return ''; end if;
+  s := lower(trim(raw));
+  if s = '' then return ''; end if;
+  s := regexp_replace(s, '/+', '/', 'g');
+  if left(s, 1) <> '/' then s := '/' || s; end if;
+  if length(s) > 1 and right(s, 1) = '/' then s := left(s, length(s) - 1); end if;
+  return s;
+end;
+$$;
+
+-- ============================================================================
+-- Delegated seller predicate: caller is a client whose effective allowed
+-- pages (clients.allowed_pages UNION active page_access_grants) include
+-- /admin/sell (or /sell). Used by RLS policies and by the Sell RPC to
+-- authorize stub-buyer creation without staff rights.
+-- ============================================================================
+create or replace function public.is_delegated_seller()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with me as (
+    select id, allowed_pages
+    from public.clients
+    where auth_user_id = auth.uid()
+    order by created_at asc, id asc
+    limit 1
+  )
+  select exists (
+    select 1 from me m
+    where exists (
+      select 1 from jsonb_array_elements_text(coalesce(m.allowed_pages, '[]'::jsonb)) e
+      where public.normalize_admin_page_path(e) in ('/admin/sell', '/sell')
+    )
+    or exists (
+      select 1 from public.page_access_grants g
+      where g.client_id = m.id
+        and g.revoked_at is null
+        and public.normalize_admin_page_path(g.page_key) in ('/admin/sell', '/sell')
+    )
+  );
+$$;
+
+-- Caller's clients.id (or null) — used as a WITH CHECK guard on delegated
+-- seller policies so they can only act on their own sales.
+create or replace function public.current_delegated_seller_client_id()
+returns uuid
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select id from public.clients where auth_user_id = auth.uid()
+  order by created_at asc, id asc
+  limit 1;
+$$;
+
+-- ============================================================================
+-- Buyer stub RPC: Sell wizard calls this when a new buyer fiche must be
+-- created. security definer so it bypasses staff_clients_crud; authorization
+-- checks is_active_staff() OR /admin/sell grant. Idempotent on phone / email.
+-- ============================================================================
+create or replace function public.create_buyer_stub_for_sale(
+  p_code text,
+  p_name text,
+  p_email text,
+  p_phone text,
+  p_cin text,
+  p_city text
+)
+returns public.clients
+language plpgsql
+security definer
+set search_path = public, auth
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_is_staff boolean := public.is_active_staff();
+  v_caller_client_id uuid := null;
+  v_caller_allowed jsonb := null;
+  v_has_allowed boolean := false;
+  v_has_grant boolean := false;
+  v_phone_normalized text;
+  v_email text;
+  v_code text;
+  v_name text;
+  v_existing public.clients%rowtype;
+  v_new public.clients%rowtype;
+begin
+  if v_uid is null and not v_is_staff then
+    raise exception 'create_buyer_stub_for_sale: not_authenticated' using errcode = '42501';
+  end if;
+
+  if not v_is_staff then
+    select id, allowed_pages into v_caller_client_id, v_caller_allowed
+    from public.clients where auth_user_id = v_uid
+    order by created_at asc, id asc limit 1;
+
+    if v_caller_client_id is null then
+      raise exception 'create_buyer_stub_for_sale: caller_not_linked_to_client' using errcode = '42501';
+    end if;
+
+    if v_caller_allowed is not null and jsonb_typeof(v_caller_allowed) = 'array' then
+      select exists (
+        select 1 from jsonb_array_elements_text(v_caller_allowed) e
+        where public.normalize_admin_page_path(e) in ('/admin/sell', '/sell')
+      ) into v_has_allowed;
+    end if;
+
+    select exists (
+      select 1 from public.page_access_grants g
+      where g.client_id = v_caller_client_id
+        and g.revoked_at is null
+        and public.normalize_admin_page_path(g.page_key) in ('/admin/sell', '/sell')
+    ) into v_has_grant;
+
+    if not (v_has_allowed or v_has_grant) then
+      raise exception 'create_buyer_stub_for_sale: no_sell_grant' using errcode = '42501';
+    end if;
+  end if;
+
+  v_phone_normalized := public.normalize_phone_e164(p_phone);
+  if v_phone_normalized is null or v_phone_normalized = '' then
+    raise exception 'create_buyer_stub_for_sale: phone_required' using errcode = '22023';
+  end if;
+
+  v_name := coalesce(nullif(trim(coalesce(p_name, '')), ''), 'Client');
+  v_email := nullif(lower(trim(coalesce(p_email, ''))), '');
+  v_code := coalesce(nullif(trim(coalesce(p_code, '')), ''),
+                     'CLI-' || extract(epoch from now())::bigint::text);
+
+  select * into v_existing from public.clients
+  where phone_normalized = v_phone_normalized
+  order by created_at asc, id asc limit 1;
+  if v_existing.id is not null then return v_existing; end if;
+
+  if v_email is not null then
+    select * into v_existing from public.clients
+    where lower(email) = v_email
+    order by created_at asc, id asc limit 1;
+    if v_existing.id is not null then return v_existing; end if;
+  end if;
+
+  insert into public.clients (code, full_name, email, phone, phone_normalized, cin, city, status)
+  values (v_code, v_name, v_email, coalesce(p_phone, ''), v_phone_normalized,
+          nullif(trim(coalesce(p_cin, '')), ''), nullif(trim(coalesce(p_city, '')), ''),
+          'active')
+  returning * into v_new;
+
+  return v_new;
+end;
+$$;
+
+-- ============================================================================
+-- Auto-link clients.auth_user_id ↔ auth.users.id
+--
+-- Without this, a stub buyer created by a delegated seller stays unlinked
+-- from its future auth account — the buyer dashboard (RLS on current_client_id())
+-- then shows an empty portfolio and no commissions.
+-- Linking works in both directions, fired by triggers on each side.
+-- Matching keys: email, phone E.164, phone last-8 fallback.
+-- All helpers respect the ux_clients_auth_user UNIQUE (one-to-one) invariant.
+-- ============================================================================
+
+create or replace function public.autolink_clients_for_auth_user(p_auth_uid uuid)
+returns integer
+language plpgsql
+security definer
+set search_path = public, auth
+as $$
+declare
+  v_email text; v_meta_phone text; v_e164 text; v_last8 text;
+  v_linked integer := 0;
+begin
+  if p_auth_uid is null then return 0; end if;
+  if exists (select 1 from public.clients where auth_user_id = p_auth_uid) then
+    return 0;
+  end if;
+
+  select lower(trim(u.email)), nullif(trim(u.raw_user_meta_data->>'phone'), '')
+    into v_email, v_meta_phone
+  from auth.users u where u.id = p_auth_uid;
+
+  if v_meta_phone is not null then
+    v_e164  := public.normalize_phone_e164(v_meta_phone);
+    v_last8 := nullif(right(regexp_replace(v_meta_phone, '\D', '', 'g'), 8), '');
+  end if;
+
+  with cand as (
+    select c.id from public.clients c
+    where c.auth_user_id is null
+      and (
+            (v_email is not null and c.email is not null and lower(trim(c.email)) = v_email)
+         or (v_e164  is not null and c.phone_normalized = v_e164)
+         or (v_last8 is not null
+              and right(regexp_replace(coalesce(c.phone_normalized, ''), '\D', '', 'g'), 8) = v_last8)
+      )
+    order by c.created_at asc, c.id asc
+    limit 1
+  )
+  update public.clients c
+     set auth_user_id = p_auth_uid, updated_at = now()
+    from cand where c.id = cand.id;
+
+  get diagnostics v_linked = row_count;
+  return v_linked;
+end;
+$$;
+
+create or replace function public.autolink_client_to_auth_user(p_client_id uuid)
+returns uuid
+language plpgsql
+security definer
+set search_path = public, auth
+as $$
+declare
+  v_email text; v_phone text; v_last8 text; v_uid uuid;
+begin
+  if p_client_id is null then return null; end if;
+
+  select lower(trim(c.email)), c.phone_normalized into v_email, v_phone
+  from public.clients c where c.id = p_client_id and auth_user_id is null;
+  if not found then return null; end if;
+
+  if v_phone is not null then
+    v_last8 := nullif(right(regexp_replace(v_phone, '\D', '', 'g'), 8), '');
+  end if;
+
+  if v_email is not null then
+    select u.id into v_uid from auth.users u
+     where lower(trim(u.email)) = v_email
+     order by u.created_at asc limit 1;
+  end if;
+  if v_uid is null and v_phone is not null then
+    select u.id into v_uid from auth.users u
+     where public.normalize_phone_e164(nullif(u.raw_user_meta_data->>'phone', '')) = v_phone
+     order by u.created_at asc limit 1;
+  end if;
+  if v_uid is null and v_last8 is not null then
+    select u.id into v_uid from auth.users u
+     where right(regexp_replace(coalesce(u.raw_user_meta_data->>'phone', ''), '\D', '', 'g'), 8) = v_last8
+     order by u.created_at asc limit 1;
+  end if;
+
+  if v_uid is null then return null; end if;
+  if exists (select 1 from public.clients where auth_user_id = v_uid) then
+    return null;
+  end if;
+
+  update public.clients set auth_user_id = v_uid, updated_at = now()
+   where id = p_client_id and auth_user_id is null;
+  return v_uid;
+end;
+$$;
+
+-- Trigger: on auth.users INSERT or email/metadata UPDATE, link matching clients.
+create or replace function public.trg_auth_users_autolink_clients()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, auth
+as $$
+begin
+  perform public.autolink_clients_for_auth_user(NEW.id);
+  return NEW;
+end;
+$$;
+
+drop trigger if exists zitouna_auth_users_autolink_insert on auth.users;
+create trigger zitouna_auth_users_autolink_insert
+  after insert on auth.users
+  for each row execute function public.trg_auth_users_autolink_clients();
+
+drop trigger if exists zitouna_auth_users_autolink_update on auth.users;
+create trigger zitouna_auth_users_autolink_update
+  after update of email, raw_user_meta_data on auth.users
+  for each row execute function public.trg_auth_users_autolink_clients();
+
+-- Forward trigger on public.clients INSERT was removed intentionally.
+--
+-- It scanned auth.users sequentially (no index on metadata phone, per-row
+-- function calls) and could easily exceed 15 s on any non-trivial auth
+-- table, breaking the Sell wizard with "délai dépassé". The REVERSE trigger
+-- on auth.users (above) covers the common case (buyer signs up after the
+-- stub exists — the cheap, indexed path). For the rare case where the auth
+-- user already exists when the stub is created, heal_my_client_profile_now()
+-- on dashboard mount closes the gap. Do NOT re-add a BEFORE INSERT trigger
+-- on public.clients that queries auth.users.
+
+-- App-callable self-heal — dashboard calls this on mount when clientProfile
+-- is missing but auth.uid exists (session loaded before the link was made).
+create or replace function public.heal_my_client_profile_now()
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, auth
+as $$
+declare
+  v_uid uuid := auth.uid();
+  v_linked integer;
+  v_cid uuid;
+begin
+  if v_uid is null then
+    return jsonb_build_object('ok', false, 'reason', 'not_authenticated');
+  end if;
+  v_linked := public.autolink_clients_for_auth_user(v_uid);
+  select id into v_cid from public.clients where auth_user_id = v_uid
+   order by created_at asc, id asc limit 1;
+  return jsonb_build_object('ok', v_cid is not null, 'linked', v_linked, 'clientId', v_cid);
+end;
+$$;
+
+-- ============================================================================
+-- Sale completion invariant safety net
+--
+-- The CHECK constraint sales_completed_has_notary_date (in 02_schema.sql)
+-- guarantees status='completed' ⇒ notary_completed_at set. This trigger
+-- auto-fills notary_completed_at = now() if a caller tries to set
+-- status='completed' without providing the date, so the CHECK never fires
+-- and users never lose dashboard visibility.
+-- ============================================================================
+create or replace function public.trg_sales_fill_notary_on_complete()
+returns trigger
+language plpgsql
+as $$
+begin
+  if NEW.status = 'completed' and NEW.notary_completed_at is null then
+    NEW.notary_completed_at := coalesce(OLD.notary_completed_at, now());
+    if coalesce(NEW.pipeline_status, '') <> 'completed' then
+      NEW.pipeline_status := 'completed';
+    end if;
+  end if;
+  return NEW;
+end;
+$$;
+
+drop trigger if exists zitouna_sales_fill_notary_on_complete on public.sales;
+create trigger zitouna_sales_fill_notary_on_complete
+  before insert or update of status, notary_completed_at on public.sales
+  for each row execute function public.trg_sales_fill_notary_on_complete();
+
+-- ============================================================================
+-- Backfill seller_relations from the legacy clients.referred_by_client_id.
+--
+-- Historically the referral tree was stored only on clients.referred_by_client_id.
+-- The authoritative source today is public.seller_relations, but the legacy
+-- column keeps getting populated on some signup paths and then drifts. This
+-- one-time (and safe-to-re-run) backfill copies every legacy edge into
+-- seller_relations so the commission walker in
+-- compute_and_insert_commissions_for_sale sees a complete L1/L2 chain.
+--
+-- Rules:
+--   * Skip rows where referred_by_client_id is null.
+--   * Skip self-referential rows (child = parent) — the CHECK constraint
+--     seller_relations_no_self would reject them anyway.
+--   * ON CONFLICT (child_client_id) DO NOTHING — the schema enforces
+--     uniqueness on child_client_id, so existing rows are never overwritten.
+--   * Returns the number of rows actually inserted (i.e. newly backfilled).
+-- ============================================================================
+create or replace function public.backfill_seller_relations_from_referred_by()
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_inserted integer := 0;
+begin
+  with inserted as (
+    insert into public.seller_relations (child_client_id, parent_client_id, source_sale_id, linked_at)
+    select c.id, c.referred_by_client_id, null, now()
+    from public.clients c
+    where c.referred_by_client_id is not null
+      and c.referred_by_client_id <> c.id
+    on conflict (child_client_id) do nothing
+    returning 1
+  )
+  select count(*) into v_inserted from inserted;
+
+  if v_inserted > 0 then
+    insert into public.audit_logs (action, entity, entity_id, details, metadata, category, source)
+    values (
+      'seller_relations_backfilled', 'seller_relations', null,
+      'Backfilled ' || v_inserted || ' seller_relations row(s) from clients.referred_by_client_id.',
+      jsonb_build_object('source', 'backfill_seller_relations_from_referred_by', 'count', v_inserted),
+      'business', 'database'
+    );
+  end if;
+
+  return v_inserted;
+end;
+$$;
+
+-- ============================================================================
+-- Auto-parrainage on sale insert
+--
+-- Every time a sale is created we materialize the buyer → seller parrainage
+-- edge in public.seller_relations. Without this, the buyer's upline stays
+-- empty and if they later become a seller themselves the commission walker
+-- in compute_and_insert_commissions_for_sale cannot climb past L1.
+--
+-- Rules:
+--   * Skip if the sale has no seller_client_id, or seller equals buyer.
+--   * ON CONFLICT (child_client_id) DO NOTHING — Option B "first sale wins":
+--     a buyer's first-ever sale sets their parrain, subsequent sales don't
+--     overwrite it.
+--   * Also heals the legacy clients.referred_by_client_id column when it is
+--     still null, so downstream reports that read the legacy field stay
+--     consistent with seller_relations.
+--   * Wrapped in EXCEPTION WHEN undefined_table/undefined_column so the
+--     trigger never blocks a sale insert if the schema drifts during a
+--     migration — the upstream code path already runs its own linker.
+-- ============================================================================
+create or replace function public.trg_sales_auto_parrainage()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_buyer uuid;
+  v_seller uuid;
+begin
+  v_buyer := NEW.client_id;
+  v_seller := NEW.seller_client_id;
+
+  if v_seller is null or v_seller = v_buyer or v_buyer is null then
+    return NEW;
+  end if;
+
+  begin
+    insert into public.seller_relations (
+      child_client_id, parent_client_id, source_sale_id, linked_at
+    ) values (
+      v_buyer, v_seller, NEW.id, now()
+    )
+    on conflict (child_client_id) do nothing;
+
+    update public.clients
+       set referred_by_client_id = v_seller,
+           updated_at = now()
+     where id = v_buyer
+       and referred_by_client_id is null;
+  exception
+    when undefined_table or undefined_column then
+      -- Schema not yet fully applied; let the sale insert proceed without
+      -- materializing the parrainage edge. backfill_parrainage_from_sales()
+      -- will close the gap on the next apply.
+      return NEW;
+  end;
+
+  return NEW;
+end;
+$$;
+
+drop trigger if exists zitouna_sales_auto_parrainage on public.sales;
+create trigger zitouna_sales_auto_parrainage
+  after insert on public.sales
+  for each row execute function public.trg_sales_auto_parrainage();
+
+-- ============================================================================
+-- Historical backfill: materialize seller_relations from existing sales.
+--
+-- Re-applies the same buyer → seller edge logic as the INSERT trigger over
+-- every pre-existing sale, oldest first so Option B "first sale wins"
+-- actually reflects chronological order. Safe to re-run: the unique on
+-- seller_relations.child_client_id guarantees idempotency.
+-- ============================================================================
+create or replace function public.backfill_parrainage_from_sales()
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_inserted integer := 0;
+begin
+  begin
+    with ordered_sales as (
+      select s.id, s.client_id, s.seller_client_id, s.created_at
+      from public.sales s
+      where s.client_id is not null
+        and s.seller_client_id is not null
+        and s.seller_client_id <> s.client_id
+      order by s.created_at asc, s.id asc
+    ),
+    inserted as (
+      insert into public.seller_relations (
+        child_client_id, parent_client_id, source_sale_id, linked_at
+      )
+      select os.client_id, os.seller_client_id, os.id, now()
+      from ordered_sales os
+      on conflict (child_client_id) do nothing
+      returning 1
+    )
+    select count(*) into v_inserted from inserted;
+
+    -- Heal legacy clients.referred_by_client_id where still null, using the
+    -- oldest sale per buyer to stay consistent with Option B.
+    update public.clients c
+       set referred_by_client_id = t.seller_client_id,
+           updated_at = now()
+      from (
+        select distinct on (s.client_id)
+               s.client_id, s.seller_client_id
+        from public.sales s
+        where s.client_id is not null
+          and s.seller_client_id is not null
+          and s.seller_client_id <> s.client_id
+        order by s.client_id, s.created_at asc, s.id asc
+      ) t
+     where c.id = t.client_id
+       and c.referred_by_client_id is null;
+  exception
+    when undefined_table or undefined_column then
+      return 0;
+  end;
+
+  if v_inserted > 0 then
+    insert into public.audit_logs (action, entity, entity_id, details, metadata, category, source)
+    values (
+      'seller_relations_backfilled_from_sales', 'seller_relations', null,
+      'Backfilled ' || v_inserted || ' seller_relations row(s) from public.sales history.',
+      jsonb_build_object('source', 'backfill_parrainage_from_sales', 'count', v_inserted),
+      'business', 'database'
+    );
+  end if;
+
+  return v_inserted;
+end;
+$$;
+
+-- ============================================================================
+-- Default commission rules seed
+--
+-- Inserts a default L1/L2/L3 ladder (60 / 20 / 10 DT fixed) for every
+-- project that has ZERO rows in public.project_commission_rules. Projects
+-- that already configured their own rules are left untouched.
+--
+-- Schema note: project_commission_rules stores (rule_type, value) rather
+-- than a single "amount" column. We insert rule_type='fixed' with
+-- value=60/20/10 which is the semantic equivalent of the requested
+-- (level, amount) seed. The unique(project_id, level) constraint on the
+-- table keeps us idempotent via ON CONFLICT DO NOTHING.
+-- ============================================================================
+create or replace function public.seed_default_commission_rules()
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_inserted integer := 0;
+begin
+  begin
+    with projects_needing_rules as (
+      select p.id as project_id
+      from public.projects p
+      where not exists (
+        select 1 from public.project_commission_rules pcr
+        where pcr.project_id = p.id
+      )
+    ),
+    defaults(level, value) as (
+      values (1, 60::numeric(14,4)), (2, 20::numeric(14,4)), (3, 10::numeric(14,4))
+    ),
+    inserted as (
+      insert into public.project_commission_rules (project_id, level, rule_type, value)
+      select pnr.project_id, d.level, 'fixed', d.value
+      from projects_needing_rules pnr cross join defaults d
+      on conflict (project_id, level) do nothing
+      returning 1
+    )
+    select count(*) into v_inserted from inserted;
+  exception
+    when undefined_table or undefined_column then
+      return 0;
+  end;
+
+  if v_inserted > 0 then
+    insert into public.audit_logs (action, entity, entity_id, details, metadata, category, source)
+    values (
+      'project_commission_rules_seeded', 'project_commission_rules', null,
+      'Seeded ' || v_inserted || ' default commission rule(s) (L1=60/L2=20/L3=10).',
+      jsonb_build_object('source', 'seed_default_commission_rules', 'count', v_inserted),
+      'business', 'database'
+    );
+  end if;
+
+  return v_inserted;
+end;
+$$;
+
+-- ============================================================================
+-- Grants for RPCs added in this file.
+-- ============================================================================
+grant execute on function public.normalize_admin_page_path(text)                       to authenticated;
+grant execute on function public.is_delegated_seller()                                 to authenticated;
+grant execute on function public.current_delegated_seller_client_id()                  to authenticated;
+grant execute on function public.create_buyer_stub_for_sale(text, text, text, text, text, text) to authenticated;
+grant execute on function public.autolink_clients_for_auth_user(uuid)                  to authenticated;
+grant execute on function public.autolink_client_to_auth_user(uuid)                    to authenticated;
+grant execute on function public.heal_my_client_profile_now()                          to authenticated;
+
+-- ============================================================================
+-- Run the backfill on every fresh apply of this file so seller_relations is
+-- always consistent with the legacy clients.referred_by_client_id column.
+-- Safe to re-run: ON CONFLICT (child_client_id) DO NOTHING makes it idempotent.
+-- ============================================================================
+do $zit_backfill$
+begin
+  perform public.backfill_seller_relations_from_referred_by();
+end;
+$zit_backfill$;
+
+-- ============================================================================
+-- Re-apply historical parrainage from public.sales on every fresh apply so
+-- the buyer upline is materialized even for legacy sales created before the
+-- zitouna_sales_auto_parrainage trigger existed.
+-- Safe to re-run: seller_relations has UNIQUE(child_client_id).
+-- ============================================================================
+do $zit_parrain$
+begin
+  perform public.backfill_parrainage_from_sales();
+end;
+$zit_parrain$;
+
+-- ============================================================================
+-- Seed default commission rules (L1=60 / L2=20 / L3=10 DT) for any project
+-- that still has no commission rules. Idempotent via the unique index on
+-- project_commission_rules(project_id, level).
+-- ============================================================================
+do $zit_seed_rules$
+begin
+  perform public.seed_default_commission_rules();
+end;
+$zit_seed_rules$;
+
+-- ============================================================================
+-- Commission integrity — prevent the "same person credited twice on one sale"
+-- bug from ever happening again.
+--
+-- Rules we now enforce at the DB level:
+--   1. A client can only receive ONE commission_events row per sale (unique
+--      on (sale_id, beneficiary_client_id)).
+--   2. Level 1 (direct) MUST equal sales.seller_client_id — no other row can
+--      be L1 on that sale. Checked by a BEFORE INSERT trigger so the DB
+--      refuses invalid inserts with a clear error.
+--   3. The seller themselves can NEVER be credited at level >= 2 on their own
+--      sale (enforced by the same trigger).
+--
+-- A cleanup function runs first to purge rows that violate these rules,
+-- then re-generates commissions for affected sales via the existing
+-- compute_and_insert_commissions_for_sale(). Safe to re-run.
+-- ============================================================================
+
+create or replace function public.cleanup_inconsistent_commission_events()
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_deleted_wrong_l1 int := 0;
+  v_deleted_self_l2  int := 0;
+  v_deleted_dupes    int := 0;
+  v_regenerated      int := 0;
+  v_affected uuid[];
+  v_sid uuid;
+begin
+  -- A) L1 rows whose beneficiary is NOT the sale's actual seller.
+  with bad as (
+    select ce.id, ce.sale_id
+    from public.commission_events ce
+    join public.sales s on s.id = ce.sale_id
+    where ce.level = 1
+      and s.seller_client_id is not null
+      and ce.beneficiary_client_id <> s.seller_client_id
+  ), del as (
+    delete from public.commission_events ce using bad where ce.id = bad.id returning bad.sale_id
+  )
+  select array_agg(distinct sale_id), count(*) into v_affected, v_deleted_wrong_l1 from del;
+
+  -- B) Seller credited to themselves at L2+ (impossible).
+  with bad as (
+    select ce.id, ce.sale_id
+    from public.commission_events ce
+    join public.sales s on s.id = ce.sale_id
+    where ce.level >= 2
+      and s.seller_client_id is not null
+      and ce.beneficiary_client_id = s.seller_client_id
+  ), del as (
+    delete from public.commission_events ce using bad where ce.id = bad.id returning bad.sale_id
+  )
+  select count(*) into v_deleted_self_l2 from del;
+
+  -- C) Duplicate rows — same (sale, beneficiary) more than once. Keep the
+  -- row with the LOWEST level (the one most likely to be the legitimate one
+  -- if the trigger ever fired twice).
+  with ranked as (
+    select ce.id, ce.sale_id, ce.beneficiary_client_id, ce.level,
+           row_number() over (
+             partition by ce.sale_id, ce.beneficiary_client_id
+             order by ce.level asc, ce.created_at asc, ce.id asc
+           ) as rn
+    from public.commission_events ce
+  ), del as (
+    delete from public.commission_events ce
+    using ranked
+    where ce.id = ranked.id and ranked.rn > 1
+    returning ranked.sale_id
+  )
+  select count(*) into v_deleted_dupes from del;
+
+  -- D) Regenerate commissions for every sale that lost at least one row.
+  if v_affected is not null then
+    foreach v_sid in array v_affected loop
+      perform public.compute_and_insert_commissions_for_sale(v_sid);
+      v_regenerated := v_regenerated + 1;
+    end loop;
+  end if;
+
+  return jsonb_build_object(
+    'deleted_wrong_l1', v_deleted_wrong_l1,
+    'deleted_self_l2',  v_deleted_self_l2,
+    'deleted_duplicates', v_deleted_dupes,
+    'regenerated_sales', v_regenerated
+  );
+end;
+$$;
+
+grant execute on function public.cleanup_inconsistent_commission_events() to service_role;
+
+-- One-shot cleanup on every apply (idempotent — returns zeros when clean).
+do $zit_commission_cleanup$
+declare
+  r jsonb;
+begin
+  r := public.cleanup_inconsistent_commission_events();
+  raise notice 'ZITOUNA commission cleanup: %', r::text;
+end;
+$zit_commission_cleanup$;
+
+-- Structural constraint: one row per (sale, beneficiary). We add it AFTER the
+-- cleanup DO block above so the ALTER never fails on historical duplicates.
+do $zit_commission_unique$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'ux_commission_events_sale_beneficiary'
+      and conrelid = 'public.commission_events'::regclass
+  ) then
+    alter table public.commission_events
+      add constraint ux_commission_events_sale_beneficiary
+      unique (sale_id, beneficiary_client_id);
+  end if;
+end;
+$zit_commission_unique$;
+
+-- BEFORE INSERT validation — catches future bugs before data lands.
+create or replace function public.trg_commission_events_validate()
+returns trigger
+language plpgsql
+as $$
+declare
+  v_seller uuid;
+begin
+  select seller_client_id into v_seller from public.sales where id = NEW.sale_id;
+
+  if NEW.level = 1 then
+    if v_seller is null then
+      raise exception 'commission L1 refused: sales.seller_client_id is null (sale=%)', NEW.sale_id
+        using errcode = '23514';
+    end if;
+    if NEW.beneficiary_client_id <> v_seller then
+      raise exception 'commission L1 refused: beneficiary % is not the direct seller % (sale=%)',
+        NEW.beneficiary_client_id, v_seller, NEW.sale_id using errcode = '23514';
+    end if;
+  elsif NEW.level >= 2 then
+    if v_seller is not null and NEW.beneficiary_client_id = v_seller then
+      raise exception 'commission L%+ refused: seller cannot be indirect on own sale (sale=%)',
+        NEW.level, NEW.sale_id using errcode = '23514';
+    end if;
+  end if;
+
+  return NEW;
+end;
+$$;
+
+drop trigger if exists zitouna_commission_events_validate on public.commission_events;
+create trigger zitouna_commission_events_validate
+  before insert on public.commission_events
+  for each row execute function public.trg_commission_events_validate();
+
+-- ============================================================================
+-- TASK 1 — Commission notification trigger
+--
+-- After a commission_events row is inserted, drop a row into
+-- public.user_notifications so the beneficiary sees the payout in their
+-- investor notification tray. Schema adaptation: user_notifications does NOT
+-- carry `title`/`body`/`kind`/`metadata` columns — it has
+-- (user_id, role_scope, type, payload jsonb, read_at, dedupe_key). The
+-- prescribed title/body/kind/metadata payload is therefore packed inside
+-- `payload` and `type` is set to 'commission_earned'. `role_scope` is
+-- 'investor' (the only scope that matches non-admin clients per the CHECK
+-- constraint). `dedupe_key` prevents duplicates on re-emission.
+--
+-- No row is written when the beneficiary client has no auth_user_id yet (we
+-- cannot target a notification). Wrapped in exception blocks so a NOTICE is
+-- emitted and the original INSERT still succeeds.
+-- ============================================================================
+
+create or replace function public.trg_commission_events_notify()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $zit_commission_notify$
+declare
+  v_auth_user uuid;
+  v_sale_code text;
+  v_buyer_name text;
+  v_project_title text;
+  v_parcel_label text;
+  v_parcel_ids integer[];
+  v_amount_fmt text;
+  v_title text;
+  v_body text;
+  v_payload jsonb;
+  v_dedupe text;
+begin
+  begin
+    -- Look up beneficiary's auth.users id. Stub clients without an account
+    -- cannot receive a notification, so we silently skip them.
+    select c.auth_user_id into v_auth_user
+    from public.clients c
+    where c.id = NEW.beneficiary_client_id;
+
+    if v_auth_user is null then
+      return NEW;
+    end if;
+
+    -- Join the sale + buyer + project in one shot so the notification body
+    -- reads naturally ("pour la vente de Ahmed B. sur Olivier — La Marsa,
+    -- parcelle #12") instead of exposing a raw UUID.
+    select
+      s.code,
+      coalesce(buyer.full_name, buyer.name),
+      p.title,
+      coalesce(s.parcel_ids, case when s.parcel_id is not null then array[s.parcel_id] else array[]::integer[] end)
+    into v_sale_code, v_buyer_name, v_project_title, v_parcel_ids
+    from public.sales s
+    left join public.clients  buyer on buyer.id = s.client_id
+    left join public.projects p     on p.id     = s.project_id
+    where s.id = NEW.sale_id;
+
+    -- Human-readable parcel label: "#12" for one, "#12, #13" for a few,
+    -- "3 parcelles" once the list gets unwieldy. NULL when we have none.
+    if v_parcel_ids is not null and array_length(v_parcel_ids, 1) is not null then
+      if array_length(v_parcel_ids, 1) <= 3 then
+        select string_agg('#' || x::text, ', ') into v_parcel_label
+          from unnest(v_parcel_ids) as x;
+      else
+        v_parcel_label := array_length(v_parcel_ids, 1)::text || ' parcelles';
+      end if;
+    end if;
+
+    -- Keep the amount short: "60" rather than "60.0000" when it's integral.
+    v_amount_fmt := trim(trailing '.' from trim(trailing '0' from NEW.amount::text));
+    if v_amount_fmt = '' then
+      v_amount_fmt := NEW.amount::text;
+    end if;
+
+    -- Title stays compact for the notification tray header.
+    v_title := 'Commission L' || NEW.level::text || ' — ' || v_amount_fmt || ' DT';
+
+    -- Body: build context-rich French with graceful fallbacks for each piece.
+    v_body := 'Commission niveau ' || NEW.level::text
+              || ' de ' || v_amount_fmt || ' DT';
+    if v_buyer_name is not null and length(trim(v_buyer_name)) > 0 then
+      v_body := v_body || ' sur la vente de ' || v_buyer_name;
+    end if;
+    if v_project_title is not null and length(trim(v_project_title)) > 0 then
+      v_body := v_body || ' — ' || v_project_title;
+    end if;
+    if v_parcel_label is not null then
+      v_body := v_body || ' (' || v_parcel_label || ')';
+    elsif v_sale_code is not null then
+      v_body := v_body || ' [' || v_sale_code || ']';
+    end if;
+    v_body := v_body || '.';
+
+    v_payload := jsonb_build_object(
+      'kind',           'commission',
+      'title',          v_title,
+      'body',           v_body,
+      'event_id',       NEW.id,
+      'sale_id',        NEW.sale_id,
+      'sale_code',      v_sale_code,
+      'buyer_name',     v_buyer_name,
+      'project_title',  v_project_title,
+      'parcel_label',   v_parcel_label,
+      'level',          NEW.level,
+      'amount',         NEW.amount,
+      'status',         NEW.status::text
+    );
+
+    -- One notification per commission_event row. dedupe_key is UNIQUE on
+    -- user_notifications, so re-runs of the same event id cannot double-post.
+    v_dedupe := 'commission_event:' || NEW.id::text;
+
+    insert into public.user_notifications (user_id, role_scope, type, payload, dedupe_key)
+    values (v_auth_user, 'investor', 'commission_earned', v_payload, v_dedupe)
+    on conflict (dedupe_key) do nothing;
+  exception when others then
+    -- Never let a notification failure abort the commission insert.
+    raise notice 'trg_commission_events_notify skipped for event %: %', NEW.id, sqlerrm;
+  end;
+
+  return NEW;
+end;
+$zit_commission_notify$;
+
+do $zit_commission_notify_trg$
+begin
+  drop trigger if exists zitouna_commission_events_notify on public.commission_events;
+  create trigger zitouna_commission_events_notify
+    after insert on public.commission_events
+    for each row execute function public.trg_commission_events_notify();
+exception when others then
+  raise notice 'zitouna_commission_events_notify trigger wiring failed: %', sqlerrm;
+end;
+$zit_commission_notify_trg$;
+
+-- ============================================================================
+-- TASK 2 — Fraud / cycle detection RPC
+--
+-- Returns a single jsonb blob summarizing five classes of parrainage
+-- anomalies. Pure SQL aggregation (recursive CTE for cycles, simple joins
+-- for the rest). SECURITY DEFINER because the report reads clients/sales
+-- that an authenticated caller might not have direct SELECT on.
+-- Each sub-query is defensive: wrapped in an exception block so a single
+-- broken slice cannot wipe out the whole report.
+-- ============================================================================
+
+create or replace function public.detect_parrainage_anomalies()
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $zit_detect_anomalies$
+declare
+  v_cycles jsonb := '[]'::jsonb;
+  v_self jsonb := '[]'::jsonb;
+  v_orphans jsonb := '[]'::jsonb;
+  v_mismatched jsonb := '[]'::jsonb;
+  v_dup jsonb := '[]'::jsonb;
+begin
+  -- 1) Cycles in the seller_relations graph. A cycle is detected when the
+  --    DFS path revisits its own starting node. Depth capped at 40.
+  begin
+    with recursive walk(start_id, current_id, path, depth, closed) as (
+      select sr.child_client_id, sr.parent_client_id,
+             array[sr.child_client_id, sr.parent_client_id],
+             1, false
+      from public.seller_relations sr
+      union all
+      select w.start_id, sr.parent_client_id,
+             w.path || sr.parent_client_id,
+             w.depth + 1,
+             (sr.parent_client_id = w.start_id)
+      from walk w
+      join public.seller_relations sr on sr.child_client_id = w.current_id
+      where w.depth < 40
+        and not w.closed
+        and not (sr.parent_client_id = any(w.path) and sr.parent_client_id <> w.start_id)
+    ),
+    cycles_found as (
+      select distinct on (array_sort_unique(path))
+        path as client_ids,
+        array_length(path, 1) as length
+      from walk
+      where closed
+    )
+    select coalesce(jsonb_agg(jsonb_build_object('client_ids', cf.client_ids, 'length', cf.length)), '[]'::jsonb)
+      into v_cycles
+    from cycles_found cf;
+  exception when undefined_function then
+    -- array_sort_unique doesn't exist by default; fall back to the raw path.
+    begin
+      with recursive walk(start_id, current_id, path, depth, closed) as (
+        select sr.child_client_id, sr.parent_client_id,
+               array[sr.child_client_id, sr.parent_client_id],
+               1, false
+        from public.seller_relations sr
+        union all
+        select w.start_id, sr.parent_client_id,
+               w.path || sr.parent_client_id,
+               w.depth + 1,
+               (sr.parent_client_id = w.start_id)
+        from walk w
+        join public.seller_relations sr on sr.child_client_id = w.current_id
+        where w.depth < 40
+          and not w.closed
+          and not (sr.parent_client_id = any(w.path) and sr.parent_client_id <> w.start_id)
+      )
+      select coalesce(jsonb_agg(jsonb_build_object('client_ids', w.path, 'length', array_length(w.path, 1))), '[]'::jsonb)
+        into v_cycles
+      from walk w
+      where w.closed;
+    exception when others then
+      v_cycles := '[]'::jsonb;
+      raise notice 'detect_parrainage_anomalies cycles slice failed: %', sqlerrm;
+    end;
+  when others then
+    v_cycles := '[]'::jsonb;
+    raise notice 'detect_parrainage_anomalies cycles slice failed: %', sqlerrm;
+  end;
+
+  -- 2) Self-referrals: clients.referred_by_client_id = id OR
+  --    seller_relations.parent = self.
+  begin
+    with refs as (
+      select c.id as client_id, 'clients.referred_by_client_id = id'::text as reason
+      from public.clients c
+      where c.referred_by_client_id = c.id
+      union all
+      select sr.child_client_id as client_id, 'seller_relations.parent = self'::text as reason
+      from public.seller_relations sr
+      where sr.parent_client_id = sr.child_client_id
+    )
+    select coalesce(jsonb_agg(jsonb_build_object('client_id', r.client_id, 'reason', r.reason)), '[]'::jsonb)
+      into v_self
+    from refs r;
+  exception when others then
+    v_self := '[]'::jsonb;
+    raise notice 'detect_parrainage_anomalies self_referrals slice failed: %', sqlerrm;
+  end;
+
+  -- 3) Orphan commissions — beneficiary no longer exists in clients.
+  begin
+    select coalesce(jsonb_agg(ce.id), '[]'::jsonb)
+      into v_orphans
+    from public.commission_events ce
+    where not exists (
+      select 1 from public.clients c where c.id = ce.beneficiary_client_id
+    );
+  exception when others then
+    v_orphans := '[]'::jsonb;
+    raise notice 'detect_parrainage_anomalies orphan_commissions slice failed: %', sqlerrm;
+  end;
+
+  -- 4) Mismatched L1 events (historical rows where L1 beneficiary
+  --    differs from sales.seller_client_id).
+  begin
+    select coalesce(jsonb_agg(jsonb_build_object(
+      'event_id',   ce.id,
+      'sale_id',    ce.sale_id,
+      'beneficiary', ce.beneficiary_client_id,
+      'seller',      s.seller_client_id
+    )), '[]'::jsonb)
+      into v_mismatched
+    from public.commission_events ce
+    join public.sales s on s.id = ce.sale_id
+    where ce.level = 1
+      and (s.seller_client_id is null or ce.beneficiary_client_id <> s.seller_client_id);
+  exception when others then
+    v_mismatched := '[]'::jsonb;
+    raise notice 'detect_parrainage_anomalies mismatched_l1 slice failed: %', sqlerrm;
+  end;
+
+  -- 5) Duplicate upline — same auth_user_id mapped to more than one
+  --    clients row (only materialized auth ids, not nulls).
+  begin
+    with dup as (
+      select auth_user_id, array_agg(id order by created_at) as client_ids
+      from public.clients
+      where auth_user_id is not null
+      group by auth_user_id
+      having count(*) > 1
+    )
+    select coalesce(jsonb_agg(jsonb_build_object(
+      'auth_user_id', d.auth_user_id,
+      'client_ids',   d.client_ids
+    )), '[]'::jsonb)
+      into v_dup
+    from dup d;
+  exception when others then
+    v_dup := '[]'::jsonb;
+    raise notice 'detect_parrainage_anomalies duplicate_upline slice failed: %', sqlerrm;
+  end;
+
+  return jsonb_build_object(
+    'cycles',               v_cycles,
+    'self_referrals',       v_self,
+    'orphan_commissions',   v_orphans,
+    'mismatched_l1',        v_mismatched,
+    'duplicate_upline',     v_dup,
+    'generated_at',         to_jsonb(now())
+  );
+end;
+$zit_detect_anomalies$;
+
+do $zit_detect_grant$
+begin
+  grant execute on function public.detect_parrainage_anomalies() to authenticated;
+exception when others then
+  raise notice 'detect_parrainage_anomalies grant failed: %', sqlerrm;
+end;
+$zit_detect_grant$;
+
+-- ============================================================================
+-- TASK 3 — Per-project effective commission rules view
+--
+-- project_commission_rules already carries per-level rows (UNIQUE on
+-- (project_id, level)). This view resolves the "effective" rule for a given
+-- (project_id, level) pair with explicit provenance:
+--   - source = 'project'  → row comes from project_commission_rules.
+--   - source = 'default'  → project has NO rules for that level; we fall
+--                           back to the L1=60 / L2=20 / L3=10 defaults seeded
+--                           by seed_default_commission_rules().
+--
+-- Consumers can `select ... from v_effective_commission_rules where
+-- project_id = 'proj-x'` and always get three rows.
+-- ============================================================================
+
+do $zit_view_effective$
+begin
+  create or replace view public.v_effective_commission_rules as
+  with defaults(level, rule_type, value, max_cap_amount) as (
+    values
+      (1, 'fixed'::text, 60::numeric(14,4), null::numeric(14,2)),
+      (2, 'fixed'::text, 20::numeric(14,4), null::numeric(14,2)),
+      (3, 'fixed'::text, 10::numeric(14,4), null::numeric(14,2))
+  ),
+  project_levels as (
+    select p.id as project_id, d.level, d.rule_type, d.value, d.max_cap_amount
+    from public.projects p
+    cross join defaults d
+  )
+  select
+    pl.project_id::text                     as project_id,
+    pl.level                                as level,
+    coalesce(pcr.rule_type, pl.rule_type)   as rule_type,
+    coalesce(pcr.value,     pl.value)       as value,
+    coalesce(pcr.max_cap_amount, pl.max_cap_amount) as max_cap_amount,
+    case when pcr.id is not null then 'project' else 'default' end as source
+  from project_levels pl
+  left join public.project_commission_rules pcr
+    on pcr.project_id = pl.project_id
+   and pcr.level = pl.level;
+exception when others then
+  raise notice 'v_effective_commission_rules create failed: %', sqlerrm;
+end;
+$zit_view_effective$;
+
+do $zit_view_grant$
+begin
+  grant select on public.v_effective_commission_rules to authenticated;
+exception when others then
+  raise notice 'v_effective_commission_rules grant failed: %', sqlerrm;
+end;
+$zit_view_grant$;

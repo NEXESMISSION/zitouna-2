@@ -1,6 +1,7 @@
 import { supabase } from './supabase.js'
 import { normalizeAdminPagePath } from '../admin/adminNavConfig.js'
 import { dedupeVerificationRequestsByUserAndCin } from './verificationResolution.js'
+import { normalizePhone as normalizePhoneE164 } from './phone.js'
 
 let PREVIEW_RPC_DISABLED_UNTIL = 0
 const USE_PREVIEW_RPC = Boolean(
@@ -657,9 +658,10 @@ export async function fetchClients() {
 export async function fetchClientByPhone(rawPhone) {
   const input = String(rawPhone || '').trim()
   if (!input) return null
-  const normalized = normalizePhone(input)
+  const e164 = normalizePhoneE164(input)
+  const legacy = normalizePhone(input)
   const canonical = normalizePhoneCanonical(input)
-  const candidates = [...new Set([normalized, canonical, input.replace(/\D/g, '')].filter(Boolean))]
+  const candidates = [...new Set([e164, legacy, canonical, input.replace(/\D/g, '')].filter(Boolean))]
   if (!candidates.length) return null
 
   const byNorm = await db()
@@ -698,7 +700,7 @@ export async function upsertClient(client) {
   const phoneNorm =
     client.phoneNormalized != null && String(client.phoneNormalized).trim() !== ''
       ? String(client.phoneNormalized).trim()
-      : legacyPhoneNorm || null
+      : phoneCanonical || legacyPhoneNorm || null
   const row = {
     code: client.code || `CLI-${Date.now()}`,
     full_name: client.name || '',
@@ -801,6 +803,39 @@ export async function upsertClient(client) {
     // Nothing found on retry — re-throw with the original error so it surfaces.
   }
   return mapClientFromDb(throwIfError(res, 'insertClient'))
+}
+
+/**
+ * Delegated-seller path for the Sell wizard. Calls the security-definer RPC
+ * public.create_buyer_stub_for_sale, which lets a client with /admin/sell in
+ * clients.allowed_pages OR page_access_grants create a buyer stub without
+ * holding the staff_clients_crud policy. Idempotent on phone_normalized /
+ * email. Active staff can use it too; they simply skip the grant check.
+ */
+export async function createBuyerStubForSale({ code, name, email, phone, cin, city }) {
+  const res = await db().rpc('create_buyer_stub_for_sale', {
+    p_code: code || '',
+    p_name: name || '',
+    p_email: email || '',
+    p_phone: phone || '',
+    p_cin: cin || '',
+    p_city: city || '',
+  })
+  if (res.error) {
+    const msg = String(res.error.message || '')
+    if (/no_sell_grant/i.test(msg)) {
+      const e = new Error('no_sell_grant'); e.code = '42501'; throw e
+    }
+    if (/caller_not_linked_to_client/i.test(msg)) {
+      const e = new Error('caller_not_linked_to_client'); e.code = '42501'; throw e
+    }
+    if (/phone_required/i.test(msg)) {
+      const e = new Error('phone_required'); e.code = '22023'; throw e
+    }
+    throw new Error(`createBuyerStubForSale: ${msg}`)
+  }
+  if (!res.data) return null
+  return mapClientFromDb(res.data)
 }
 
 async function invalidateOtherPhoneCanonicalsForIdentity({
@@ -1143,6 +1178,79 @@ export async function fetchAuthAdminProfile(authEmail) {
   }
   if (!res.data) return null
   return mapAdminFromDb(res.data)
+}
+
+/**
+ * Client-side diagnostic for the "Création client refusée / pas staff actif"
+ * RLS toast. Returns a structured snapshot of what the current session looks
+ * like from the app's point of view so the user (and support) can pinpoint
+ * the exact mismatch without opening the Supabase dashboard.
+ *
+ * The shape is UI-friendly and intentionally non-sensitive (no tokens, no
+ * session id) so we can surface it in a toast / inline panel.
+ */
+export async function diagnoseStaffAccess() {
+  const out = {
+    authEmail: '',
+    authUserId: '',
+    adminRow: null,
+    adminActive: false,
+    adminEmailMatches: false,
+    clientRowId: '',
+    clientAllowedPages: [],
+    clientGrantKeys: [],
+    effectiveAllowedPages: [],
+    verdict: 'unknown',
+  }
+  try {
+    const { data: authData } = await db().auth.getUser()
+    out.authEmail = String(authData?.user?.email || '').trim().toLowerCase()
+    out.authUserId = String(authData?.user?.id || '')
+  } catch { /* ignore */ }
+
+  if (out.authEmail) {
+    try {
+      const res = await db().from('admin_users').select('id, email, status, role').ilike('email', out.authEmail).maybeSingle()
+      if (!res.error && res.data) {
+        out.adminRow = { id: res.data.id, email: res.data.email, status: res.data.status, role: res.data.role }
+        out.adminActive = res.data.status === 'active'
+        out.adminEmailMatches = String(res.data.email || '').trim().toLowerCase() === out.authEmail
+      }
+    } catch { /* ignore */ }
+  }
+
+  if (out.authUserId) {
+    try {
+      const res = await db().from('clients').select('id, allowed_pages').eq('auth_user_id', out.authUserId).order('created_at', { ascending: true }).limit(1).maybeSingle()
+      if (!res.error && res.data) {
+        out.clientRowId = res.data.id
+        out.clientAllowedPages = Array.isArray(res.data.allowed_pages)
+          ? res.data.allowed_pages.map((p) => normalizeAdminPagePath(p)).filter(Boolean)
+          : []
+      }
+    } catch { /* ignore */ }
+  }
+
+  // Mirror fetchAuthClientProfile: the effective allowedPages is the union of
+  // the clients.allowed_pages column AND active page_access_grants for the
+  // same clients row. Without this, a delegated seller whose Sell access lives
+  // purely in page_access_grants is mis-classified as client_no_grants and the
+  // toast tells them to ask for an admin_users email — wrong action.
+  if (out.clientRowId) {
+    try {
+      const keys = await fetchActivePageGrantKeysForClient(out.clientRowId)
+      out.clientGrantKeys = Array.isArray(keys) ? keys : []
+    } catch { /* ignore */ }
+  }
+  out.effectiveAllowedPages = [...new Set([...(out.clientAllowedPages || []), ...(out.clientGrantKeys || [])])]
+
+  if (!out.authEmail) out.verdict = 'no_auth_email'
+  else if (out.adminRow && out.adminActive) out.verdict = 'staff_ok'
+  else if (out.adminRow && !out.adminActive) out.verdict = 'staff_inactive'
+  else if (!out.adminRow && out.clientRowId && out.effectiveAllowedPages.length) out.verdict = 'delegated_client'
+  else if (!out.adminRow && out.clientRowId) out.verdict = 'client_no_grants'
+  else out.verdict = 'unknown_session'
+  return out
 }
 
 function mapPageAccessGrantFromDb(r) {
@@ -3302,10 +3410,6 @@ function defaultReferralSummary() {
   }
 }
 
-function defaultReferralSummaryUnconfigured() {
-  return { ...defaultReferralSummary(), reason: 'supabase_not_configured' }
-}
-
 /** Aggregated ambassador KPIs + rules (RPC get_my_referral_summary). */
 export async function fetchAmbassadorReferralSummary() {
   const { data, error } = await supabase.rpc('get_my_referral_summary')
@@ -3330,7 +3434,11 @@ export async function fetchAmbassadorReferralSummary() {
     fieldDepositMin: Number(d.fieldDepositMin ?? 0),
     fullDepositTarget: Number(d.fullDepositTarget ?? 0),
     referralGross: Number(d.referralGross ?? 0),
-    referralGrossPerLevel: Number(d.referralGrossPerLevel ?? d.referralGross ?? 0),
+    // Array of { level, amount } — the RPC returns this for per-level display.
+    referralGrossPerLevel: Array.isArray(d.referralGrossPerLevel) ? d.referralGrossPerLevel : [],
+    // L1 / L2 aggregates for the Parrainage card breakdown.
+    l1Total: Number(d.l1Total ?? 0),
+    l2Total: Number(d.l2Total ?? 0),
     parrainageMaxDepth: Number(d.parrainageMaxDepth ?? 0),
     rsRatePct: Number(d.rsRatePct ?? 0),
     levelGrossRules: Array.isArray(d.levelGrossRules) ? d.levelGrossRules : [],
@@ -3339,6 +3447,113 @@ export async function fetchAmbassadorReferralSummary() {
     identityVerificationBlocked: Boolean(d.identityVerificationBlocked),
     diagnostics: d.diagnostics || null,
   }
+}
+
+/**
+ * Detailed commission ledger for the signed-in client: every commission_events
+ * row where they are the beneficiary, enriched with sale + project + seller +
+ * buyer info so the dashboard can show WHY each payment exists (which filleul
+ * made which sale). Uses current_client_id() via the heal_my_client_profile_now
+ * path — read-only, staff RLS not required because client_select_own_commission_events
+ * already allows the beneficiary to SELECT their own rows.
+ */
+export async function fetchMyCommissionLedger(clientId = null) {
+  // Resolve the caller's clients.id explicitly. For regular buyers RLS on
+  // commission_events already filters to current_client_id(), but STAFF (incl.
+  // Super Admin) bypass that policy and would see every event in the DB —
+  // including DEMO data and other users' commissions. Always filter by the
+  // passed-in clientId to guarantee the dashboard only shows the signed-in
+  // user's own commissions, regardless of their role.
+  let beneficiaryId = clientId
+  if (!beneficiaryId) {
+    try {
+      const { data: heal } = await db().rpc('heal_my_client_profile_now')
+      beneficiaryId = heal?.clientId || null
+    } catch { /* ignore */ }
+  }
+  if (!beneficiaryId) return []
+
+  const evRes = await db()
+    .from('commission_events')
+    .select('id, sale_id, level, amount, status, rule_snapshot, created_at')
+    .eq('beneficiary_client_id', beneficiaryId)
+    .order('created_at', { ascending: false })
+  if (evRes.error) throw new Error(`fetchMyCommissionLedger events: ${evRes.error.message}`)
+  const events = evRes.data || []
+  // Also fetch payout requests for this beneficiary only.
+  const prRes = await db()
+    .from('commission_payout_requests')
+    .select('id, code, gross_amount, status, reviewed_at, reviewed_by, paid_at, created_at')
+    .eq('beneficiary_client_id', beneficiaryId)
+    .order('created_at', { ascending: false })
+  const payoutRequests = (prRes.error ? [] : (prRes.data || [])).map((r) => ({
+    kind: 'payout',
+    id: r.id,
+    code: r.code || '',
+    amount: Number(r.gross_amount) || 0,
+    status: r.status || 'pending_review',
+    createdAt: r.created_at || null,
+    reviewedAt: r.reviewed_at || null,
+    paidAt: r.paid_at || null,
+  }))
+  if (!events.length && !payoutRequests.length) return []
+
+  const saleIds = [...new Set(events.map((e) => e.sale_id).filter(Boolean))]
+  const salesRes = saleIds.length
+    ? await db().from('sales')
+        .select('id, code, project_id, client_id, seller_client_id, agreed_price, notary_completed_at')
+        .in('id', saleIds)
+    : { data: [], error: null }
+  if (salesRes.error) throw new Error(`fetchMyCommissionLedger sales: ${salesRes.error.message}`)
+  const sales = salesRes.data || []
+  const clientIds = [...new Set(sales.flatMap((s) => [s.client_id, s.seller_client_id]).filter(Boolean))]
+  const projectIds = [...new Set(sales.map((s) => s.project_id).filter(Boolean))]
+  const [clientsRes, projectsDetailRes] = await Promise.all([
+    clientIds.length
+      ? db().from('clients').select('id, full_name, code, phone').in('id', clientIds)
+      : Promise.resolve({ data: [], error: null }),
+    projectIds.length
+      ? db().from('projects').select('id, title, city').in('id', projectIds)
+      : Promise.resolve({ data: [], error: null }),
+  ])
+  if (clientsRes.error) throw new Error(`fetchMyCommissionLedger clients: ${clientsRes.error.message}`)
+  if (projectsDetailRes.error) throw new Error(`fetchMyCommissionLedger projects: ${projectsDetailRes.error.message}`)
+
+  const saleById = new Map(sales.map((s) => [s.id, s]))
+  const clientById = new Map((clientsRes.data || []).map((c) => [c.id, c]))
+  const projectById = new Map((projectsDetailRes.data || []).map((p) => [p.id, p]))
+
+  const mappedEvents = events.map((ev) => {
+    const sale = saleById.get(ev.sale_id) || null
+    const project = sale ? projectById.get(sale.project_id) : null
+    const seller = sale ? clientById.get(sale.seller_client_id) : null
+    const buyer = sale ? clientById.get(sale.client_id) : null
+    return {
+      kind: 'commission',
+      id: ev.id,
+      level: Number(ev.level) || 0,
+      amount: Number(ev.amount) || 0,
+      status: ev.status || 'pending',
+      createdAt: ev.created_at || null,
+      sale: sale ? {
+        id: sale.id,
+        code: sale.code,
+        agreedPrice: Number(sale.agreed_price) || 0,
+        notaryCompletedAt: sale.notary_completed_at || null,
+      } : null,
+      project: project ? { id: project.id, title: project.title, city: project.city } : null,
+      seller: seller ? { id: seller.id, name: seller.full_name || seller.code, phone: seller.phone || '' } : null,
+      buyer: buyer ? { id: buyer.id, name: buyer.full_name || buyer.code, phone: buyer.phone || '' } : null,
+    }
+  })
+  // Merge commission events + payout requests and sort by date (newest first).
+  const merged = [...mappedEvents, ...payoutRequests]
+  merged.sort((a, b) => {
+    const ta = new Date(a.createdAt || 0).getTime()
+    const tb = new Date(b.createdAt || 0).getTime()
+    return tb - ta
+  })
+  return merged
 }
 
 export async function requestAmbassadorPayout(amount, idempotencyKey = null) {
@@ -4088,3 +4303,29 @@ export async function fetchWorkflowIntegritySummary() {
 }
 
 export { DEFAULT_HEALTH }
+
+/**
+ * Fetches everything the admin commission tracker needs in one trip.
+ * Staff-only (RLS). Returns { commissionEvents, clients, sellerRelations, sales }.
+ */
+export async function fetchCommissionTrackerData() {
+  const [ceRes, clRes, srRes, saRes, prRes] = await Promise.all([
+    db().from('commission_events').select('id, beneficiary_client_id, sale_id, level, amount, status, rule_snapshot, created_at').order('created_at', { ascending: false }),
+    db().from('clients').select('id, code, full_name, email, phone, phone_normalized, referred_by_client_id, status'),
+    db().from('seller_relations').select('id, child_client_id, parent_client_id, source_sale_id, linked_at'),
+    db().from('sales').select('id, code, client_id, seller_client_id, project_id, agreed_price, notary_completed_at, status').not('notary_completed_at','is', null).order('notary_completed_at', { ascending: false }),
+    db().from('projects').select('id, title, city'),
+  ])
+  if (ceRes.error) throw new Error(`commission_events: ${ceRes.error.message}`)
+  if (clRes.error) throw new Error(`clients: ${clRes.error.message}`)
+  if (srRes.error) throw new Error(`seller_relations: ${srRes.error.message}`)
+  if (saRes.error) throw new Error(`sales: ${saRes.error.message}`)
+  if (prRes.error) throw new Error(`projects: ${prRes.error.message}`)
+  return {
+    commissionEvents: ceRes.data || [],
+    clients: clRes.data || [],
+    sellerRelations: srRes.data || [],
+    sales: saRes.data || [],
+    projects: prRes.data || [],
+  }
+}

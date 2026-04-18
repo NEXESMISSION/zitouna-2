@@ -352,7 +352,11 @@ create table sales (
   -- cases from accidentally crediting L1 commissions to the buyer (audit M4)
   -- and catches any future write path that bypasses the application guard in
   -- computeCommissionEventPayloads.
-  constraint sales_seller_neq_buyer check (seller_client_id is null or seller_client_id <> client_id)
+  constraint sales_seller_neq_buyer check (seller_client_id is null or seller_client_id <> client_id),
+  -- Buyer dashboard AND the commission trigger both depend on notary_completed_at.
+  -- A row can't carry status='completed' without it, or we silently hide the
+  -- sale from its buyer and skip every commission payout.
+  constraint sales_completed_has_notary_date check (status <> 'completed' or notary_completed_at is not null)
 );
 
 create index idx_sales_project on sales(project_id);

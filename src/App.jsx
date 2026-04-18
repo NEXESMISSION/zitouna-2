@@ -16,6 +16,7 @@ const ProjectPage = lazy(() => import('./pages/ProjectPage.jsx'))
 const PlotPage = lazy(() => import('./pages/PlotPage.jsx'))
 const PurchaseMandatPage = lazy(() => import('./pages/PurchaseMandatPage.jsx'))
 const VisitSuccessPage = lazy(() => import('./pages/VisitSuccessPage.jsx'))
+const ReferralInvitePage = lazy(() => import('./pages/ReferralInvitePage.jsx'))
 
 const AdminLayout = lazy(() => import('./admin/AdminLayout.jsx'))
 const ProjectsPage = lazy(() => import('./admin/pages/ProjectsPage.jsx'))
@@ -39,6 +40,9 @@ const CommercialCalendarPage = lazy(() => import('./admin/pages/CommercialCalend
 const AccessGrantsPage = lazy(() => import('./admin/pages/AccessGrantsPage.jsx'))
 const CommissionLedgerPage = lazy(() => import('./admin/pages/CommissionLedgerPage.jsx'))
 const ClientLinkRepairPage = lazy(() => import('./admin/pages/ClientLinkRepairPage.jsx'))
+const CommissionAnomaliesPage = lazy(() => import('./admin/pages/CommissionAnomaliesPage.jsx'))
+const CommissionAnalyticsPage = lazy(() => import('./admin/pages/CommissionAnalyticsPage.jsx'))
+import CommissionTrackerPage from './admin/pages/CommissionTrackerPage.jsx'
 
 function LegacyMandatToVisiteRedirect() {
   const { id } = useParams()
@@ -68,6 +72,7 @@ export default function App() {
         <Route path="/project/:projectId/plot/:plotId" element={<PlotPage />} />
         <Route path="/project/:id/mandat"              element={<LegacyMandatToVisiteRedirect />} />
         <Route path="/owner"                           element={<Navigate to="/browse" replace />} />
+        <Route path="/ref/:code"                       element={<ReferralInvitePage />} />
 
         {/* Auth pages (no guard, just UI) */}
         <Route path="/login"            element={<LoginPage />} />
@@ -93,6 +98,9 @@ export default function App() {
           <Route path="finance"              element={<FinanceDashboardPage />} />
           <Route path="referral-settings"    element={<ReferralCommissionSettingsPage />} />
           <Route path="commission-ledger" element={<CommissionLedgerPage />} />
+          <Route path="commissions" element={<CommissionTrackerPage />} />
+          <Route path="commissions/analytics" element={<CommissionAnalyticsPage />} />
+          <Route path="commissions/anomalies" element={<CommissionAnomaliesPage />} />
           <Route path="legal"                element={<NotaryDashboardPage />} />
           <Route path="coordination"         element={<CoordinationPage />} />
           <Route path="juridique"            element={<ServiceJuridiquePage />} />

@@ -119,3 +119,258 @@ values
   ('afternoon-1', '14h00 – 16h00', 'Début d''après-midi — température agréable',       3),
   ('afternoon-2', '16h00 – 18h00', 'Fin d''après-midi — lumière douce',                4)
 on conflict (id) do nothing;
+
+-- ========= Demo referral chain (4 levels) =========
+-- Creates a 4-level parrain demo: Abir (root) -> Saif -> Ayoub -> Med.
+-- Strictly additive + idempotent: guarded by ON CONFLICT on phone_normalized
+-- (clients) and child_client_id (seller_relations). No sales are inserted;
+-- the admin creates those via the Sell UI.
+do $zit_demo_chain$
+declare
+  v_abir_id  uuid;
+  v_saif_id  uuid;
+  v_ayoub_id uuid;
+  v_med_id   uuid;
+begin
+  with ins_abir as (
+    insert into public.clients (code, full_name, phone, phone_normalized, referred_by_client_id)
+    values ('DEMO-ABIR', 'DEMO Abir', '+216 99 000 001', '+21699000001', null)
+    on conflict (phone_normalized) do nothing
+    returning id
+  )
+  select coalesce(
+    (select id from ins_abir),
+    (select id from public.clients where phone_normalized = '+21699000001')
+  ) into v_abir_id;
+
+  with ins_saif as (
+    insert into public.clients (code, full_name, phone, phone_normalized, referred_by_client_id)
+    values ('DEMO-SAIF', 'DEMO Saif', '+216 99 000 002', '+21699000002', v_abir_id)
+    on conflict (phone_normalized) do nothing
+    returning id
+  )
+  select coalesce(
+    (select id from ins_saif),
+    (select id from public.clients where phone_normalized = '+21699000002')
+  ) into v_saif_id;
+
+  with ins_ayoub as (
+    insert into public.clients (code, full_name, phone, phone_normalized, referred_by_client_id)
+    values ('DEMO-AYOUB', 'DEMO Ayoub', '+216 99 000 003', '+21699000003', v_saif_id)
+    on conflict (phone_normalized) do nothing
+    returning id
+  )
+  select coalesce(
+    (select id from ins_ayoub),
+    (select id from public.clients where phone_normalized = '+21699000003')
+  ) into v_ayoub_id;
+
+  with ins_med as (
+    insert into public.clients (code, full_name, phone, phone_normalized, referred_by_client_id)
+    values ('DEMO-MED', 'DEMO Med', '+216 99 000 004', '+21699000004', v_ayoub_id)
+    on conflict (phone_normalized) do nothing
+    returning id
+  )
+  select coalesce(
+    (select id from ins_med),
+    (select id from public.clients where phone_normalized = '+21699000004')
+  ) into v_med_id;
+
+  insert into public.seller_relations (child_client_id, parent_client_id)
+  values
+    (v_saif_id,  v_abir_id),
+    (v_ayoub_id, v_saif_id),
+    (v_med_id,   v_ayoub_id)
+  on conflict (child_client_id) do nothing;
+end;
+$zit_demo_chain$;
+
+-- ========= Demo chain extension: 5th level + branches =========
+-- Extends the demo tree so the graph visualization has something meaningful:
+--   Abir (root)
+--    ├── Saif ── Ayoub ── Med ── Nour      (depth 5)
+--    ├── Hedi                               (branch)
+--    └── Salma                              (branch)
+-- Fully idempotent: ON CONFLICT on phone_normalized + child_client_id.
+do $zit_demo_chain_ext$
+declare
+  v_abir_id  uuid;
+  v_med_id   uuid;
+  v_nour_id  uuid;
+  v_hedi_id  uuid;
+  v_salma_id uuid;
+begin
+  select id into v_abir_id from public.clients where phone_normalized = '+21699000001';
+  select id into v_med_id  from public.clients where phone_normalized = '+21699000004';
+
+  if v_abir_id is null or v_med_id is null then
+    raise notice 'ZITOUNA: base demo chain (Abir/Med) missing — skipping chain extension.';
+    return;
+  end if;
+
+  -- 5th level: Nour referred by Med
+  with ins_nour as (
+    insert into public.clients (code, full_name, phone, phone_normalized, referred_by_client_id)
+    values ('DEMO-NOUR', 'DEMO Nour', '+216 99 000 005', '+21699000005', v_med_id)
+    on conflict (phone_normalized) do nothing
+    returning id
+  )
+  select coalesce(
+    (select id from ins_nour),
+    (select id from public.clients where phone_normalized = '+21699000005')
+  ) into v_nour_id;
+
+  -- Extra branches off Abir: Hedi + Salma
+  with ins_hedi as (
+    insert into public.clients (code, full_name, phone, phone_normalized, referred_by_client_id)
+    values ('DEMO-HEDI', 'DEMO Hedi', '+216 99 000 006', '+21699000006', v_abir_id)
+    on conflict (phone_normalized) do nothing
+    returning id
+  )
+  select coalesce(
+    (select id from ins_hedi),
+    (select id from public.clients where phone_normalized = '+21699000006')
+  ) into v_hedi_id;
+
+  with ins_salma as (
+    insert into public.clients (code, full_name, phone, phone_normalized, referred_by_client_id)
+    values ('DEMO-SALMA', 'DEMO Salma', '+216 99 000 007', '+21699000007', v_abir_id)
+    on conflict (phone_normalized) do nothing
+    returning id
+  )
+  select coalesce(
+    (select id from ins_salma),
+    (select id from public.clients where phone_normalized = '+21699000007')
+  ) into v_salma_id;
+
+  insert into public.seller_relations (child_client_id, parent_client_id)
+  values
+    (v_nour_id,  v_med_id),
+    (v_hedi_id,  v_abir_id),
+    (v_salma_id, v_abir_id)
+  on conflict (child_client_id) do nothing;
+end;
+$zit_demo_chain_ext$;
+
+-- ========= Demo sales to trigger commissions =========
+-- Creates up to 3 scripted sales along the demo chain so the referral
+-- commission pipeline has live data:
+--   (a) Saif  sells to Ayoub
+--   (b) Ayoub sells to Med
+--   (c) Med   sells to Nour
+-- Each sale:
+--   * Uses the first available parcel of "Projet Olivier — La Marsa" (tunis).
+--   * agreed_price = 85000, status = 'completed', notary_completed_at = now()
+--     (UPDATE after INSERT so the notary commission trigger fires).
+--   * Marks the consumed parcel as 'reserved' to avoid double-booking.
+-- Fully idempotent: skipped when a sale already exists for the same
+-- (seller_client_id, client_id) pair.
+do $zit_demo_sales$
+declare
+  r record;
+  v_project_id text;
+  v_seller_id  uuid;
+  v_buyer_id   uuid;
+  v_parcel_id  bigint;
+  v_sale_id    uuid;
+  v_sale_code  text;
+  v_created    int := 0;
+  v_skipped    int := 0;
+begin
+  -- Resolve the demo project by title (fall back to the seeded 'tunis' id).
+  select id into v_project_id
+  from public.projects
+  where title = 'Projet Olivier — La Marsa'
+  limit 1;
+
+  if v_project_id is null then
+    raise notice 'ZITOUNA: Projet Olivier not found — skipping demo sales.';
+    return;
+  end if;
+
+  for r in
+    select *
+    from (values
+      ('DEMO-SALE-1', '+21699000002', '+21699000003'),  -- Saif  -> Ayoub
+      ('DEMO-SALE-2', '+21699000003', '+21699000004'),  -- Ayoub -> Med
+      ('DEMO-SALE-3', '+21699000004', '+21699000005')   -- Med   -> Nour
+    ) as t(sale_code, seller_phone, buyer_phone)
+  loop
+    v_sale_code := r.sale_code;
+
+    select id into v_seller_id
+    from public.clients where phone_normalized = r.seller_phone;
+    select id into v_buyer_id
+    from public.clients where phone_normalized = r.buyer_phone;
+
+    if v_seller_id is null or v_buyer_id is null then
+      v_skipped := v_skipped + 1;
+      continue;
+    end if;
+
+    -- Idempotency: one sale per (seller, buyer) pair in this demo dataset.
+    if exists (
+      select 1 from public.sales
+      where seller_client_id = v_seller_id
+        and client_id        = v_buyer_id
+    ) then
+      v_skipped := v_skipped + 1;
+      continue;
+    end if;
+
+    -- Pick the first still-available parcel in the demo project.
+    select id into v_parcel_id
+    from public.parcels
+    where project_id = v_project_id
+      and status = 'available'
+    order by parcel_number
+    limit 1;
+
+    if v_parcel_id is null then
+      raise notice 'ZITOUNA: no available parcels left in % for %; skipping.',
+        v_project_id, v_sale_code;
+      v_skipped := v_skipped + 1;
+      continue;
+    end if;
+
+    -- Insert sale first with notary_completed_at NULL so the CHECK constraint
+    -- (status='completed' => notary_completed_at NOT NULL) is satisfied, then
+    -- UPDATE to flip status + set notary timestamp: this is what fires the
+    -- trg_sales_notary_commissions trigger.
+    insert into public.sales (
+      code, project_id, parcel_id, parcel_ids,
+      client_id, seller_client_id,
+      payment_type, agreed_price,
+      status, pipeline_status
+    )
+    values (
+      v_sale_code, v_project_id, v_parcel_id, array[v_parcel_id]::bigint[],
+      v_buyer_id, v_seller_id,
+      'full'::payment_type, 85000,
+      'draft', 'draft'
+    )
+    returning id into v_sale_id;
+
+    update public.sales
+       set status                = 'completed',
+           pipeline_status       = 'completed',
+           notary_completed_at   = now(),
+           finance_confirmed_at  = now(),
+           legal_sale_contract_signed_at = now(),
+           updated_at            = now()
+     where id = v_sale_id;
+
+    -- Reserve the parcel so the next iteration picks a fresh one.
+    update public.parcels
+       set status = 'reserved'
+     where id = v_parcel_id
+       and status = 'available';
+
+    v_created := v_created + 1;
+  end loop;
+
+  raise notice
+    'ZITOUNA demo extension: added up to 3 clients (Nour/Hedi/Salma), extended chain to 5 levels, created % demo sale(s), skipped % (already present or missing prereqs).',
+    v_created, v_skipped;
+end;
+$zit_demo_sales$;

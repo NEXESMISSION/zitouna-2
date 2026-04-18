@@ -5,13 +5,14 @@ import { useAuth } from '../../lib/AuthContext.jsx'
 import { useProjects, useProjectWorkflow } from '../../lib/useSupabase.js'
 import { useClients } from '../../lib/useSupabase.js'
 import { useOffers } from '../../lib/useSupabase.js'
-import { useSales, useInstallments, useAdminUsers, useMySellerParcelAssignments } from '../../lib/useSupabase.js'
+import { useSales, useAdminUsers, useMySellerParcelAssignments } from '../../lib/useSupabase.js'
 import { generatePaymentSchedule } from '../../installmentsStore.js'
 import { useToast } from '../components/AdminToast.jsx'
 import AdminDrawer from '../components/AdminDrawer.jsx'
 import AdminModal from '../components/AdminModal.jsx'
-import { SALE_STATUS, getSaleStatusMeta, canonicalSaleStatus } from '../../domain/workflowModel.js'
+import { SALE_STATUS, getSaleStatusMeta } from '../../domain/workflowModel.js'
 import * as db from '../../lib/db.js'
+import { emitInvalidate } from '../../lib/dataEvents.js'
 import { normalizePhone } from '../../lib/phone.js'
 import '../admin.css'
 import './sell-field.css'
@@ -22,7 +23,7 @@ function reservationExpiresAtIso(hours) {
   return d.toISOString()
 }
 
-/** Attache la vente à l’agent ou au responsable pour le reporting et le tableau de bord. */
+/** Attache la vente à l'agent ou au responsable pour le reporting et le tableau de bord. */
 function saleAttribution(role, adminUser) {
   const r = canonicalRole(role)
   if (r === 'Agent' && adminUser?.id) {
@@ -51,6 +52,19 @@ function plotSelectionMatchesSale(sale, formPlotIds) {
   return a.length === b.length && a.every((v, i) => v === b[i])
 }
 
+// Compact pager: 1 2 3 4 5 … 12, or 1 … 5 6 7 … 12 depending on where we are.
+function getPagerPages(current, total) {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1)
+  const out = [1]
+  const left = Math.max(2, current - 1)
+  const right = Math.min(total - 1, current + 1)
+  if (left > 2) out.push('…')
+  for (let i = left; i <= right; i++) out.push(i)
+  if (right < total - 1) out.push('…')
+  out.push(total)
+  return out
+}
+
 function fmtFrDateTime(iso) {
   if (!iso) return '—'
   try {
@@ -63,6 +77,31 @@ function fmtFrDateTime(iso) {
 function normalizePhoneLookup(v) {
   return String(v || '').replace(/\D/g, '').slice(-8)
 }
+
+// Country codes for the + Nouveau phone picker. Kept intentionally focused on
+// the markets most likely to appear for Zitouna buyers (Maghreb, EU, Gulf,
+// North America). Dial code is what we store; the flag + name are for UX.
+const PHONE_COUNTRY_CODES = [
+  { code: '+216', flag: '🇹🇳', name: 'Tunisie' },
+  { code: '+213', flag: '🇩🇿', name: 'Algérie' },
+  { code: '+212', flag: '🇲🇦', name: 'Maroc' },
+  { code: '+218', flag: '🇱🇾', name: 'Libye' },
+  { code: '+20',  flag: '🇪🇬', name: 'Égypte' },
+  { code: '+33',  flag: '🇫🇷', name: 'France' },
+  { code: '+32',  flag: '🇧🇪', name: 'Belgique' },
+  { code: '+41',  flag: '🇨🇭', name: 'Suisse' },
+  { code: '+49',  flag: '🇩🇪', name: 'Allemagne' },
+  { code: '+39',  flag: '🇮🇹', name: 'Italie' },
+  { code: '+34',  flag: '🇪🇸', name: 'Espagne' },
+  { code: '+44',  flag: '🇬🇧', name: 'Royaume-Uni' },
+  { code: '+31',  flag: '🇳🇱', name: 'Pays-Bas' },
+  { code: '+971', flag: '🇦🇪', name: 'Émirats' },
+  { code: '+966', flag: '🇸🇦', name: 'Arabie S.' },
+  { code: '+974', flag: '🇶🇦', name: 'Qatar' },
+  { code: '+965', flag: '🇰🇼', name: 'Koweït' },
+  { code: '+973', flag: '🇧🇭', name: 'Bahreïn' },
+  { code: '+1',   flag: '🇨🇦', name: 'Canada / USA' },
+]
 
 const SALE_WIZARD_STEP_COUNT = 6
 const SALE_WIZARD_LABELS = [
@@ -78,8 +117,8 @@ const SALE_WIZARD_HELPERS = [
   'Appuyez sur les numéros des parcelles à réserver. Les cases grisées sont déjà prises.',
   'Retrouvez le client par son numéro de téléphone (8 chiffres). Créez sa fiche si besoin.',
   'Montant fixé par les paramètres du projet — simple vérification.',
-  'Comptant ou échelonné : choisissez, puis sélectionnez l’offre si nécessaire.',
-  'Relisez tout avant d’envoyer la vente à la coordination.',
+  "Comptant ou échelonné : choisissez, puis sélectionnez l'offre si nécessaire.",
+  "Relisez tout avant d'envoyer la vente à la coordination.",
 ]
 
 /** Cycle vente (technique) — métier : coordination relance le client en pending_finance ; le notaire n'agit qu'après passage en pending_legal. */
@@ -106,9 +145,9 @@ const PAYMENT_TYPE = {
 /** Affichage carnet vente : pipeline, réservation, snapshots figés (ou aperçu workflow projet avant création). */
 function SaleLedgerPanel({ sale, previewWorkflow, variant = 'wizard' }) {
   const preview = Boolean(previewWorkflow)
-  const wrapClass = variant === 'detail' ? 'sell-detail__section' : 'sell-wizard__recap-section'
-  const titleClass = variant === 'detail' ? 'sell-detail__section-title' : 'sell-wizard__recap-section-title'
-  const rowClass = variant === 'detail' ? 'sell-detail__row' : 'sell-wizard__recap-row'
+  const wrapClass = variant === 'detail' ? 'sp-detail__section' : 'sp-recap-section'
+  const titleClass = variant === 'detail' ? 'sp-detail__section-title' : 'sp-recap-section-title'
+  const rowClass = variant === 'detail' ? 'sp-detail__row' : 'sp-recap-row'
 
   const fee = preview
     ? { companyFeePct: previewWorkflow.companyFeePct, notaryFeePct: previewWorkflow.notaryFeePct }
@@ -137,7 +176,7 @@ function SaleLedgerPanel({ sale, previewWorkflow, variant = 'wizard' }) {
     <div className={wrapClass}>
       <div className={titleClass}>{preview ? 'Aperçu règles projet (figées à la création)' : 'Carnet & snapshots (immuable)'}</div>
       {preview ? (
-        <p className="sell-wizard__hint" style={{ marginTop: 0 }}>
+        <p className="sp-wizard__helper" style={{ marginTop: 0 }}>
           Montants et listes issus du workflow projet au moment de la validation.
         </p>
       ) : null}
@@ -261,28 +300,6 @@ function initialsFromName(name) {
   return parts.map(p => p[0]).join('').toUpperCase().slice(0, 2)
 }
 
-function salePlotsMeta(sale, projects) {
-  const ids = normalizePlotIds(sale)
-  const proj = projects.find(p => p.id === sale.projectId)
-  const plots = proj?.plots || []
-  let area = 0
-  for (const id of ids) {
-    const pl = plots.find(x => String(x.id) === String(id) || Number(x.id) === Number(id))
-    if (pl) area += Number(pl.area) || 0
-  }
-  return { count: ids.length, area }
-}
-
-function fieldStatusHint(sale) {
-  const st = canonicalSaleStatus(sale.status)
-  if (st === SALE_STATUS.COMPLETED) return { done: true, text: 'Vente clôturée' }
-  if (st === SALE_STATUS.ACTIVE) return { done: true, text: 'Contrat actif — échéancier en cours' }
-  if (st === SALE_STATUS.PENDING_FINANCE) return { done: false, text: 'À traiter par la finance (caisse)' }
-  if (st === SALE_STATUS.PENDING_LEGAL) return { done: false, text: 'Chez le notaire — signature' }
-  if (st === SALE_STATUS.DRAFT) return { done: false, text: 'Brouillon — compléter la vente' }
-  return { done: false, text: STATUS_FLOW[st]?.label || st }
-}
-
 function reservationTtlText(sale) {
   if (!sale.reservationExpiresAt) return null
   if (sale.financeConfirmedAt || sale.stampedAt) return null
@@ -303,7 +320,7 @@ export default function SellPage() {
   const sellerMode = Boolean(isSellerClient && !adminUser)
   const { addToast } = useToast()
   const { projects, updateParcelStatus } = useProjects()
-  const { clients, upsert: clientUpsert } = useClients()
+  const { clients, upsert: clientUpsert, refresh: refreshClients } = useClients()
 
   const myClientId = useMemo(() => {
     if (clientProfile?.id) return clientProfile.id
@@ -312,8 +329,13 @@ export default function SellPage() {
     return match?.id || null
   }, [clientProfile?.id, user?.id, clients])
   const { offersByProject } = useOffers()
-  const { sales, create: salesCreate, update: salesUpdate, refresh: refreshSales } = useSales()
-  const { createPlan: installmentsCreatePlan } = useInstallments()
+  const { sales, loading: salesLoading, create: salesCreate, update: salesUpdate, refresh: refreshSales } = useSales()
+  // Bypass useInstallments() here — it eagerly fetches all plans+payments+receipts, none of which SellPage reads.
+  const installmentsCreatePlan = useCallback(async (plan) => {
+    const id = await db.createInstallmentPlan(plan)
+    emitInvalidate('installmentPlans')
+    return id
+  }, [])
   const { adminUsers } = useAdminUsers()
   const { assignments: mySellerAssignments } = useMySellerParcelAssignments(sellerMode)
 
@@ -350,7 +372,7 @@ export default function SellPage() {
       }))
   }, [sellerMode, projects, sellerAssignedProjectIds, sellerAssignedParcelDbIds])
 
-  // Per-project arabon: derived from selected project’s arabonDefault
+  // Per-project arabon: derived from selected project's arabonDefault
   const arabonForProject = useCallback((projId) => {
     const p = scopedProjects.find(x => x.id === projId)
     return Number(p?.arabonDefault) || 50
@@ -362,7 +384,7 @@ export default function SellPage() {
     return undefined
   }, [isAdminOrSeller])
 
-  /** Liste affichée : l’agent ne voit que ses ventes ; dispo parcelles reste globale (évite double réservation). */
+  /** Liste affichée : l'agent ne voit que ses ventes ; dispo parcelles reste globale (évite double réservation). */
   const salesForList = useMemo(() => {
     if (sellerMode || (!adminUser && myClientId)) {
       const cid = String(myClientId || '')
@@ -377,7 +399,6 @@ export default function SellPage() {
     }
     return []
   }, [sales, role, adminUser?.id, sellerMode, myClientId])
-  const canAdvanceWorkflow = !sellerMode && role !== 'Agent'
   const agentMayCancelSale = useCallback((sale) => {
     if (sellerMode) return ['draft', 'pending_finance'].includes(sale.status)
     if (role !== 'Agent') return true
@@ -397,6 +418,8 @@ export default function SellPage() {
   }, [])
   const [search, setSearch] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
+  const [page, setPage] = useState(1)
+  const SALES_PER_PAGE = 10
 
   const blankForm = { projectId: '', plotIds: [], clientId: '', offerId: '', notes: '', paymentType: 'installments', deposit: '' }
 
@@ -418,13 +441,12 @@ export default function SellPage() {
   const [editId, setEditId] = useState(null)
 
   const [clientModal, setClientModal] = useState(false)
-  const [clientForm, setClientForm] = useState({ name: '', email: '', phone: '', cin: '', city: '' })
+  const [clientForm, setClientForm] = useState({ name: '', phone: '', phoneCc: '+216', cin: '', city: '' })
   const [clientSaving, setClientSaving] = useState(false)
   const [cinLookup, setCinLookup] = useState('')
   const [cinLookupResult, setCinLookupResult] = useState(null)
   const [actionModal, setActionModal] = useState(null)
   const [detailSale, setDetailSale] = useState(null)
-  const [sellTab, setSellTab] = useState('field')
 
   const withTimeout = useCallback(async (promise, ms, message) => {
     let timer = null
@@ -449,7 +471,7 @@ export default function SellPage() {
       return val
     })
   }, [])
-  /** Horodatage figé à l’entrée sur l’étape finale (piste audit / récap). */
+  /** Horodatage figé à l'entrée sur l'étape finale (piste audit / récap). */
   const [recapCapturedAt, setRecapCapturedAt] = useState(null)
 
   const todayIso = new Date().toISOString().slice(0, 10)
@@ -562,7 +584,7 @@ export default function SellPage() {
   const totalArea = selectedPlots.reduce((s, p) => s + (p.area || 0), 0)
   const totalPlotPrice = selectedPlots.reduce((s, p) => s + (p.totalPrice || 0), 0)
 
-  const filtered = salesForList.filter(s => {
+  const filtered = useMemo(() => salesForList.filter(s => {
     if (filterStatus && s.status !== filterStatus) return false
     if (search) {
       const q = search.toLowerCase()
@@ -576,14 +598,28 @@ export default function SellPage() {
       ) return false
     }
     return true
-  })
+  }), [salesForList, filterStatus, search])
 
-  const pendingPhoneReservation =
-    !form.clientId && cinLookup.length >= 8 && !cinLookupResult
+  const pageCount = Math.max(1, Math.ceil(filtered.length / SALES_PER_PAGE))
+  // Reset to page 1 when the filter result shrinks below the current page.
+  useEffect(() => {
+    if (page > pageCount) setPage(1)
+  }, [page, pageCount])
+  useEffect(() => { setPage(1) }, [search, filterStatus])
+  const pagedFiltered = useMemo(
+    () => filtered.slice((page - 1) * SALES_PER_PAGE, page * SALES_PER_PAGE),
+    [filtered, page],
+  )
+
+  // Schema requires sales.client_id NOT NULL (see database/02_schema.sql):
+  // there is no "pending phone reservation" at DB level — a client row must
+  // exist (staff creates it directly, delegated seller goes through the
+  // create_buyer_stub_for_sale RPC). We enforce that here so the wizard
+  // cannot reach salesCreate with an empty uuid.
   const saleFormSubmitBlocked =
     !form.projectId ||
     form.plotIds.length === 0 ||
-    (!form.clientId && !pendingPhoneReservation) ||
+    !form.clientId ||
     (form.paymentType === 'installments' && form.offerId === '' && projectOffers.length > 0)
 
   const wizardSelectedClient = clients.find(c => c.id === form.clientId)
@@ -698,10 +734,9 @@ export default function SellPage() {
       }
     }
     if (saleWizardStep === 3) {
-      const allowPendingPhone = !form.clientId && cinLookup.length >= 8 && !cinLookupResult
-      if (!form.clientId && !allowPendingPhone) {
+      if (!form.clientId) {
         addToast(
-          'Identifiez le client par téléphone, créez une fiche, ou saisissez 8 chiffres inconnus pour une réservation avec rattachement ultérieur.',
+          "Identifiez le client par téléphone ou créez une fiche (« + Nouveau »). Une vente ne peut pas être enregistrée sans client.",
           'error',
         )
         return
@@ -747,7 +782,14 @@ export default function SellPage() {
   )
 
   const handleSave = useCallback(async () => {
-    const client = form.clientId ? clients.find(c => c.id === form.clientId) : null
+    // cinLookupResult is the last successful phone lookup / RPC-created row;
+    // the useClients hook may not have refreshed yet, so fall back to it when
+    // the local list doesn't contain form.clientId.
+    const clientFromList = form.clientId ? clients.find(c => c.id === form.clientId) : null
+    const client = clientFromList
+      || (cinLookupResult && cinLookupResult.id && String(cinLookupResult.id) === String(form.clientId)
+          ? cinLookupResult
+          : null)
     const claimNorm = client?.phone
       ? normalizePhone(client.phone)
       : normalizePhone(cinLookup)
@@ -777,7 +819,7 @@ export default function SellPage() {
     }
 
     if (!price || Number(price) <= 0) {
-      addToast('Prix convenu invalide : vérifiez les parcelles et l’offre.', 'error')
+      addToast("Prix convenu invalide : vérifiez les parcelles et l'offre.", 'error')
       return
     }
     const priceNum = Number(price) || 0
@@ -872,17 +914,21 @@ export default function SellPage() {
         const ambassadorClientId = effectiveSellerClientId
         const ambassadorCin = effectiveSellerClientId ? (sellerClientRecord?.cin || '') : ''
         const rh = wf.reservationHours || 48
+        if (!client?.id) {
+          addToast("Client manquant : sélectionnez ou créez une fiche avant de soumettre la vente.", 'error')
+          return
+        }
         const created = await salesCreate({
           projectId: form.projectId,
           projectTitle: project?.title || '',
           parcelId: plotDbIds[0],
           parcelIds: plotDbIds,
-          clientId: client?.id || '',
-          clientName: client?.name || 'Acheteur — rattachement en attente',
+          clientId: client.id,
+          clientName: client.name || 'Acheteur',
           buyerPhoneClaim: claimNorm,
           buyerPhoneNormalized: claimNorm,
-          buyerUserId: client?.id || null,
-          buyerAuthUserId: client?.authUserId || null,
+          buyerUserId: client.id,
+          buyerAuthUserId: client.authUserId || null,
           paymentType: isInstallments ? 'installments' : 'full',
           offerId: offer?.dbId || null,
           agreedPrice: price,
@@ -1047,11 +1093,16 @@ export default function SellPage() {
   }, [actionModal, salesUpdate, updateParcelStatus, addToast, agentMayCancelSale])
 
   const handleCreateClient = useCallback(async () => {
+    console.log('[Sell] handleCreateClient: click received', { name: clientForm.name, phone: clientForm.phone })
     if (!clientForm.name.trim()) { addToast('Le nom est obligatoire', 'error'); return }
-    const normalizedPhone = normalizePhoneLookup(clientForm.phone)
-    if (!normalizedPhone) { addToast('Le téléphone est obligatoire', 'error'); return }
-    // Store E.164 (+216…) on the client row so it matches `buyer_phone_normalized` and signup metadata.
-    const phoneE164 = normalizePhone(String(clientForm.phone || '').trim()) || normalizePhone(normalizedPhone)
+    const localDigits = String(clientForm.phone || '').replace(/\D/g, '')
+    if (!localDigits) { addToast('Le téléphone est obligatoire', 'error'); return }
+    // E.164 built from picked country code + local digits.
+    const ccRaw = String(clientForm.phoneCc || '+216').trim()
+    const cc = ccRaw.startsWith('+') ? ccRaw : `+${ccRaw.replace(/\D/g, '')}`
+    const phoneE164 = `${cc}${localDigits}`
+    // normalizedPhone remains the last-8 form used for local-table dedupe lookups.
+    const normalizedPhone = normalizePhoneLookup(phoneE164)
 
     const cin = clientForm.cin.trim()
     const existing = clients.find(c => normalizePhoneLookup(c.phone) === normalizedPhone)
@@ -1064,21 +1115,52 @@ export default function SellPage() {
       return
     }
 
+    // Always use create_buyer_stub_for_sale RPC. It is security-definer and
+    // bypasses the RLS lookup storms that make the staff upsert path hang.
+    // Internally it authorizes on is_active_staff() OR /admin/sell grants —
+    // so staff and delegated sellers both work. If the caller is neither, the
+    // RPC returns a specific error we translate to a French toast.
     setClientSaving(true)
     try {
-      const newClient = await withTimeout(
-        clientUpsert({
-          code: `CLI-${Date.now()}`,
-          name: clientForm.name.trim(),
-          email: clientForm.email.trim().toLowerCase(),
-          phone: phoneE164 || normalizedPhone,
-          cin,
-          city: clientForm.city.trim(),
-          ...(role === 'Agent' && adminUser?.id ? { ownerAgentId: adminUser.id } : {}),
-        }),
-        15_000,
-        'Création client: délai dépassé. Vérifiez la connexion / permissions (RLS) puis réessayez.',
-      )
+      const payload = {
+        code: `CLI-${Date.now()}`,
+        name: clientForm.name.trim(),
+        email: '',
+        phone: phoneE164 || normalizedPhone,
+        cin,
+        city: clientForm.city.trim(),
+      }
+      console.log('[Sell] create path: RPC (unified)', payload)
+      // Belt and braces. The RPC is the canonical path for both staff and
+      // delegated sellers. If it ever hangs or errors on a staff session
+      // (where staff_clients_crud would let a direct insert through), we
+      // fall back to db.upsertClient with its own short timeout so the user
+      // is never stuck waiting for the initial request to die.
+      let newClient = null
+      try {
+        newClient = await withTimeout(
+          db.createBuyerStubForSale(payload),
+          8_000,
+          'rpc_timeout',
+        )
+      } catch (rpcErr) {
+        const rpcMsg = String(rpcErr?.message || rpcErr || '')
+        console.warn('[Sell] RPC failed, attempting staff fallback:', rpcMsg)
+        if (adminUser?.id) {
+          newClient = await withTimeout(
+            clientUpsert({
+              ...payload,
+              ...(role === 'Agent' ? { ownerAgentId: adminUser.id } : {}),
+            }),
+            8_000,
+            'fallback_timeout',
+          )
+        } else {
+          throw rpcErr
+        }
+      }
+      console.log('[Sell] create result:', newClient)
+      refreshClients().catch(e => console.warn('[Sell] refreshClients after create failed:', e?.message || e))
       if (!newClient?.id) {
         addToast('Impossible de créer ce client pour le moment.', 'error')
         return
@@ -1088,56 +1170,74 @@ export default function SellPage() {
       setCinLookupResult(newClient)
       addToast('Client créé')
       setClientModal(false)
-      setClientForm({ name: '', email: '', phone: '', cin: '', city: '' })
+      setClientForm({ name: '', phone: '', phoneCc: '+216', cin: '', city: '' })
     } catch (err) {
-      // Surface RLS / permission denials distinctly so the user understands
-      // it's NOT a transient glitch: their session doesn't hold staff rights.
       const raw = String(err?.message || err || '')
-      const code = String(err?.code || '')
-      const isRls = /row-level security|permission denied|not allowed|forbidden/i.test(raw) || code === '42501'
-      if (isRls) {
-        addToast(
-          "Création client refusée (droits insuffisants). Votre compte n'est pas reconnu comme staff actif — contactez un administrateur.",
-          'error',
-        )
-        // Keep the modal open so the user sees the failed fields and can retry
-        // after the admin fixes their admin_users entry.
-        return
+      console.error('[Sell] create error:', raw, err)
+      if (/no_sell_grant/i.test(raw)) {
+        addToast("Création refusée : votre compte n'a ni rôle staff ni grant /admin/sell. Demandez à un administrateur de créer le client.", 'error')
+      } else if (/caller_not_linked_to_client/i.test(raw)) {
+        addToast("Création refusée : votre session Supabase n'est liée à aucune fiche client. Reconnectez-vous ou demandez un rattachement.", 'error')
+      } else if (/phone_required/i.test(raw)) {
+        addToast('Téléphone invalide. Saisissez 8 chiffres (Tunisie) ou un numéro E.164.', 'error')
+      } else if (/function .* does not exist|Could not find the function|PGRST202/i.test(raw)) {
+        addToast('RPC create_buyer_stub_for_sale introuvable en base. Appliquez database/06_buyer_stub_rpc.sql.', 'error')
+      } else if (/rpc_timeout|fallback_timeout|timeout/i.test(raw)) {
+        addToast('Création: le serveur ne répond pas (>8 s). Vérifiez la connexion Supabase ou réessayez dans quelques secondes.', 'error')
+      } else {
+        addToast(`Erreur : ${raw}`, 'error')
       }
-      addToast(`Erreur : ${raw}`, 'error')
     }
     finally { setClientSaving(false) }
-  }, [clientForm, clients, clientUpsert, addToast, role, adminUser?.id, withTimeout])
+  }, [clientForm, clients, clientUpsert, addToast, refreshClients, withTimeout, adminUser?.id, role])
 
   const activeSales = salesForList.filter(s => !['cancelled', 'completed', 'rejected'].includes(s.status)).length
-  const fullPaymentCount = salesForList.filter(s => s.paymentType === 'full' && s.status !== 'cancelled').length
-  const installmentCount = salesForList.filter(s => s.paymentType === 'installments' && s.status !== 'cancelled').length
   const totalRevenue = salesForList.filter(s => ['active', 'completed'].includes(s.status)).reduce((s, x) => s + (x.agreedPrice || 0), 0)
 
   const renderSaleList = () => (
     <>
-      <div className="sell-cat__bar">
-        <div className="sell-cat__stats">
-          <span className="sell-cat__stat"><strong>{salesForList.length}</strong> total</span>
-          <span className="sell-cat__stat-dot" />
-          <span className="sell-cat__stat"><strong>{activeSales}</strong> actives</span>
-          <span className="sell-cat__stat-dot" />
-          <span className="sell-cat__stat"><strong>{totalRevenue.toLocaleString('fr-FR')}</strong> TND</span>
+      <div className="sp-cat-bar">
+        <div className="sp-cat-stats">
+          <strong>{salesForList.length}</strong> total
+          <span className="sp-cat-stat-dot" />
+          <strong>{activeSales}</strong> actives
+          <span className="sp-cat-stat-dot" />
+          <strong>{totalRevenue.toLocaleString('fr-FR')}</strong> TND
         </div>
-        <div className="sell-cat__filters">
-          <input className="sell-cat__search" placeholder="Rechercher…" value={search} onChange={e => setSearch(e.target.value)} />
-          <select className="sell-cat__select" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
+        <div className="sp-cat-filters">
+          <input className="sp-cat-search" placeholder="Rechercher…" value={search} onChange={e => setSearch(e.target.value)} />
+          <select className="sp-cat-select" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
             <option value="">Tous</option>
             {Object.entries(STATUS_FLOW).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
           </select>
         </div>
       </div>
-      <div className="sell-cat__list">
-        {filtered.length === 0 ? (
-          <div className="sell-field__empty">
-            {salesForList.length === 0 ? 'Aucune vente enregistrée.' : 'Aucun résultat.'}
+      <div className="sp-cards">
+        {salesLoading && salesForList.length === 0 ? (
+          Array.from({ length: 6 }).map((_, i) => (
+            <div key={`sk-${i}`} className="sp-card sp-card--skeleton" aria-hidden>
+              <div className="sp-card__head">
+                <div className="sp-card__user">
+                  <span className="sp-card__initials sp-sk-box" />
+                  <div style={{ flex: 1 }}>
+                    <p className="sp-sk-line sp-sk-line--title" />
+                    <p className="sp-sk-line sp-sk-line--sub" />
+                  </div>
+                </div>
+                <span className="sp-sk-line sp-sk-line--badge" />
+              </div>
+              <div className="sp-card__body">
+                <span className="sp-sk-line sp-sk-line--price" />
+                <span className="sp-sk-line sp-sk-line--info" />
+              </div>
+            </div>
+          ))
+        ) : filtered.length === 0 ? (
+          <div className="sp-empty">
+            <span className="sp-empty__emoji" aria-hidden>{salesForList.length === 0 ? '📭' : '🔍'}</span>
+            <div className="sp-empty__title">{salesForList.length === 0 ? 'Aucune vente enregistrée.' : 'Aucun résultat.'}</div>
           </div>
-        ) : filtered.map(s => {
+        ) : pagedFiltered.map(s => {
           const flow = STATUS_FLOW[s.status]
           const pt = PAYMENT_TYPE[s.paymentType] || PAYMENT_TYPE.full
           const pIds = normalizePlotIds(s)
@@ -1145,43 +1245,83 @@ export default function SellPage() {
           const deposit = Number(s.deposit) || 0
           const ttl = reservationTtlText(s)
           return (
-            <div key={s.id} className="sell-cat__card" onClick={() => setDetailSale(s)} role="presentation">
-              <div className="sell-cat__card-head">
-                <div className="sell-cat__card-user">
-                  <span className="sell-cat__card-initials">{initialsFromName(s.clientName)}</span>
+            <button key={s.id} type="button" className={`sp-card sp-card--${flow?.badge || 'gray'}`} onClick={() => setDetailSale(s)}>
+              <div className="sp-card__head">
+                <div className="sp-card__user">
+                  <span className="sp-card__initials">{initialsFromName(s.clientName)}</span>
                   <div>
-                    <p className="sell-cat__card-name">{s.clientName || '—'}</p>
-                    <p className="sell-cat__card-sub">{s.projectTitle} · {plotLabel}</p>
+                    <p className="sp-card__name">{s.clientName || '—'}</p>
+                    <p className="sp-card__sub">{s.projectTitle} · {plotLabel}</p>
                   </div>
                 </div>
-                <div className="sell-cat__card-status">
-                  <span className={`sell-cat__badge sell-cat__badge--${flow?.badge || 'gray'}`}>{flow?.label || s.status}</span>
-                  {ttl && <span className={`sell-cat__ttl${ttl.urgent ? ' sell-cat__ttl--urgent' : ''}`}>⏱ {ttl.text}</span>}
+                <div className="sp-card__right">
+                  <span className={`sp-badge sp-badge--${flow?.badge || 'gray'}`}>{flow?.label || s.status}</span>
+                  {ttl && <span className={`sp-ttl${ttl.urgent ? ' sp-ttl--urgent' : ''}`}>⏱ {ttl.text}</span>}
                 </div>
               </div>
-              <div className="sell-cat__card-body">
-                <div className="sell-cat__card-price">
-                  <span className="sell-cat__card-amount">{(s.agreedPrice || 0).toLocaleString('fr-FR')}</span>
-                  <span className="sell-cat__card-currency">TND</span>
+              <div className="sp-card__body">
+                <div className="sp-card__price">
+                  <span className="sp-card__amount">{(s.agreedPrice || 0).toLocaleString('fr-FR')}</span>
+                  <span className="sp-card__currency">TND</span>
                 </div>
-                <div className="sell-cat__card-info">
+                <div className="sp-card__info">
                   <span>{pt.icon} {pt.label}</span>
-                  {deposit > 0 && <span className="sell-cat__card-prepaid">↓ {deposit.toLocaleString('fr-FR')}</span>}
+                  {deposit > 0 && <span className="sp-card__prepaid">↓ {deposit.toLocaleString('fr-FR')}</span>}
                 </div>
               </div>
-            </div>
+            </button>
           )
         })}
       </div>
+      {filtered.length > SALES_PER_PAGE && (
+        <div className="sp-pager" role="navigation" aria-label="Pagination">
+          <button
+            type="button"
+            className="sp-pager__btn sp-pager__btn--nav"
+            disabled={page <= 1}
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            aria-label="Page précédente"
+          >
+            ‹
+          </button>
+          {getPagerPages(page, pageCount).map((p, i) =>
+            p === '…' ? (
+              <span key={`dots-${i}`} className="sp-pager__ellipsis" aria-hidden>…</span>
+            ) : (
+              <button
+                key={p}
+                type="button"
+                className={`sp-pager__btn${p === page ? ' sp-pager__btn--active' : ''}`}
+                onClick={() => setPage(p)}
+                aria-current={p === page ? 'page' : undefined}
+              >
+                {p}
+              </button>
+            ),
+          )}
+          <button
+            type="button"
+            className="sp-pager__btn sp-pager__btn--nav"
+            disabled={page >= pageCount}
+            onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+            aria-label="Page suivante"
+          >
+            ›
+          </button>
+          <span className="sp-pager__info">
+            {(page - 1) * SALES_PER_PAGE + 1}–{Math.min(page * SALES_PER_PAGE, filtered.length)} / {filtered.length}
+          </span>
+        </div>
+      )}
     </>
   )
 
   if (role === 'Agent' && !adminUser?.id) {
     return (
       <div className="sell-field" dir="ltr">
-        <button type="button" className="ds-back-btn" onClick={goBack}>
-          <span className="ds-back-btn__icon" aria-hidden>←</span>
-          <span className="ds-back-btn__label">Back</span>
+        <button type="button" className="sp-back-btn" onClick={goBack}>
+          <span className="sp-back-btn__icon-wrap" aria-hidden>←</span>
+          <span>Back</span>
         </button>
         <div className="adm-empty">
           <div className="adm-empty-icon">⚠️</div>
@@ -1192,39 +1332,6 @@ export default function SellPage() {
     )
   }
 
-  // Local style block scoped via unique class prefixes. We never modify the
-  // shared admin.css / zitouna-admin-page.css files.
-  const localStyles = `
-    .sp2-help { font-size: 12px; color: #64748b; margin-top: 4px; line-height: 1.45; }
-    .sp2-required { color: #dc2626; margin-left: 2px; }
-    .sp2-section-title { font-size: 18px; font-weight: 700; margin: 0 0 4px; color: #0f172a; }
-    .sp2-section-sub { font-size: 13px; color: #475569; margin: 0 0 12px; }
-    .sp2-progress { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
-    .sp2-progress-pill { flex: 1 1 40px; min-width: 36px; height: 6px; border-radius: 999px; background: #e2e8f0; transition: background .2s; }
-    .sp2-progress-pill--done { background: #10b981; }
-    .sp2-progress-pill--active { background: #2563eb; }
-    .sp2-live-summary { background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px 12px; font-size: 12px; color: #334155; margin: 8px 0 14px; display: flex; flex-wrap: wrap; gap: 6px 14px; line-height: 1.5; }
-    .sp2-live-summary strong { color: #0f172a; font-weight: 600; }
-    .sp2-input-err { border-color: #dc2626 !important; background: #fef2f2 !important; }
-    .sp2-err-msg { color: #dc2626; font-size: 12px; margin-top: 6px; display: flex; align-items: center; gap: 6px; }
-    .sp2-empty { text-align: center; padding: 24px 16px; color: #64748b; font-size: 13px; border: 1px dashed #cbd5e1; border-radius: 12px; background: #f8fafc; }
-    .sp2-empty-emoji { font-size: 28px; margin-bottom: 6px; display: block; }
-    .sp2-empty-title { color: #0f172a; font-weight: 600; font-size: 14px; margin-bottom: 4px; }
-    .sp2-field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .sp2-help-card { background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 10px; padding: 10px 12px; font-size: 12px; color: #1e3a8a; line-height: 1.5; display: flex; gap: 8px; align-items: flex-start; }
-    .sp2-help-card-ico { font-size: 14px; flex-shrink: 0; }
-    .sp2-plot-legend { display: flex; flex-wrap: wrap; gap: 10px 14px; font-size: 12px; color: #475569; margin-bottom: 10px; align-items: center; }
-    .sp2-plot-legend-dot { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 5px; vertical-align: middle; }
-    .sp2-kbd-hint { font-size: 11px; color: #94a3b8; margin-top: 6px; }
-    @media (max-width: 600px) {
-      .sp2-field-row { grid-template-columns: 1fr; }
-      .sp2-live-summary { font-size: 11px; }
-      .sp2-section-title { font-size: 16px; }
-    }
-    .sell-wizard__input, .sell-wizard__select, .sell-wizard__textarea { min-height: 40px; }
-    .sell-wizard__btn { min-height: 44px; }
-    .sell-wizard__btn--primary, .sell-wizard__btn--cta { font-weight: 600; letter-spacing: 0.01em; }
-  `
 
   // Build a one-line running summary shown at the top of the wizard so the
   // user always sees what they've chosen so far.
@@ -1233,118 +1340,43 @@ export default function SellPage() {
     if (selectedProject) parts.push(`Projet : ${selectedProject.title}`)
     if (selectedPlots.length) parts.push(`${selectedPlots.length} parcelle${selectedPlots.length > 1 ? 's' : ''}`)
     if (wizardSelectedClient) parts.push(`Client : ${wizardSelectedClient.name}`)
-    else if (pendingPhoneReservation) parts.push('Client : rattachement en attente')
     if (form.paymentType) parts.push(form.paymentType === 'full' ? 'Comptant' : 'Échelonné')
     return parts
   })()
 
   return (
     <div className="sell-field" dir="ltr">
-      <style>{localStyles}</style>
-      <button type="button" className="ds-back-btn" onClick={goBack}>
-        <span className="ds-back-btn__icon" aria-hidden>←</span>
-        <span className="ds-back-btn__label">Retour</span>
+      <button type="button" className="sp-back-btn" onClick={goBack}>
+        <span className="sp-back-btn__icon-wrap" aria-hidden>←</span>
+        <span>Retour</span>
       </button>
-      {sellTab === 'field' && (
-        <>
-          <header className="sell-field__hero">
-            <div className="sell-field__hero-top">
-              <div className="sell-field__hero-user">
-                <div className="sell-field__hero-avatar">
-                  <img src={`https://api.dicebear.com/9.x/initials/svg?seed=${avatarSeed}&backgroundColor=eff6ff&textColor=2563eb&fontSize=42`} alt="" width={44} height={44} />
-                </div>
-                <div>
-                  <h1 className="sell-field__hero-name">{displayAgentName}</h1>
-                  <p className="sell-field__hero-role">{commercialRoleLabel}{agentCity ? ` · ${agentCity}` : ''}</p>
-                </div>
-              </div>
-            </div>
-            <div className="sell-field__hero-kpi">
-              <div className="sell-field__kpi-block">
-                <span className="sell-field__kpi-num">{todayDepositTotal.toLocaleString('fr-FR')}</span>
-                <span className="sell-field__kpi-unit">TND</span>
-              </div>
-              <span className="sell-field__kpi-label">{todaySaleCount} vente{todaySaleCount !== 1 ? 's' : ''} aujourd’hui</span>
-            </div>
-          </header>
-
-          <button
-            type="button"
-            className="sell-field__cta-btn"
-            onClick={openNew}
-            title="Démarrer le formulaire de vente en 6 étapes"
-          >
-            <span className="sell-field__cta-plus">+</span>
-            <span className="sell-field__cta-text">Enregistrer une nouvelle vente</span>
-            <span className="sell-field__cta-arrow">→</span>
-          </button>
-
-          <div className="sell-field__section-head">
-            <h2 className="sell-field__section-title" style={{ fontSize: 18 }}>Ventes du jour</h2>
-          </div>
-
-          {salesToday.length === 0 ? (
-            <div className="sp2-empty" role="status">
-              <span className="sp2-empty-emoji" aria-hidden>📭</span>
-              <div className="sp2-empty-title">Aucune vente aujourd’hui</div>
-              <div>Appuyez sur « Enregistrer une nouvelle vente » pour commencer.</div>
-            </div>
-          ) : (
-            <div className="sell-cat__list">
-              {salesToday.map(s => {
-                const flow = STATUS_FLOW[s.status]
-                const pt = PAYMENT_TYPE[s.paymentType] || PAYMENT_TYPE.full
-                const pIds = normalizePlotIds(s)
-                const plotLabel = pIds.length <= 3 ? pIds.map(id => `#${id}`).join(', ') : `${pIds.length} parcelles`
-                const deposit = Number(s.deposit) || 0
-                const ttl = reservationTtlText(s)
-                return (
-                  <div key={s.id} className="sell-cat__card" onClick={() => setDetailSale(s)} role="presentation">
-                    <div className="sell-cat__card-head">
-                      <div className="sell-cat__card-user">
-                        <span className="sell-cat__card-initials">{initialsFromName(s.clientName)}</span>
-                        <div>
-                          <p className="sell-cat__card-name">{s.clientName || '—'}</p>
-                          <p className="sell-cat__card-sub">{s.projectTitle} · {plotLabel}</p>
-                        </div>
-                      </div>
-                      <div className="sell-cat__card-status">
-                        <span className={`sell-cat__badge sell-cat__badge--${flow?.badge || 'gray'}`}>{flow?.label || s.status}</span>
-                        {ttl && <span className={`sell-cat__ttl${ttl.urgent ? ' sell-cat__ttl--urgent' : ''}`}>⏱ {ttl.text}</span>}
-                      </div>
-                    </div>
-                    <div className="sell-cat__card-body">
-                      <div className="sell-cat__card-price">
-                        <span className="sell-cat__card-amount">{(s.agreedPrice || 0).toLocaleString('fr-FR')}</span>
-                        <span className="sell-cat__card-currency">TND</span>
-                      </div>
-                      <div className="sell-cat__card-info">
-                        <span>{pt.icon} {pt.label}</span>
-                        {deposit > 0 && <span className="sell-cat__card-prepaid">↓ {deposit.toLocaleString('fr-FR')}</span>}
-                      </div>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </>
-      )}
-
-      {sellTab === 'catalog' && renderSaleList()}
-
-      <nav className="sell-field__bottom" aria-label="Navigation ventes">
-        <div className="sell-field__bottom-inner">
-          <button type="button" className={`sell-field__tab${sellTab === 'field' ? ' sell-field__tab--active' : ''}`} onClick={() => setSellTab('field')}>
-            <span className="sell-field__tab-icon" aria-hidden>📍</span>
-            Terrain
-          </button>
-          <button type="button" className={`sell-field__tab${sellTab === 'catalog' ? ' sell-field__tab--active' : ''}`} onClick={() => setSellTab('catalog')}>
-            <span className="sell-field__tab-icon" aria-hidden>📋</span>
-            Toutes les ventes
-          </button>
+      <header className="sp-hero">
+        <div className="sp-hero__avatar">
+          <img src={`https://api.dicebear.com/9.x/initials/svg?seed=${avatarSeed}&backgroundColor=eff6ff&textColor=2563eb&fontSize=42`} alt="" width={52} height={52} />
         </div>
-      </nav>
+        <div className="sp-hero__info">
+          <h1 className="sp-hero__name">{displayAgentName}</h1>
+          <p className="sp-hero__role">{commercialRoleLabel}{agentCity ? ` · ${agentCity}` : ''}</p>
+        </div>
+        <div className="sp-hero__kpis">
+          <span className="sp-hero__kpi-num">{todayDepositTotal.toLocaleString('fr-FR')}</span>
+          <span className="sp-hero__kpi-unit">TND</span>
+          <span className="sp-hero__kpi-label">{todaySaleCount} vente{todaySaleCount !== 1 ? 's' : ''} aujourd'hui</span>
+        </div>
+      </header>
+
+      <button
+        type="button"
+        className="sp-cta-btn"
+        onClick={openNew}
+        title="Démarrer le formulaire de vente en 6 étapes"
+      >
+        <span className="sp-cta-btn__icon">+</span>
+        <span className="sp-cta-btn__text">Enregistrer une nouvelle vente</span>
+        <span className="sp-cta-btn__arrow">→</span>
+      </button>
+
+      {renderSaleList()}
 
       {/* ── Sale Detail Modal ── */}
       {detailSale && (() => {
@@ -1365,86 +1397,86 @@ export default function SellPage() {
         const detailTtl = reservationTtlText(ds)
         return (
           <AdminModal open onClose={() => setDetailSale(null)} title="">
-            <div className="sell-detail">
-              <div className="sell-detail__banner">
-                <div className="sell-detail__banner-top">
-                  <span className={`sell-cat__badge sell-cat__badge--${flow?.badge || 'gray'}`}>{flow?.label || ds.status}</span>
-                  {detailTtl && <span className={`sell-detail__ttl${detailTtl.urgent ? ' sell-detail__ttl--urgent' : ''}`}>⏱ {detailTtl.text}</span>}
-                  <span className="sell-detail__date">{fmtFrDateTime(ds.createdAt)}</span>
+            <div className="sp-detail">
+              <div className="sp-detail__banner">
+                <div className="sp-detail__banner-top">
+                  <span className={`sp-badge sp-badge--${flow?.badge || 'gray'}`}>{flow?.label || ds.status}</span>
+                  {detailTtl && <span className={`sp-detail__ttl${detailTtl.urgent ? ' sp-detail__ttl--urgent' : ''}`}>⏱ {detailTtl.text}</span>}
+                  <span className="sp-detail__date">{fmtFrDateTime(ds.createdAt)}</span>
                 </div>
-                <div className="sell-detail__banner-price">
-                  <span className="sell-detail__price-num">{agreed.toLocaleString('fr-FR')}</span>
-                  <span className="sell-detail__price-cur">TND</span>
+                <div className="sp-detail__price">
+                  <span className="sp-detail__price-num">{agreed.toLocaleString('fr-FR')}</span>
+                  <span className="sp-detail__price-cur">TND</span>
                 </div>
-                <p className="sell-detail__banner-sub">{ds.projectTitle} · {plotLabel}</p>
+                <p className="sp-detail__banner-sub">{ds.projectTitle} · {plotLabel}</p>
               </div>
 
-              <div className="sell-detail__section">
-                <div className="sell-detail__section-title">Vendeur</div>
-                <div className="sell-detail__row">
+              <div className="sp-detail__section">
+                <div className="sp-detail__section-title">Vendeur</div>
+                <div className="sp-detail__row">
                   <span>Nom</span><strong>{resolveAgentForSale(ds)?.name || displayAgentName}</strong>
                 </div>
-                <div className="sell-detail__row">
+                <div className="sp-detail__row">
                   <span>Contact</span><strong>{resolveAgentForSale(ds)?.email || adminUser?.email || user?.email || '—'}</strong>
                 </div>
               </div>
 
-              <div className="sell-detail__section">
-                <div className="sell-detail__section-title">Client (acheteur)</div>
-                <div className="sell-detail__row">
+              <div className="sp-detail__section">
+                <div className="sp-detail__section-title">Client (acheteur)</div>
+                <div className="sp-detail__row">
                   <span>Nom</span><strong>{ds.clientName || '—'}</strong>
                 </div>
                 {ds.clientPhone && (
-                  <div className="sell-detail__row">
+                  <div className="sp-detail__row">
                     <span>Téléphone</span><strong style={{ direction: 'ltr' }}>{ds.clientPhone}</strong>
                   </div>
                 )}
                 {ds.clientEmail && (
-                  <div className="sell-detail__row">
+                  <div className="sp-detail__row">
                     <span>Email</span><strong style={{ direction: 'ltr', wordBreak: 'break-all' }}>{ds.clientEmail}</strong>
                   </div>
                 )}
                 {ds.clientCin && (
-                  <div className="sell-detail__row">
+                  <div className="sp-detail__row">
                     <span>CIN</span><strong style={{ direction: 'ltr' }}>{ds.clientCin}</strong>
                   </div>
                 )}
               </div>
 
-              <div className="sell-detail__section">
-                <div className="sell-detail__section-title">Offre & paiement</div>
-                <div className="sell-detail__row">
+              <div className="sp-detail__section">
+                <div className="sp-detail__section-title">Offre & paiement</div>
+                <div className="sp-detail__row">
                   <span>Mode</span><strong>{pt.icon} {pt.label}</strong>
                 </div>
                 {isInst && ds.offerName && (
-                  <div className="sell-detail__row">
+                  <div className="sp-detail__row">
                     <span>Offre</span><strong>{ds.offerName}</strong>
                   </div>
                 )}
-                <div className="sell-detail__row">
+                <div className="sp-detail__row">
                   <span>Prix convenu</span><strong>{agreed.toLocaleString('fr-FR')} TND</strong>
                 </div>
                 {isInst && downPct > 0 && (
                   <>
-                    <div className="sell-detail__row">
+                    <div className="sp-detail__row">
                       <span>1er versement ({downPct}%)</span><strong>{downAmt.toLocaleString('fr-FR')} TND</strong>
                     </div>
-                    <div className="sell-detail__row">
+                    <div className="sp-detail__row">
                       <span>Capital restant</span><strong>{remaining.toLocaleString('fr-FR')} TND</strong>
                     </div>
                     {duration > 0 && (
-                      <div className="sell-detail__row">
+                      <div className="sp-detail__row">
                         <span>Mensualité</span><strong>{monthly.toLocaleString('fr-FR')} TND x {duration} mois</strong>
                       </div>
                     )}
                   </>
                 )}
                 {deposit > 0 && (
-                  <div className="sell-detail__row">
+                  <div className="sp-detail__row">
                     <span>Acompte</span><strong>{deposit.toLocaleString('fr-FR')} TND</strong>
                   </div>
                 )}
-                <div className="sell-detail__row sell-detail__row--highlight">
+                <div className="sp-detail__row sp-detail__row--highlight">
                   <span>Solde finance</span><strong>{balanceDue.toLocaleString('fr-FR')} TND</strong>
                 </div>
               </div>
@@ -1452,14 +1484,14 @@ export default function SellPage() {
               <SaleLedgerPanel sale={ds} variant="detail" />
 
               {ds.notes && (
-                <div className="sell-detail__section">
-                  <div className="sell-detail__section-title">Notes</div>
-                  <p className="sell-detail__notes">{ds.notes}</p>
+                <div className="sp-detail__section">
+                  <div className="sp-detail__section-title">Notes</div>
+                  <p className="sp-detail__notes">{ds.notes}</p>
                 </div>
               )}
 
-              <div className="sell-detail__actions">
-                <button type="button" className="sell-detail__btn sell-detail__btn--edit" onClick={() => { setDetailSale(null); openEdit(ds) }}>Modifier</button>
+              <div className="sp-detail__actions">
+                <button type="button" className="sp-detail__btn sp-detail__btn--edit" onClick={() => { setDetailSale(null); openEdit(ds) }}>Modifier</button>
               </div>
             </div>
           </AdminModal>
@@ -1469,21 +1501,20 @@ export default function SellPage() {
       {/* ── Edit Sale Modal (flat form) ── */}
       {drawer === 'edit' && editId && (() => {
         const prevSale = sales.find(s => s.id === editId)
-        const canEditStructure = prevSale && ['draft', 'pending_finance'].includes(prevSale.status)
         const editProject = scopedProjects.find(p => p.id === form.projectId)
         const editPlotLabel = form.plotIds.length <= 3 ? form.plotIds.map(id => `#${id}`).join(', ') : `${form.plotIds.length} parcelles`
         return (
           <AdminModal open onClose={closeSaleDrawer} title="">
-            <div className="sell-edit">
-              <div className="sell-edit__banner">
-                <p className="sell-edit__banner-title">Modifier la vente</p>
-                <p className="sell-edit__banner-sub">{prevSale?.clientName || '—'} · {editProject?.title || prevSale?.projectTitle || '—'} · {editPlotLabel}</p>
+            <div className="sp-edit">
+              <div className="sp-edit__banner">
+                <p className="sp-edit__banner-title">Modifier la vente</p>
+                <p className="sp-edit__banner-sub">{prevSale?.clientName || '—'} · {editProject?.title || prevSale?.projectTitle || '—'} · {editPlotLabel}</p>
               </div>
 
-              <div className="sell-edit__body">
-                <div className="sell-edit__field">
-                  <label className="sell-edit__label">Acompte (TND)</label>
-                  <div className="sell-edit__input" style={{ opacity: 0.8, cursor: 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div className="sp-edit__body">
+                <div className="sp-edit__field">
+                  <label className="sp-edit__label">Acompte (TND)</label>
+                  <div className="sp-edit__input" style={{ opacity: 0.8, cursor: 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <strong style={{ direction: 'ltr', fontFamily: 'ui-monospace, monospace' }}>
                       {Number(arabonForProject(form.projectId) || 0).toLocaleString('fr-FR')}
                     </strong>
@@ -1493,29 +1524,29 @@ export default function SellPage() {
                     Modifiable uniquement depuis les paramètres du projet.
                   </div>
                 </div>
-                <div className="sell-edit__field">
-                  <label className="sell-edit__label">Mode de paiement</label>
-                  <div className="sell-edit__toggle">
-                    <button type="button" className={`sell-edit__toggle-btn${form.paymentType === 'full' ? ' sell-edit__toggle-btn--on' : ''}`}
+                <div className="sp-edit__field">
+                  <label className="sp-edit__label">Mode de paiement</label>
+                  <div className="sp-edit__toggle">
+                    <button type="button" className={`sp-edit__toggle-btn${form.paymentType === 'full' ? ' sp-edit__toggle-btn--on' : ''}`}
                       onClick={() => setForm(f => ({ ...f, paymentType: 'full', offerId: '' }))}>Comptant</button>
-                    <button type="button" className={`sell-edit__toggle-btn${form.paymentType === 'installments' ? ' sell-edit__toggle-btn--on' : ''}`}
+                    <button type="button" className={`sp-edit__toggle-btn${form.paymentType === 'installments' ? ' sp-edit__toggle-btn--on' : ''}`}
                       onClick={() => setForm(f => ({ ...f, paymentType: 'installments' }))}>Echelonne</button>
                   </div>
                 </div>
                 {form.paymentType === 'installments' && projectOffers.length > 0 && (
-                  <div className="sell-edit__field sell-edit__field--full">
-                    <label className="sell-edit__label">Offre</label>
-                    <div className="sell-edit__offer-list">
+                  <div className="sp-edit__field sp-edit__field--full">
+                    <label className="sp-edit__label">Offre</label>
+                    <div className="sp-edit__offer-list">
                       {projectOffers.map((o, i) => {
                         const sel = String(form.offerId) === String(i)
                         const mo = o.duration > 0 ? Math.round((o.price * (1 - o.downPayment / 100)) / o.duration) : 0
                         return (
-                          <button key={i} type="button" className={`sell-edit__offer-opt${sel ? ' sell-edit__offer-opt--on' : ''}`}
+                          <button key={i} type="button" className={`sp-edit__offer-opt${sel ? ' sp-edit__offer-opt--on' : ''}`}
                             onClick={() => setForm(f => ({ ...f, offerId: String(i) }))}>
-                            <span className="sell-edit__offer-opt-radio" />
-                            <span className="sell-edit__offer-opt-info">
-                              <span className="sell-edit__offer-opt-name">{o.name}{o.price > 0 ? ` — ${o.price.toLocaleString('fr-FR')} TND` : ''}</span>
-                              <span className="sell-edit__offer-opt-meta">{o.downPayment}% acompte · {o.duration} mois{mo > 0 ? ` · ~${mo.toLocaleString('fr-FR')}/mois` : ''}</span>
+                            <span className="sp-edit__offer-opt__radio" />
+                            <span className="sp-edit__offer-opt__info">
+                              <span className="sp-edit__offer-opt__name">{o.name}{o.price > 0 ? ` — ${o.price.toLocaleString('fr-FR')} TND` : ''}</span>
+                              <span className="sp-edit__offer-opt__meta">{o.downPayment}% acompte · {o.duration} mois{mo > 0 ? ` · ~${mo.toLocaleString('fr-FR')}/mois` : ''}</span>
                             </span>
                           </button>
                         )
@@ -1523,17 +1554,17 @@ export default function SellPage() {
                     </div>
                   </div>
                 )}
-                <div className="sell-edit__field sell-edit__field--full">
-                  <label className="sell-edit__label">Notes</label>
-                  <textarea className="sell-edit__input sell-edit__textarea" rows={2}
+                <div className="sp-edit__field sp-edit__field--full">
+                  <label className="sp-edit__label">Notes</label>
+                  <textarea className="sp-edit__input sp-edit__textarea" rows={2}
                     placeholder="Ajouter une note…"
                     value={form.notes || ''} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
                 </div>
               </div>
 
-              <div className="sell-edit__footer">
-                <button type="button" className="sell-edit__btn sell-edit__btn--cancel" onClick={closeSaleDrawer}>Annuler</button>
-                <button type="button" className="sell-edit__btn sell-edit__btn--save" onClick={handleSave}>Enregistrer</button>
+              <div className="sp-edit__footer">
+                <button type="button" className="sp-edit__btn sp-edit__btn--cancel" onClick={closeSaleDrawer}>Annuler</button>
+                <button type="button" className="sp-edit__btn sp-edit__btn--save" onClick={handleSave}>Enregistrer</button>
               </div>
             </div>
           </AdminModal>
@@ -1551,15 +1582,15 @@ export default function SellPage() {
       >
         <div
           className={
-            'sell-wizard sell-wizard--stacked' +
-            (saleWizardStep === 2 && form.projectId ? ' sell-wizard--plots-grid-only' : '')
+            'sp-wizard sp-wizard--stacked' +
+            (saleWizardStep === 2 && form.projectId ? ' sp-wizard--plots-grid-only' : '')
           }
           dir="ltr"
         >
           {!(saleWizardStep === 2 && form.projectId) && (
-          <div className="sell-wizard__top">
+          <div className="sp-wizard__top">
             <div
-              className="sp2-progress"
+              className="sp-progress"
               role="progressbar"
               aria-valuenow={saleWizardStep}
               aria-valuemin={1}
@@ -1570,35 +1601,35 @@ export default function SellPage() {
                 <span
                   key={i}
                   className={
-                    'sp2-progress-pill' +
-                    (i + 1 < saleWizardStep ? ' sp2-progress-pill--done' : '') +
-                    (i + 1 === saleWizardStep ? ' sp2-progress-pill--active' : '')
+                    'sp-progress__pill' +
+                    (i + 1 < saleWizardStep ? ' sp-progress__pill--done' : '') +
+                    (i + 1 === saleWizardStep ? ' sp-progress__pill--active' : '')
                   }
                 />
               ))}
             </div>
-            <div className="sell-wizard__steps" aria-hidden>
+            <div className="sp-wizard__steps" aria-hidden>
               {Array.from({ length: SALE_WIZARD_STEP_COUNT }, (_, i) => (
                 <div
                   key={i}
                   className={
-                    'sell-wizard__step-box' +
-                    (i + 1 < saleWizardStep ? ' sell-wizard__step-box--done' : '') +
-                    (i + 1 === saleWizardStep ? ' sell-wizard__step-box--active' : '')
+                    'sp-wizard__step-bubble' +
+                    (i + 1 < saleWizardStep ? ' sp-wizard__step-bubble--done' : '') +
+                    (i + 1 === saleWizardStep ? ' sp-wizard__step-bubble--active' : '')
                   }
                 >
                   {i + 1 < saleWizardStep ? '✓' : i + 1}
                 </div>
               ))}
             </div>
-            <h2 className="sell-wizard__title" style={{ fontSize: 20 }}>
+            <h2 className="sp-wizard__title">
               {SALE_WIZARD_LABELS[saleWizardStep - 1]}
             </h2>
-            <p className="sell-wizard__hint" style={{ fontSize: 13, lineHeight: 1.5 }}>
+            <p className="sp-wizard__helper">
               {SALE_WIZARD_HELPERS[saleWizardStep - 1]}
             </p>
             {wizardLiveSummary.length > 0 && saleWizardStep > 1 && (
-              <div className="sp2-live-summary" aria-label="Résumé de la saisie en cours">
+              <div className="sp-wizard__summary" aria-label="Résumé de la saisie en cours">
                 <span aria-hidden>📝</span>
                 {wizardLiveSummary.map((p, i) => (
                   <span key={i}><strong>{p}</strong></span>
@@ -1608,15 +1639,15 @@ export default function SellPage() {
           </div>
           )}
 
-          <div className="sell-wizard__scroll">
+          <div className="sp-wizard__scroll">
           {saleWizardStep === 1 && (
-        <div className="sell-wizard__panel">
-          <label className="sell-wizard__label" htmlFor="sp2-project-select">
-            Projet concerné<span className="sp2-required" aria-hidden>*</span>
+        <div className="sp-wizard__panel">
+          <label className="sp-wizard__label" htmlFor="sp-project-select">
+            Projet concerné<span className="sp-required" aria-hidden>*</span>
           </label>
           <select
-            id="sp2-project-select"
-            className={'sell-wizard__select' + (!form.projectId ? '' : '')}
+            id="sp-project-select"
+            className="sp-wizard__select"
             value={form.projectId}
             onChange={e => {
               const pid = e.target.value
@@ -1627,46 +1658,46 @@ export default function SellPage() {
             <option value="">— Choisir un projet —</option>
             {scopedProjects.map(p => <option key={p.id} value={p.id}>{p.title} — {p.city}</option>)}
           </select>
-          <p className="sp2-help">Le projet détermine les parcelles, offres et paramètres d’acompte disponibles.</p>
+          <p className="sp-wizard__helper" style={{ marginBottom: 0 }}>Le projet détermine les parcelles, offres et paramètres d'acompte disponibles.</p>
           {scopedProjects.length === 0 && (
-            <div className="sp2-empty" style={{ marginTop: 12 }}>
-              <span className="sp2-empty-emoji" aria-hidden>🏗️</span>
-              <div className="sp2-empty-title">Aucun projet accessible</div>
-              <div>Contactez un administrateur pour qu’un projet vous soit attribué.</div>
+            <div className="sp-empty" style={{ marginTop: 12 }}>
+              <span className="sp-empty__emoji" aria-hidden>🏗️</span>
+              <div className="sp-empty__title">Aucun projet accessible</div>
+              <div>Contactez un administrateur pour qu'un projet vous soit attribué.</div>
             </div>
           )}
         </div>
           )}
 
           {saleWizardStep === 2 && form.projectId && (
-        <div className="sell-wizard__panel sell-wizard__panel--plots sell-wizard__panel--plots-minimal">
+        <div className="sp-wizard__panel sp-wizard__panel--plots sp-wizard__panel--plots-minimal">
             <div style={{ padding: '0 4px 10px', borderBottom: '1px solid #e2e8f0', marginBottom: 10 }}>
-              <h2 className="sp2-section-title">Choisissez les parcelles</h2>
-              <p className="sp2-section-sub">
+              <h2 className="sp-panel-title">Choisissez les parcelles</h2>
+              <p className="sp-panel-sub">
                 {selectedPlots.length === 0
                   ? 'Appuyez sur un numéro pour le sélectionner.'
                   : `${selectedPlots.length} parcelle${selectedPlots.length > 1 ? 's' : ''} sélectionnée${selectedPlots.length > 1 ? 's' : ''}${totalArea > 0 ? ` · ${totalArea.toLocaleString('fr-FR')} m²` : ''}`}
               </p>
-              <div className="sp2-plot-legend" aria-label="Légende des parcelles">
-                <span><span className="sp2-plot-legend-dot" style={{ background: '#2563eb' }} />Sélectionnée</span>
-                <span><span className="sp2-plot-legend-dot" style={{ background: '#f1f5f9', border: '1px solid #cbd5e1' }} />Disponible</span>
-                <span><span className="sp2-plot-legend-dot" style={{ background: '#e5e7eb' }} />Indisponible</span>
+              <div className="sp-plot-legend" aria-label="Légende des parcelles">
+                <span><span className="sp-plot-legend__dot" style={{ background: '#2563eb' }} />Sélectionnée</span>
+                <span><span className="sp-plot-legend__dot" style={{ background: '#f1f5f9', border: '1px solid #cbd5e1' }} />Disponible</span>
+                <span><span className="sp-plot-legend__dot" style={{ background: '#e5e7eb' }} />Indisponible</span>
               </div>
             </div>
             {allProjectPlots.length === 0 ? (
-              <div className="sp2-empty">
-                <span className="sp2-empty-emoji" aria-hidden>🗺️</span>
-                <div className="sp2-empty-title">Aucune parcelle dans ce projet</div>
-                <div>Revenez à l’étape précédente pour choisir un autre projet.</div>
+              <div className="sp-empty">
+                <span className="sp-empty__emoji" aria-hidden>🗺️</span>
+                <div className="sp-empty__title">Aucune parcelle dans ce projet</div>
+                <div>Revenez à l'étape précédente pour choisir un autre projet.</div>
               </div>
             ) : (
-              <div className="sell-wizard__plots-grid-shell sell-wizard__plots-grid-shell--solo">
+              <div className="sp-plots-grid-shell--solo">
                 <div
-                  className="sell-wizard__plot-micro-grid"
+                  className="sp-plot-micro-grid"
                   role="group"
                   aria-label={
                     `Parcelles. ${selectedPlots.length} sélectionnée${selectedPlots.length !== 1 ? 's' : ''}. ` +
-                    'Touchez un numéro pour l’ajouter ou le retirer. Indisponible si grisé et barré.'
+                    "Touchez un numéro pour l'ajouter ou le retirer. Indisponible si grisé et barré."
                   }
                 >
                     {sortedProjectPlots.map(pl => {
@@ -1678,9 +1709,9 @@ export default function SellPage() {
                           key={pl.id}
                           type="button"
                           className={
-                            'sell-wizard__plot-micro' +
-                            (selected ? ' sell-wizard__plot-micro--selected' : '') +
-                            (!available ? ' sell-wizard__plot-micro--taken' : '')
+                            'sp-plot-micro' +
+                            (selected ? ' sp-plot-micro--selected' : '') +
+                            (!available ? ' sp-plot-micro--taken' : '')
                           }
                           aria-disabled={!available}
                           aria-pressed={selected}
@@ -1694,7 +1725,7 @@ export default function SellPage() {
                           }}
                           title={available ? `${selected ? 'Retirer' : 'Ajouter'} la parcelle ${pl.id}` : `Parcelle ${pl.id} indisponible`}
                         >
-                          <span className="sell-wizard__plot-micro-num">{pl.id}</span>
+                          <span className="sp-plot-micro__num">{pl.id}</span>
                         </button>
                       )
                     })}
@@ -1702,39 +1733,68 @@ export default function SellPage() {
               </div>
             )}
             {allProjectPlots.length > 0 && availablePlots.length === 0 && selectedPlots.length === 0 ? (
-              <p className="sell-sr-only" role="status">
-                Toutes les parcelles sont indisponibles (réservées, vendues ou liées à une vente).
-              </p>
+              <div className="sp-empty" role="status" style={{ marginTop: 12 }}>
+                <span className="sp-empty__emoji" aria-hidden>🚫</span>
+                <div className="sp-empty__title">Toutes les parcelles sont indisponibles</div>
+                <div>Elles sont réservées, vendues ou liées à une vente en cours. Choisissez un autre projet.</div>
+              </div>
             ) : null}
         </div>
           )}
 
           {saleWizardStep === 3 && (
-        <div className="sell-wizard__panel">
-          <label className="sell-wizard__label">Client — recherche par téléphone</label>
-          <div className="sell-wizard__row">
+        <div className="sp-wizard__panel">
+          <div className="sp-help-card" style={{ marginBottom: 12 }}>
+            <span className="sp-help-card__ico" aria-hidden>💡</span>
+            <span>Le téléphone sert de clé unique pour relier la vente au client. Le CIN est facultatif.</span>
+          </div>
+          {clientProfile?.id && clientProfile?.phone && (
+            <button
+              type="button"
+              className="sp-wizard__mini sp-wizard__mini--ok"
+              style={{ width: '100%', marginBottom: 10, cursor: 'pointer', border: 'none', textAlign: 'left' }}
+              onClick={() => {
+                const ph = normalizePhoneLookup(clientProfile.phone)
+                setCinLookup(ph)
+                setCinLookupResult(clientProfile)
+                setForm(f => ({ ...f, clientId: clientProfile.id }))
+              }}
+            >
+              <span>👤</span>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 700 }}>Utiliser mon profil acheteur</div>
+                <div style={{ fontSize: 11, marginTop: 2 }}>{clientProfile.name} · {clientProfile.phone}</div>
+              </div>
+              <span style={{ fontSize: 10, fontWeight: 700 }}>Sélectionner</span>
+            </button>
+          )}
+          <label className="sp-wizard__label" htmlFor="sp-phone-input">
+            Téléphone du client<span className="sp-required" aria-hidden>*</span>
+          </label>
+          <div className="sp-wizard__row">
             <input
-              className="sell-wizard__input"
+              id="sp-phone-input"
+              className={'sp-wizard__input' + (cinLookup.length > 0 && cinLookup.length < 8 ? ' sp-wizard__input--err' : '')}
               value={cinLookup}
               onChange={e => {
                 const val = normalizePhoneLookup(e.target.value)
                 setCinLookup(val)
                 if (val.length >= 4) {
-                  // Phone is the only linking key. CIN is optional metadata.
-                  // 1) Instant match against the local list (cached view).
-                  const found = clients.find(c => normalizePhoneLookup(c.phone) === val)
+                  // 1) Check if typed phone matches the current user's own clientProfile.
+                  const selfMatch = clientProfile?.id && normalizePhoneLookup(clientProfile.phone) === val
+                    ? clientProfile : null
+                  // 2) Instant match against the local clients list (cached view).
+                  const found = selfMatch || clients.find(c => normalizePhoneLookup(c.phone) === val)
                   setCinLookupResult(found || null)
                   if (found) setForm(f => ({ ...f, clientId: found.id }))
                   else setForm(f => ({ ...f, clientId: '' }))
-                  // 2) When the phone is fully entered and the local list said
-                  //    "not found", double-check the database so we don't
-                  //    invite the user to create a duplicate stub.
+                  // 3) When fully entered and local list has no match, hit the DB
+                  //    so we don't invite the user to create a duplicate stub.
                   if (!found && val.length >= 8) {
                     const guard = val
                     db.fetchClientByPhone(val)
                       .then(dbClient => {
                         if (!dbClient) return
-                        // Discard stale responses if the user kept typing.
                         if (guard !== val) return
                         setCinLookupResult(dbClient)
                         setForm(f => ({ ...f, clientId: dbClient.id }))
@@ -1754,15 +1814,24 @@ export default function SellPage() {
             />
             <button
               type="button"
-              className="sell-wizard__btn sell-wizard__btn--ghost"
-              style={{ whiteSpace: 'nowrap', flexShrink: 0 }}
-              onClick={() => { setClientForm({ name: '', email: '', phone: cinLookup || '', cin: '', city: '' }); setClientModal(true) }}
+              className="sp-wizard__btn sp-wizard__btn--ghost"
+              style={{ whiteSpace: 'nowrap', flexShrink: 0, opacity: (!adminUser && sellerMode) ? 0.5 : 1, cursor: (!adminUser && sellerMode) ? 'not-allowed' : 'pointer' }}
+              disabled={!adminUser && sellerMode}
+              title={(!adminUser && sellerMode) ? "Accès délégué : la création d'une fiche client doit être faite par un staff SQL." : ''}
+              onClick={() => {
+                if (!adminUser && sellerMode) {
+                  addToast("Création de fiche réservée au staff. Demandez à un administrateur d'ajouter le client.", 'error')
+                  return
+                }
+                setClientForm({ name: '', phone: cinLookup || '', phoneCc: '+216', cin: '', city: '' })
+                setClientModal(true)
+              }}
             >
               + Nouveau
             </button>
           </div>
           {cinLookupResult && cinLookup.length >= 4 && (
-            <div className="sell-wizard__mini sell-wizard__mini--ok">
+            <div className="sp-wizard__mini sp-wizard__mini--ok">
               <span>✓</span>
               <div style={{ flex: 1 }}>
                 <div style={{ fontWeight: 700 }}>{cinLookupResult.name}</div>
@@ -1775,12 +1844,12 @@ export default function SellPage() {
             </div>
           )}
           {!cinLookupResult && cinLookup.length >= 8 && (
-            <div className="sell-wizard__mini sell-wizard__mini--warn">
+            <div className="sp-wizard__mini sp-wizard__mini--warn">
               <span>⚠</span>
               <div>
                 <div style={{ fontWeight: 700 }}>Aucun client avec ce téléphone</div>
                 <div style={{ fontSize: 11, marginTop: 2 }}>
-                  Créez une fiche avec « Nouveau », ou poursuivez : la vente enregistre une réclamation téléphone et se rattache à l’inscription.
+                  Créez une fiche avec « Nouveau », ou poursuivez : la vente enregistre une réclamation téléphone et se rattache à l'inscription.
                 </div>
               </div>
             </div>
@@ -1789,15 +1858,15 @@ export default function SellPage() {
           )}
 
           {saleWizardStep === 4 && (
-        <div className="sell-wizard__panel">
-          <label className="sell-wizard__label">Acompte (TND)</label>
-          <div className="sell-wizard__arabon-display">
-            <span className="sell-wizard__arabon-value" style={{ textAlign: 'center' }}>
+        <div className="sp-wizard__panel">
+          <label className="sp-wizard__label">Acompte (TND)</label>
+          <div className="sp-arabon-display">
+            <span className="sp-arabon-value">
               {Number(arabonForProject(form.projectId) || 0).toLocaleString('fr-FR')}
             </span>
-            <span className="sell-wizard__arabon-unit">TND</span>
+            <span className="sp-arabon-unit">TND</span>
           </div>
-          <p className="sell-wizard__arabon-note">
+          <p className="sp-arabon-note">
             Modifiable uniquement depuis les paramètres du projet.
           </p>
         </div>
@@ -1805,48 +1874,51 @@ export default function SellPage() {
 
           {saleWizardStep === 5 && (
         <>
-        <div className="sell-wizard__panel">
-          <label className="sell-wizard__label">Mode de paiement</label>
-          <div className="sell-wizard__pay-grid">
+        <div className="sp-wizard__panel">
+          <label className="sp-wizard__label">Mode de paiement</label>
+          <div className="sp-pay-grid">
             <button
               type="button"
-              className={`sell-wizard__pay-card${form.paymentType === 'full' ? ' sell-wizard__pay-card--on' : ''}`}
+              className={`sp-pay-card${form.paymentType === 'full' ? ' sp-pay-card--on' : ''}`}
               onClick={() => setForm(f => ({ ...f, paymentType: 'full', offerId: '' }))}
             >
-              <div className="sell-wizard__pay-ico">💵</div>
-              <div className="sell-wizard__pay-name">Comptant</div>
-              <div className="sell-wizard__pay-hint">Montant total en espèces</div>
+              <div className="sp-pay-card__check">✓</div>
+              <div className="sp-pay-card__ico">💵</div>
+              <div className="sp-pay-card__name">Comptant</div>
+              <div className="sp-pay-card__hint">Montant total en espèces</div>
             </button>
             <button
               type="button"
-              className={`sell-wizard__pay-card${form.paymentType === 'installments' ? ' sell-wizard__pay-card--on' : ''}`}
+              className={`sp-pay-card${form.paymentType === 'installments' ? ' sp-pay-card--on' : ''}`}
               onClick={() => setForm(f => ({ ...f, paymentType: 'installments' }))}
             >
-              <div className="sell-wizard__pay-ico">📅</div>
-              <div className="sell-wizard__pay-name">Echelonne</div>
-              <div className="sell-wizard__pay-hint">Acompte + mensualités</div>
+              <div className="sp-pay-card__check">✓</div>
+              <div className="sp-pay-card__ico">📅</div>
+              <div className="sp-pay-card__name">Echelonne</div>
+              <div className="sp-pay-card__hint">Acompte + mensualités</div>
             </button>
           </div>
         </div>
 
         {form.paymentType === 'installments' && form.projectId && projectOffers.length > 0 && (
-          <div className="sell-wizard__panel">
-            <label className="sell-wizard__label">Offre de paiement</label>
-            <div className="sell-wizard__offer-list">
+          <div className="sp-wizard__panel">
+            <label className="sp-wizard__label">Offre de paiement</label>
+            <div className="sp-offer-list">
               {projectOffers.map((o, i) => {
                 const sel = String(form.offerId) === String(i)
                 const mo = o.duration > 0 ? Math.round((o.price * (1 - o.downPayment / 100)) / o.duration) : 0
                 return (
-                  <button key={i} type="button" className={`sell-wizard__offer${sel ? ' sell-wizard__offer--on' : ''}`}
+                  <button key={i} type="button" className={`sp-offer${sel ? ' sp-offer--on' : ''}`}
                     onClick={() => setForm(f => ({ ...f, offerId: String(i) }))}>
-                    <div className="sell-wizard__offer-top">
-                      <span className="sell-wizard__offer-name">{o.name}</span>
-                      {o.price > 0 && <span className="sell-wizard__offer-price">{o.price.toLocaleString('fr-FR')} TND</span>}
+                    <div className="sp-offer__radio" />
+                    <div className="sp-offer__top">
+                      <span className="sp-offer__name">{o.name}</span>
+                      {o.price > 0 && <span className="sp-offer__price">{o.price.toLocaleString('fr-FR')} TND</span>}
                     </div>
-                    <div className="sell-wizard__offer-chips">
-                      <span className="sell-wizard__offer-chip">{o.downPayment}%</span>
-                      <span className="sell-wizard__offer-chip">{o.duration} mois</span>
-                      {mo > 0 && <span className="sell-wizard__offer-chip">~{mo.toLocaleString('fr-FR')}/mois</span>}
+                    <div className="sp-offer__chips">
+                      <span className="sp-offer__chip">{o.downPayment}%</span>
+                      <span className="sp-offer__chip">{o.duration} mois</span>
+                      {mo > 0 && <span className="sp-offer__chip">~{mo.toLocaleString('fr-FR')}/mois</span>}
                     </div>
                   </button>
                 )
@@ -1856,7 +1928,7 @@ export default function SellPage() {
         )}
 
         {form.paymentType === 'installments' && form.projectId && projectOffers.length === 0 && (
-          <div className="sell-wizard__fin-warn">⚠️ Aucune offre pour ce projet — passez en comptant ou configurez les offres.</div>
+          <div className="sp-fin-warn">⚠️ Aucune offre pour ce projet — passez en comptant ou configurez les offres.</div>
         )}
 
         {form.paymentType === 'installments' && form.offerId !== '' && projectOffers[Number(form.offerId)] && selectedPlots.length > 0 && (() => {
@@ -1868,26 +1940,26 @@ export default function SellPage() {
           const arabonVal = Number(form.deposit) || 0
           const toPay = Math.max(0, down - arabonVal)
           return (
-            <div className="sell-wizard__panel">
-              <div className="sell-wizard__fin-header">Détail des échéances — {selectedPlots.length} parcelle(s)</div>
+            <div className="sp-wizard__panel">
+              <div className="sp-fin-header">Détail des échéances — {selectedPlots.length} parcelle(s)</div>
               {o.price && o.price * selectedPlots.length !== totalPlotPrice && (
-                <div className="sell-wizard__fin-catalog-note">
+                <div className="sp-fin-catalog-note">
                   Prix catalogue : <s>{totalPlotPrice.toLocaleString('fr-FR')} TND</s> → offre : <strong>{price.toLocaleString('fr-FR')} TND</strong>
                 </div>
               )}
-              <div className="sell-wizard__fin-grid">
+              <div className="sp-fin-grid">
                 <span>Prix convenu :</span> <strong>{price.toLocaleString('fr-FR')} TND</strong>
                 <span>1er versement ({o.downPayment} %) :</span> <strong>{down.toLocaleString('fr-FR')} TND</strong>
                 <span>Reste :</span> <strong>{remaining.toLocaleString('fr-FR')} TND</strong>
                 <span>Mensualité :</span> <strong>{monthly.toLocaleString('fr-FR')} TND × {o.duration}</strong>
               </div>
               {arabonVal > 0 && (
-                <div className="sell-wizard__fin-deductions">
-                  <div className="sell-wizard__fin-deduct-row">
+                <div className="sp-fin-deductions">
+                  <div className="sp-fin-deduct-row">
                     <span>Acompte terrain :</span>
                     <strong>- {arabonVal.toLocaleString('fr-FR')} TND</strong>
                   </div>
-                  <div className="sell-wizard__fin-total-row">
+                  <div className="sp-fin-total-row">
                     <span>Solde à encaisser (finance) :</span>
                     <strong>{toPay.toLocaleString('fr-FR')} TND</strong>
                   </div>
@@ -1901,19 +1973,19 @@ export default function SellPage() {
           const arabonVal = Number(form.deposit) || 0
           const toPay = Math.max(0, totalPlotPrice - arabonVal)
           return (
-            <div className="sell-wizard__panel">
-              <div className="sell-wizard__fin-header">Résumé comptant — {selectedPlots.length} parcelle(s)</div>
-              <div className="sell-wizard__fin-grid">
+            <div className="sp-wizard__panel">
+              <div className="sp-fin-header">Résumé comptant — {selectedPlots.length} parcelle(s)</div>
+              <div className="sp-fin-grid">
                 <span>Montant total :</span>
                 <strong>{totalPlotPrice.toLocaleString('fr-FR')} TND</strong>
               </div>
               {arabonVal > 0 && (
-                <div className="sell-wizard__fin-deductions">
-                  <div className="sell-wizard__fin-deduct-row">
+                <div className="sp-fin-deductions">
+                  <div className="sp-fin-deduct-row">
                     <span>Acompte terrain :</span>
                     <strong>- {arabonVal.toLocaleString('fr-FR')} TND</strong>
                   </div>
-                  <div className="sell-wizard__fin-total-row">
+                  <div className="sp-fin-total-row">
                     <span>Solde à encaisser (finance) :</span>
                     <strong>{toPay.toLocaleString('fr-FR')} TND</strong>
                   </div>
@@ -1927,21 +1999,21 @@ export default function SellPage() {
 
           {saleWizardStep === 6 && (
         <>
-          <div className="sell-wizard__recap sell-wizard__recap--stack">
-            <div className="sell-wizard__recap-section">
-              <div className="sell-wizard__recap-section-title">Suivi &amp; horodatage</div>
-              <div className="sell-wizard__recap-row">
+          <div className="sp-recap sp-recap--stack">
+            <div className="sp-recap-section">
+              <div className="sp-recap-section-title">Suivi &amp; horodatage</div>
+              <div className="sp-recap-row">
                 <span>Récapitulatif établi le</span>
                 <strong>{fmtFrDateTime(recapCapturedAt)}</strong>
               </div>
               {editId && (
                 <>
-                  <div className="sell-wizard__recap-row">
+                  <div className="sp-recap-row">
                     <span>Réf. vente</span>
                     <strong style={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.72rem', wordBreak: 'break-all' }}>{editId}</strong>
                   </div>
                   {saleBeingEdited?.createdAt && (
-                    <div className="sell-wizard__recap-row">
+                    <div className="sp-recap-row">
                       <span>Vente créée le</span>
                       <strong>{fmtFrDateTime(saleBeingEdited.createdAt)}</strong>
                     </div>
@@ -1949,7 +2021,7 @@ export default function SellPage() {
                   {saleBeingEdited?.updatedAt &&
                     saleBeingEdited?.createdAt &&
                     String(saleBeingEdited.updatedAt) !== String(saleBeingEdited.createdAt) && (
-                      <div className="sell-wizard__recap-row">
+                      <div className="sp-recap-row">
                         <span>Dernière mise à jour</span>
                         <strong>{fmtFrDateTime(saleBeingEdited.updatedAt)}</strong>
                       </div>
@@ -1958,21 +2030,21 @@ export default function SellPage() {
               )}
             </div>
 
-            <div className="sell-wizard__recap-section">
-              <div className="sell-wizard__recap-section-title">Commercial (vendeur)</div>
-              <div className="sell-wizard__recap-row">
+            <div className="sp-recap-section">
+              <div className="sp-recap-section-title">Commercial (vendeur)</div>
+              <div className="sp-recap-row">
                 <span>Nom</span>
                 <strong>{displayAgentName}</strong>
               </div>
-              <div className="sell-wizard__recap-row">
+              <div className="sp-recap-row">
                 <span>Rôle</span>
                 <strong>{commercialRoleLabel}</strong>
               </div>
-              <div className="sell-wizard__recap-row">
+              <div className="sp-recap-row">
                 <span>Contact</span>
                 <strong>{adminUser?.email || user?.email || '—'}</strong>
               </div>
-              <div className="sell-wizard__recap-row">
+              <div className="sp-recap-row">
                 <span>Téléphone</span>
                 <strong style={{ direction: 'ltr', fontFamily: 'ui-monospace, monospace' }}>
                   {normalizePhoneLookup(adminUser?.phone || user?.phone || '') || '—'}
@@ -1980,85 +2052,85 @@ export default function SellPage() {
               </div>
             </div>
 
-            <div className="sell-wizard__recap-section">
-              <div className="sell-wizard__recap-section-title">Client</div>
-              <div className="sell-wizard__recap-row">
+            <div className="sp-recap-section">
+              <div className="sp-recap-section-title">Client</div>
+              <div className="sp-recap-row">
                 <span>Nom</span>
                 <strong>
-                  {wizardSelectedClient?.name || (pendingPhoneReservation ? 'Rattachement en attente (téléphone)' : '—')}
+                  {wizardSelectedClient?.name || cinLookupResult?.name || '—'}
                 </strong>
               </div>
-              <div className="sell-wizard__recap-row">
+              <div className="sp-recap-row">
                 <span>CIN</span>
                 <strong style={{ direction: 'ltr', fontFamily: 'ui-monospace, monospace' }}>
                   {wizardSelectedClient?.cin || cinLookupResult?.cin || '—'}
                 </strong>
               </div>
-              <div className="sell-wizard__recap-row">
+              <div className="sp-recap-row">
                 <span>Téléphone</span>
                 <strong style={{ direction: 'ltr' }}>
-                  {wizardSelectedClient?.phone || (pendingPhoneReservation ? normalizePhone(cinLookup) : '—')}
+                  {wizardSelectedClient?.phone || cinLookupResult?.phone || '—'}
                 </strong>
               </div>
-              <div className="sell-wizard__recap-row">
+              <div className="sp-recap-row">
                 <span>Email</span>
                 <strong style={{ direction: 'ltr', wordBreak: 'break-all' }}>{wizardSelectedClient?.email || '—'}</strong>
               </div>
-              <div className="sell-wizard__recap-row">
+              <div className="sp-recap-row">
                 <span>Ville</span>
                 <strong>{wizardSelectedClient?.city || '—'}</strong>
               </div>
             </div>
 
-            <div className="sell-wizard__recap-section">
-              <div className="sell-wizard__recap-section-title">Commission (attribuee au vendeur)</div>
-              <p className="sell-wizard__hint">
+            <div className="sp-recap-section">
+              <div className="sp-recap-section-title">Commission (attribuee au vendeur)</div>
+              <p className="sp-wizard__helper">
                 Le rattachement se fait par numero de telephone. Le CIN reste une information complementaire.
               </p>
               {willBeCreditedAsSellerL1 ? (
-                <p className="sell-wizard__hint" style={{ color: '#0a7a3a', fontWeight: 600 }}>
+                <p className="sp-wizard__helper" style={{ color: '#0a7a3a', fontWeight: 600 }}>
                   Vous serez crédité comme vendeur (L1) sur cette vente.
                 </p>
               ) : sellerL1BlockedByBuyerEq ? (
-                <p className="sell-wizard__hint" style={{ color: '#b94a00', fontWeight: 600 }}>
-                  Vous êtes l’acheteur sur cette vente : aucune commission L1 ne vous sera attribuée.
+                <p className="sp-wizard__helper" style={{ color: '#b94a00', fontWeight: 600 }}>
+                  Vous êtes l'acheteur sur cette vente : aucune commission L1 ne vous sera attribuée.
                 </p>
               ) : (
-                <p className="sell-wizard__hint" style={{ color: '#b94a00', fontWeight: 600 }}>
-                  Aucun compte client n’est rattaché à votre session : aucune commission L1 ne sera attribuée. Contactez un Super Admin pour rattacher votre CIN/téléphone à un profil client afin d’être crédité.
+                <p className="sp-wizard__helper" style={{ color: '#b94a00', fontWeight: 600 }}>
+                  Aucun compte client n'est rattaché à votre session : aucune commission L1 ne sera attribuée. Contactez un Super Admin pour rattacher votre CIN/téléphone à un profil client afin d'être crédité.
                 </p>
               )}
-              <div className="sell-wizard__recap-row">
+              <div className="sp-recap-row">
                 <span>Vendeur</span>
                 <strong>{sellerClientRecord?.name || displayAgentName}</strong>
               </div>
-              <div className="sell-wizard__recap-row">
+              <div className="sp-recap-row">
                 <span>Telephone</span>
                 <strong style={{ direction: 'ltr', fontFamily: 'ui-monospace, monospace' }}>
                   {normalizePhoneLookup(sellerClientRecord?.phone || adminUser?.phone || user?.phone || '') || '—'}
                 </strong>
               </div>
               {sellerClientRecord?.cin ? (
-                <div className="sell-wizard__recap-row">
+                <div className="sp-recap-row">
                   <span>CIN</span>
                   <strong style={{ direction: 'ltr', fontFamily: 'ui-monospace, monospace' }}>{sellerClientRecord.cin}</strong>
                 </div>
               ) : null}
               {!sellerClientRecord && !myClientId ? (
-                <div className="sell-wizard__recap-row">
+                <div className="sp-recap-row">
                   <span>Compte vendeur (client)</span>
                   <strong>—</strong>
                 </div>
               ) : null}
             </div>
 
-            <div className="sell-wizard__recap-section">
-              <div className="sell-wizard__recap-section-title">Projet &amp; parcelles</div>
-              <div className="sell-wizard__recap-row">
+            <div className="sp-recap-section">
+              <div className="sp-recap-section-title">Projet &amp; parcelles</div>
+              <div className="sp-recap-row">
                 <span>Projet</span>
                 <strong>{selectedProject ? `${selectedProject.title} — ${selectedProject.city || ''}` : '—'}</strong>
               </div>
-              <div className="sell-wizard__recap-row">
+              <div className="sp-recap-row">
                 <span>Parcelles ({selectedPlots.length})</span>
                 <strong>
                   {selectedPlots.length
@@ -2068,37 +2140,37 @@ export default function SellPage() {
                     : '—'}
                 </strong>
               </div>
-              <div className="sell-wizard__recap-row">
+              <div className="sp-recap-row">
                 <span>Surface totale</span>
                 <strong>{totalArea > 0 ? `${totalArea.toLocaleString('fr-FR')} m²` : '—'}</strong>
               </div>
             </div>
 
-            <div className="sell-wizard__recap-section">
-              <div className="sell-wizard__recap-section-title">Offre &amp; encaissements</div>
-              <div className="sell-wizard__recap-row">
+            <div className="sp-recap-section">
+              <div className="sp-recap-section-title">Offre &amp; encaissements</div>
+              <div className="sp-recap-row">
                 <span>Mode de paiement</span>
                 <strong>{form.paymentType === 'full' ? 'Comptant' : 'Echelonne'}</strong>
               </div>
               {wizardFinancialRecap.kind === 'installments' && wizardFinancialRecap.offer && (
                 <>
-                  <div className="sell-wizard__recap-row">
+                  <div className="sp-recap-row">
                     <span>Offre commerciale</span>
                     <strong>{wizardFinancialRecap.offer.name}</strong>
                   </div>
-                  <div className="sell-wizard__recap-row">
+                  <div className="sp-recap-row">
                     <span>Prix convenu ({wizardFinancialRecap.plotCount} parcelle(s))</span>
                     <strong>{wizardFinancialRecap.price.toLocaleString('fr-FR')} TND</strong>
                   </div>
-                  <div className="sell-wizard__recap-row">
+                  <div className="sp-recap-row">
                     <span>1er versement ({wizardFinancialRecap.downPct} %)</span>
                     <strong>{wizardFinancialRecap.down.toLocaleString('fr-FR')} TND</strong>
                   </div>
-                  <div className="sell-wizard__recap-row">
+                  <div className="sp-recap-row">
                     <span>Capital restant</span>
                     <strong>{wizardFinancialRecap.remaining.toLocaleString('fr-FR')} TND</strong>
                   </div>
-                  <div className="sell-wizard__recap-row">
+                  <div className="sp-recap-row">
                     <span>Mensualité × durée</span>
                     <strong>
                       {wizardFinancialRecap.monthly.toLocaleString('fr-FR')} TND × {wizardFinancialRecap.duration} mois
@@ -2107,24 +2179,24 @@ export default function SellPage() {
                 </>
               )}
               {wizardFinancialRecap.kind === 'full' && (
-                <div className="sell-wizard__recap-row">
+                <div className="sp-recap-row">
                   <span>Montant total (parcelles)</span>
                   <strong>{wizardFinancialRecap.totalPlotPrice.toLocaleString('fr-FR')} TND</strong>
                 </div>
               )}
-              <div className="sell-wizard__recap-row">
+              <div className="sp-recap-row">
                 <span>Acompte (terrain)</span>
                 <strong>{wizardFinancialRecap.kind !== 'incomplete' ? wizardFinancialRecap.arabon.toLocaleString('fr-FR') : (Number(form.deposit) || 0).toLocaleString('fr-FR')} TND</strong>
               </div>
               {wizardFinancialRecap.kind !== 'incomplete' && (
-                <div className="sell-wizard__recap-row sell-wizard__recap-row--emph">
+                <div className="sp-recap-row sp-recap-row--emph">
                   <span>Solde à encaisser (finance)</span>
                   <strong>{wizardFinancialRecap.toPay.toLocaleString('fr-FR')} TND</strong>
                 </div>
               )}
               {wizardFinancialRecap.kind === 'incomplete' && form.paymentType === 'installments' && (
-                <div className="sell-wizard__recap-note">
-                  Complétez le mode et l’offre à l’étape précédente pour le détail des montants.
+                <div className="sp-recap-note">
+                  Complétez le mode et l'offre à l'étape précédente pour le détail des montants.
                 </div>
               )}
             </div>
@@ -2139,34 +2211,34 @@ export default function SellPage() {
             ) : null}
 
           </div>
-          <div className="sell-wizard__panel">
-            <label className="sell-wizard__label">Notes internes</label>
-            <textarea className="sell-wizard__textarea" value={form.notes || ''} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Notes internes…" />
+          <div className="sp-wizard__panel">
+            <label className="sp-wizard__label">Notes internes</label>
+            <textarea className="sp-wizard__textarea" value={form.notes || ''} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Notes internes…" />
           </div>
         </>
           )}
 
           </div>
 
-          <div className="sell-wizard__footer">
+          <div className="sp-wizard__footer">
             {saleWizardStep > 1 && (
-              <button type="button" className="sell-wizard__btn sell-wizard__btn--ghost" onClick={() => setSaleWizardStep(s => Math.max(1, s - 1))}>
+              <button type="button" className="sp-wizard__btn sp-wizard__btn--ghost" onClick={() => setSaleWizardStep(s => Math.max(1, s - 1))}>
                 ‹ Retour
               </button>
             )}
-            <span className="sell-wizard__footer-spacer" />
+            <span className="sp-wizard__footer-spacer" />
             {saleWizardStep < SALE_WIZARD_STEP_COUNT ? (
-              <button type="button" className="sell-wizard__btn sell-wizard__btn--primary" onClick={tryWizardNext}>
+              <button type="button" className="sp-wizard__btn sp-wizard__btn--primary" onClick={tryWizardNext}>
                 Continuer ›
               </button>
             ) : (
               <>
-                <button type="button" className="sell-wizard__btn sell-wizard__btn--ghost" onClick={closeSaleDrawer}>
+                <button type="button" className="sp-wizard__btn sp-wizard__btn--ghost" onClick={closeSaleDrawer}>
                   Annuler
                 </button>
                 <button
                   type="button"
-                  className="sell-wizard__btn sell-wizard__btn--cta"
+                  className="sp-wizard__btn sp-wizard__btn--cta"
                   onClick={handleSave}
                   disabled={saleFormSubmitBlocked}
                 >
@@ -2182,14 +2254,34 @@ export default function SellPage() {
       <AdminModal open={clientModal} onClose={() => setClientModal(false)} title="Nouveau client" width={420}>
         <div className="adm-field"><label className="adm-label">Nom complet *</label><input className="adm-input" value={clientForm.name} onChange={e => setClientForm(f => ({ ...f, name: e.target.value }))} placeholder="Prénom Nom" autoFocus /></div>
         <div className="adm-field"><label className="adm-label">CIN (optionnel)</label><input className="adm-input" value={clientForm.cin} onChange={e => setClientForm(f => ({ ...f, cin: e.target.value }))} placeholder="XXXXXXXX" maxLength={8} /></div>
-        <div className="adm-form-row">
-          <div className="adm-field"><label className="adm-label">Téléphone *</label><input className="adm-input" value={clientForm.phone} onChange={e => setClientForm(f => ({ ...f, phone: e.target.value }))} placeholder="+216 XX XXX XXX" /></div>
-          <div className="adm-field"><label className="adm-label">E-mail</label><input className="adm-input" type="email" value={clientForm.email} onChange={e => setClientForm(f => ({ ...f, email: e.target.value }))} placeholder="email@example.com" /></div>
+        <div className="adm-field">
+          <label className="adm-label">Téléphone *</label>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <select
+              className="adm-input"
+              value={clientForm.phoneCc || '+216'}
+              onChange={e => setClientForm(f => ({ ...f, phoneCc: e.target.value }))}
+              style={{ width: 110, flexShrink: 0, fontFamily: 'ui-monospace, monospace' }}
+              title="Indicatif pays"
+            >
+              {PHONE_COUNTRY_CODES.map(c => (
+                <option key={c.code} value={c.code}>{c.flag} {c.code}</option>
+              ))}
+            </select>
+            <input
+              className="adm-input"
+              value={clientForm.phone}
+              onChange={e => setClientForm(f => ({ ...f, phone: e.target.value.replace(/\D/g, '').slice(0, 15) }))}
+              placeholder="58 415 520"
+              style={{ flex: 1, direction: 'ltr', fontFamily: 'ui-monospace, monospace' }}
+              inputMode="numeric"
+            />
+          </div>
         </div>
         <div className="adm-field"><label className="adm-label">Ville</label><input className="adm-input" value={clientForm.city} onChange={e => setClientForm(f => ({ ...f, city: e.target.value }))} placeholder="Tunis, Sousse…" /></div>
         <div className="adm-form-actions">
           <button className="adm-btn adm-btn--secondary" onClick={() => setClientModal(false)}>Annuler</button>
-          <button className="adm-btn adm-btn--primary" onClick={handleCreateClient} disabled={!clientForm.name.trim() || !normalizePhoneLookup(clientForm.phone) || clientSaving}>{clientSaving ? 'Création…' : 'Créer le client'}</button>
+          <button className="adm-btn adm-btn--primary" onClick={handleCreateClient} disabled={!clientForm.name.trim() || !String(clientForm.phone || '').replace(/\D/g, '') || clientSaving}>{clientSaving ? 'Création…' : 'Créer le client'}</button>
         </div>
       </AdminModal>
 
@@ -2224,7 +2316,7 @@ export default function SellPage() {
                     <li>Statut des parcelles → <strong>Vendu</strong></li>
                     <li>Statut de la vente → <strong>Terminé</strong></li>
                   </>) : (<>
-                    <li>Création du plan d’échéances : <strong>{actionModal.offerDuration} mois</strong></li>
+                    <li>Création du plan d'échéances : <strong>{actionModal.offerDuration} mois</strong></li>
                     <li>Statut de la vente → <strong>Actif</strong></li>
                   </>)}
                 </ul>

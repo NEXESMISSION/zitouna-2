@@ -3,6 +3,7 @@ import { useAuth } from '../lib/AuthContext.jsx'
 import { canAccessAdminPath, canClientAccessAdminPath, isClientSuspended, isStaffSuspended } from '../lib/adminAccess.js'
 import { ToastProvider } from './components/AdminToast.jsx'
 import './admin.css'
+import './admin-v2.css'
 
 function AdminAccessGate() {
   const { loading, ready, isAuthenticated, adminUser, clientProfile } = useAuth()
@@ -95,7 +96,7 @@ function AdminAccessGate() {
 
 export default function AdminLayout() {
   return (
-    <div className="adm-shell adm-standalone-layout" lang="fr">
+    <div className="adm-shell adm-standalone-layout zadm-shell" lang="fr">
       <main className="adm-main adm-main--standalone">
         <ToastProvider>
           <AdminAccessGate />

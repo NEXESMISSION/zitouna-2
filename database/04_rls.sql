@@ -573,3 +573,115 @@ SET
   client_id    = COALESCE(public.client_phone_identities.client_id,    EXCLUDED.client_id),
   auth_user_id = COALESCE(public.client_phone_identities.auth_user_id, EXCLUDED.auth_user_id),
   updated_at   = now();
+
+-- ============================================================================
+-- Delegated seller policies
+--
+-- A "delegated seller" is a client whose effective allowed pages (column
+-- clients.allowed_pages UNION active page_access_grants) include /admin/sell.
+-- They can go through the Sell wizard end-to-end without holding staff
+-- rights. Everything is scoped to their own clients.id via
+-- current_delegated_seller_client_id() so they cannot touch sales / parcels
+-- they don't own.
+--
+-- These policies are ADDITIVE next to the existing staff_* policies.
+-- ============================================================================
+
+-- clients: delegated sellers can SELECT all clients (needed for buyer lookup
+-- in the Sell wizard). Writes remain staff-only + the buyer-stub RPC.
+drop policy if exists delegated_sellers_clients_select on public.clients;
+create policy delegated_sellers_clients_select on public.clients for select
+  to authenticated
+  using (public.is_delegated_seller());
+
+-- sales: INSERT when attributed to themselves; SELECT and UPDATE their own.
+drop policy if exists delegated_sellers_sales_insert on public.sales;
+create policy delegated_sellers_sales_insert on public.sales for insert
+  to authenticated
+  with check (
+    public.is_delegated_seller()
+    and seller_client_id = public.current_delegated_seller_client_id()
+  );
+
+drop policy if exists delegated_sellers_sales_select on public.sales;
+create policy delegated_sellers_sales_select on public.sales for select
+  to authenticated
+  using (
+    public.is_delegated_seller()
+    and seller_client_id = public.current_delegated_seller_client_id()
+  );
+
+drop policy if exists delegated_sellers_sales_update on public.sales;
+create policy delegated_sellers_sales_update on public.sales for update
+  to authenticated
+  using (
+    public.is_delegated_seller()
+    and seller_client_id = public.current_delegated_seller_client_id()
+  )
+  with check (
+    public.is_delegated_seller()
+    and seller_client_id = public.current_delegated_seller_client_id()
+  );
+
+-- parcels: SELECT + UPDATE only (for the reserved transition on sale create).
+drop policy if exists delegated_sellers_parcels_select on public.parcels;
+create policy delegated_sellers_parcels_select on public.parcels for select
+  to authenticated
+  using (public.is_delegated_seller());
+
+drop policy if exists delegated_sellers_parcels_update on public.parcels;
+create policy delegated_sellers_parcels_update on public.parcels for update
+  to authenticated
+  using (public.is_delegated_seller())
+  with check (public.is_delegated_seller() and status in ('reserved','available'));
+
+-- seller_relations: delegated sellers auto-link their upline parrain.
+drop policy if exists delegated_sellers_seller_relations_insert on public.seller_relations;
+create policy delegated_sellers_seller_relations_insert on public.seller_relations for insert
+  to authenticated
+  with check (
+    public.is_delegated_seller()
+    and child_client_id = public.current_delegated_seller_client_id()
+  );
+
+drop policy if exists delegated_sellers_seller_relations_select on public.seller_relations;
+create policy delegated_sellers_seller_relations_select on public.seller_relations for select
+  to authenticated
+  using (
+    public.is_delegated_seller()
+    and child_client_id = public.current_delegated_seller_client_id()
+  );
+
+-- sale_reservation_events: append+read for their own sales.
+drop policy if exists delegated_sellers_sale_reservation_events_insert on public.sale_reservation_events;
+create policy delegated_sellers_sale_reservation_events_insert on public.sale_reservation_events for insert
+  to authenticated
+  with check (
+    public.is_delegated_seller() and exists (
+      select 1 from public.sales s
+      where s.id = sale_reservation_events.sale_id
+        and s.seller_client_id = public.current_delegated_seller_client_id()
+    )
+  );
+
+drop policy if exists delegated_sellers_sale_reservation_events_select on public.sale_reservation_events;
+create policy delegated_sellers_sale_reservation_events_select on public.sale_reservation_events for select
+  to authenticated
+  using (
+    public.is_delegated_seller() and exists (
+      select 1 from public.sales s
+      where s.id = sale_reservation_events.sale_id
+        and s.seller_client_id = public.current_delegated_seller_client_id()
+    )
+  );
+
+-- audit_logs: delegated sellers (and staff) can append/read audit entries.
+drop policy if exists delegated_users_audit_logs_insert on public.audit_logs;
+create policy delegated_users_audit_logs_insert on public.audit_logs for insert
+  to authenticated
+  with check (public.is_delegated_seller() or public.is_active_staff());
+
+drop policy if exists delegated_users_audit_logs_select on public.audit_logs;
+create policy delegated_users_audit_logs_select on public.audit_logs for select
+  to authenticated
+  using (public.is_delegated_seller() or public.is_active_staff());

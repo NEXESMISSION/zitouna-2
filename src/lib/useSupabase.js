@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { normalizePhone } from './phone.js'
 import { supabase } from './supabase.js'
 import * as db from './db.js'
+import { emitInvalidate, onInvalidate } from './dataEvents.js'
 
 const DEFAULT_FETCH_TIMEOUT_MS = 30000
 
@@ -65,10 +66,12 @@ export function useProjects() {
         refreshTimerRef.current = window.setTimeout(() => refresh(), 500)
       })
       .subscribe()
+    const unsubBus = onInvalidate('projects', () => refresh())
     return () => {
       cancelled = true
       if (refreshTimerRef.current) window.clearTimeout(refreshTimerRef.current)
       supabase.removeChannel(channel)
+      unsubBus()
     }
   }, [refresh])
 
@@ -77,6 +80,7 @@ export function useProjects() {
       try {
         await db.updateParcelStatus(parcelDbId, status)
         await refresh()
+        emitInvalidate('projects')
       } catch (e) {
         console.error('updateParcelStatus', e)
       }
@@ -278,9 +282,11 @@ export function useClients() {
       .channel('realtime-clients')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'clients' }, () => refresh())
       .subscribe()
+    const unsubBus = onInvalidate('clients', () => refresh())
     return () => {
       cancelled = true
       supabase.removeChannel(channel)
+      unsubBus()
     }
   }, [refresh])
 
@@ -288,6 +294,7 @@ export function useClients() {
     async (client) => {
       const saved = await db.upsertClient(client)
       await refresh()
+      emitInvalidate('clients')
       return saved
     },
     [refresh],
@@ -297,6 +304,7 @@ export function useClients() {
     async (clientId) => {
       await db.deleteClient(clientId)
       await refresh()
+      emitInvalidate('clients')
     },
     [refresh],
   )
@@ -403,10 +411,14 @@ export function useSales() {
         refreshTimer.current = window.setTimeout(() => refresh(), 350)
       })
       .subscribe()
+    // Local event bus: any other page that mutates sales bumps us immediately,
+    // even when Supabase realtime replication isn't enabled for this table.
+    const unsubBus = onInvalidate('sales', () => refresh())
     return () => {
       cancelled = true
       if (refreshTimer.current) window.clearTimeout(refreshTimer.current)
       supabase.removeChannel(channel)
+      unsubBus()
     }
   }, [refresh])
 
@@ -427,6 +439,7 @@ export function useSales() {
       }
       if (refreshTimer.current) window.clearTimeout(refreshTimer.current)
       refreshTimer.current = window.setTimeout(() => refresh(), 350)
+      emitInvalidate('sales')
       return row
     },
     [refresh],
@@ -439,6 +452,7 @@ export function useSales() {
       setSales((prev) => (prev || []).map((s) => (String(s.id) === String(saleId) ? { ...s, ...patch } : s)))
       if (refreshTimer.current) window.clearTimeout(refreshTimer.current)
       refreshTimer.current = window.setTimeout(() => refresh(), 350)
+      emitInvalidate('sales')
       return { id: saleId, ...patch }
     },
     [refresh],
@@ -450,6 +464,7 @@ export function useSales() {
       setSales((prev) => (prev || []).filter((s) => String(s.id) !== String(saleId)))
       if (refreshTimer.current) window.clearTimeout(refreshTimer.current)
       refreshTimer.current = window.setTimeout(() => refresh(), 350)
+      emitInvalidate('sales')
     },
     [refresh],
   )
@@ -522,9 +537,11 @@ export function useSalesScoped(filters = {}) {
       .channel(`realtime-sales-scoped-${String(clientId || 'all')}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, () => refresh())
       .subscribe()
+    const unsubBus = onInvalidate('sales', () => refresh())
     return () => {
       cancelled = true
       supabase.removeChannel(channel)
+      unsubBus()
     }
   }, [refresh, clientId])
 
@@ -625,9 +642,11 @@ export function useInstallments() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'installment_plans' }, () => refresh())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'installment_payments' }, () => refresh())
       .subscribe()
+    const unsubBus = onInvalidate('installmentPlans', () => refresh())
     return () => {
       cancelled = true
       supabase.removeChannel(channel)
+      unsubBus()
     }
   }, [refresh])
 
@@ -635,6 +654,7 @@ export function useInstallments() {
     async (plan) => {
       const id = await db.createInstallmentPlan(plan)
       await refresh()
+      emitInvalidate('installmentPlans')
       return id
     },
     [refresh],
@@ -655,7 +675,11 @@ export function useInstallmentsScoped(filters = {}) {
     }
     setLoading(true)
     try {
-      const rows = await db.fetchInstallmentsScoped({ clientId })
+      const rows = await withTimeout(
+        db.fetchInstallmentsScoped({ clientId }),
+        DEFAULT_FETCH_TIMEOUT_MS,
+        'fetchInstallmentsScoped',
+      )
       setPlans(rows)
     } catch (e) {
       console.error('fetchInstallmentsScoped', e)
@@ -673,7 +697,11 @@ export function useInstallmentsScoped(filters = {}) {
     ;(async () => {
       setLoading(true)
       try {
-        const rows = await db.fetchInstallmentsScoped({ clientId })
+        const rows = await withTimeout(
+          db.fetchInstallmentsScoped({ clientId }),
+          DEFAULT_FETCH_TIMEOUT_MS,
+          'fetchInstallmentsScoped',
+        )
         if (!cancelled) setPlans(rows)
       } catch (e) {
         console.error('fetchInstallmentsScoped', e)
@@ -1158,7 +1186,11 @@ export function useAmbassadorReferralSummary(enabled = true) {
     const seq = ++inflightRef.current
     setLoading(true)
     try {
-      const next = await db.fetchAmbassadorReferralSummary()
+      const next = await withTimeout(
+        db.fetchAmbassadorReferralSummary(),
+        DEFAULT_FETCH_TIMEOUT_MS,
+        'fetchAmbassadorReferralSummary',
+      )
       // Drop stale responses (e.g. enabled toggled, user logged out mid-fetch).
       if (seq !== inflightRef.current) return
       setSummary(next)
@@ -1179,7 +1211,11 @@ export function useAmbassadorReferralSummary(enabled = true) {
     let cancelled = false
     ;(async () => {
       try {
-        const next = await db.fetchAmbassadorReferralSummary()
+        const next = await withTimeout(
+          db.fetchAmbassadorReferralSummary(),
+          DEFAULT_FETCH_TIMEOUT_MS,
+          'fetchAmbassadorReferralSummary',
+        )
         if (!cancelled) setSummary(next)
       } catch (e) {
         if (!cancelled) setSummary((prev) => ({ ...prev, ok: false, reason: 'rpc_error', errorMessage: String(e?.message || e) }))
@@ -1202,4 +1238,60 @@ export function useAmbassadorReferralSummary(enabled = true) {
   }, [enabled, refresh])
 
   return { summary, loading, refresh }
+}
+
+/**
+ * Detailed commission ledger for the signed-in client: one enriched row per
+ * commission_events row where they are the beneficiary. Used by the Parrainage
+ * tab to show WHERE each DT comes from (which sale, which filleul, L1 vs L2+).
+ */
+export function useMyCommissionLedger(clientIdOrEnabled = null) {
+  // Back-compat: previously took a boolean `enabled`. Now takes the caller's
+  // clientId so staff sessions don't bleed other users' events via RLS bypass.
+  // If a boolean is passed we treat it as enabled flag (no explicit id — the
+  // fetcher falls back to heal_my_client_profile_now() to self-resolve).
+  const explicitId = typeof clientIdOrEnabled === 'string' ? clientIdOrEnabled : null
+  const enabled = typeof clientIdOrEnabled === 'boolean' ? clientIdOrEnabled : Boolean(explicitId)
+  const [events, setEvents] = useState([])
+  const [loading, setLoading] = useState(Boolean(enabled))
+  const [error, setError] = useState(null)
+
+  const refresh = useCallback(async () => {
+    if (!enabled) return
+    setLoading(true)
+    setError(null)
+    try {
+      const rows = await withTimeout(db.fetchMyCommissionLedger(explicitId), DEFAULT_FETCH_TIMEOUT_MS, 'fetchMyCommissionLedger')
+      setEvents(rows || [])
+    } catch (e) {
+      console.warn('[useMyCommissionLedger]', e?.message || e)
+      setError(String(e?.message || e))
+    } finally {
+      setLoading(false)
+    }
+  }, [enabled, explicitId])
+
+  useEffect(() => {
+    if (!enabled) { setLoading(false); return }
+    let cancelled = false
+    ;(async () => {
+      setLoading(true)
+      try {
+        const rows = await withTimeout(db.fetchMyCommissionLedger(explicitId), DEFAULT_FETCH_TIMEOUT_MS, 'fetchMyCommissionLedger')
+        if (!cancelled) setEvents(rows || [])
+      } catch (e) {
+        if (!cancelled) setError(String(e?.message || e))
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    const filter = explicitId ? `beneficiary_client_id=eq.${explicitId}` : undefined
+    const channel = supabase
+      .channel(`realtime-my-commission-ledger-${explicitId || 'self'}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'commission_events', ...(filter ? { filter } : {}) }, () => refresh())
+      .subscribe()
+    return () => { cancelled = true; supabase.removeChannel(channel) }
+  }, [enabled, explicitId, refresh])
+
+  return { events, loading, error, refresh }
 }

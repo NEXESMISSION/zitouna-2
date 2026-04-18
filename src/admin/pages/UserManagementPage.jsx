@@ -633,10 +633,16 @@ export default function UserManagementPage() {
 
   const steps = ['identity', 'pages', 'projects', 'pieces']
   const stepLabels = {
-    identity: 'User info',
-    pages: 'Page access',
-    projects: 'Project access',
-    pieces: 'Pieces access',
+    identity: 'Identité',
+    pages: 'Pages',
+    projects: 'Projets',
+    pieces: 'Parcelles',
+  }
+  const stepHelp = {
+    identity: 'Coordonnées du compte. Nom et e-mail obligatoires.',
+    pages: 'Choisissez les pages de l’admin accessibles à cet utilisateur.',
+    projects: 'Limitez la vue aux projets concernés. Tout = accès à tous les projets.',
+    pieces: 'Autorisez des parcelles précises dans les projets sélectionnés.',
   }
   const stepIndex = steps.indexOf(formStep)
   const canGoNext = formStep !== 'identity' || (form.name?.trim() && form.email?.trim())
@@ -645,80 +651,150 @@ export default function UserManagementPage() {
     return (
       <div className="zitu-page" dir="ltr">
         <div className="zitu-page__column">
-          <div className="zitu-page__loading">Loading...</div>
+          <div className="zitu-page__loading">Chargement…</div>
         </div>
       </div>
     )
   }
 
+  // Local styles: scoped to this page only; no globals touched.
+  const localStyle = `
+    .um-wrap { --um-ink:#0f172a; --um-muted:#64748b; --um-line:#e2e8f0; --um-soft:#f8fafc; --um-brand:#2563eb; --um-brandSoft:#eff6ff; --um-danger:#b91c1c; }
+    .um-hero { display:flex; gap:14px; align-items:flex-start; padding:18px; border-radius:16px; background:linear-gradient(135deg,#eff6ff 0%,#f8fafc 60%); border:1px solid #dbeafe; margin-bottom:14px; }
+    .um-hero h1 { font-size:20px; font-weight:800; color:var(--um-ink); margin:0 0 4px; line-height:1.25; }
+    .um-hero p { font-size:13px; color:var(--um-muted); margin:0; line-height:1.5; }
+    .um-hero__cta { background:var(--um-brand); color:#fff; border:none; border-radius:10px; padding:10px 16px; font-size:14px; font-weight:700; cursor:pointer; box-shadow:0 4px 12px rgba(37,99,235,.25); }
+    .um-hero__cta:hover { background:#1d4ed8; }
+    .um-tabs { display:flex; gap:6px; padding:4px; background:#f1f5f9; border-radius:10px; width:fit-content; margin-bottom:12px; }
+    .um-tab { padding:8px 16px; border-radius:8px; border:none; background:transparent; color:var(--um-muted); font-size:13px; font-weight:600; cursor:pointer; }
+    .um-tab--on { background:#fff; color:var(--um-brand); box-shadow:0 1px 3px rgba(0,0,0,.06); }
+    .um-kpis { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin-bottom:14px; }
+    .um-kpi { background:#fff; border:1px solid var(--um-line); border-radius:12px; padding:12px 14px; }
+    .um-kpi__label { font-size:11px; color:var(--um-muted); text-transform:uppercase; letter-spacing:.04em; font-weight:700; }
+    .um-kpi__value { font-size:22px; font-weight:800; color:var(--um-ink); margin-top:2px; }
+    .um-kpi__hint { font-size:11px; color:var(--um-muted); margin-top:2px; }
+    .um-toolbar { display:flex; gap:10px; align-items:center; margin-bottom:14px; flex-wrap:wrap; }
+    .um-toolbar .um-search { flex:1; min-width:200px; }
+    .um-help { background:#fffbeb; border:1px solid #fde68a; color:#92400e; padding:8px 12px; border-radius:10px; font-size:12px; line-height:1.45; margin-bottom:12px; display:flex; gap:8px; align-items:flex-start; }
+    .um-help b { color:#78350f; }
+    .um-section { background:#fff; border:1px solid var(--um-line); border-radius:12px; padding:14px; margin:0 0 12px; }
+    .um-section__title { font-size:14px; font-weight:800; color:var(--um-ink); margin:0 0 4px; }
+    .um-section__sub { font-size:12px; color:var(--um-muted); margin:0 0 10px; line-height:1.5; }
+    .um-mode { display:inline-flex; padding:3px; background:#f1f5f9; border-radius:8px; gap:2px; margin-bottom:10px; }
+    .um-mode__btn { border:none; background:transparent; padding:6px 14px; border-radius:6px; font-size:12px; font-weight:600; color:var(--um-muted); cursor:pointer; }
+    .um-mode__btn--on { background:#fff; color:var(--um-brand); box-shadow:0 1px 2px rgba(0,0,0,.06); }
+    .um-chip { padding:7px 12px; font-size:13px; font-weight:600; border-radius:8px; cursor:pointer; border:1px solid var(--um-line); background:#fff; color:var(--um-muted); transition:all .12s; }
+    .um-chip:hover { border-color:#cbd5e1; }
+    .um-chip--on { border-color:#93c5fd; background:var(--um-brandSoft); color:#1d4ed8; }
+    .um-row-item { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:10px 12px; font-size:13px; font-weight:600; border-radius:10px; cursor:pointer; border:1px solid var(--um-line); background:#fff; }
+    .um-row-item--on { border-color:#93c5fd; background:var(--um-brandSoft); }
+    .um-row-item__status { font-size:11px; font-weight:700; padding:3px 8px; border-radius:999px; background:#f1f5f9; color:var(--um-muted); }
+    .um-row-item--on .um-row-item__status { background:#dbeafe; color:#1d4ed8; }
+    .um-stepper { display:flex; gap:6px; margin-bottom:12px; flex-wrap:wrap; padding:6px; background:#f1f5f9; border-radius:10px; }
+    .um-step { flex:1; min-width:90px; padding:8px 10px; border-radius:8px; border:none; background:transparent; font-size:12px; font-weight:600; cursor:pointer; color:var(--um-muted); display:flex; align-items:center; gap:6px; justify-content:center; }
+    .um-step--on { background:#fff; color:var(--um-brand); box-shadow:0 1px 3px rgba(0,0,0,.06); }
+    .um-step__num { display:inline-flex; width:18px; height:18px; border-radius:50%; background:#e2e8f0; color:var(--um-muted); font-size:10px; font-weight:800; align-items:center; justify-content:center; }
+    .um-step--on .um-step__num { background:var(--um-brand); color:#fff; }
+    .um-step--done .um-step__num { background:#10b981; color:#fff; }
+    .um-actions { display:flex; gap:8px; margin-top:14px; padding-top:12px; border-top:1px solid var(--um-line); align-items:center; flex-wrap:wrap; }
+    .um-actions .um-spacer { flex:1; }
+    .um-btn-primary { background:var(--um-brand); color:#fff; border:none; border-radius:8px; padding:10px 18px; font-size:14px; font-weight:700; cursor:pointer; }
+    .um-btn-primary:hover:not(:disabled) { background:#1d4ed8; }
+    .um-btn-primary:disabled { opacity:.5; cursor:not-allowed; }
+    .um-empty { text-align:center; padding:40px 20px; background:#f8fafc; border:1px dashed var(--um-line); border-radius:14px; color:var(--um-muted); }
+    .um-empty strong { display:block; font-size:15px; color:var(--um-ink); margin-bottom:4px; }
+    .um-empty__hint { font-size:13px; line-height:1.5; }
+    @media (max-width: 600px) {
+      .um-hero { flex-direction:column; padding:14px; }
+      .um-hero__cta { width:100%; }
+      .um-kpis { grid-template-columns:1fr; }
+      .um-tabs { width:100%; }
+      .um-tab { flex:1; text-align:center; }
+    }
+  `
+
   return (
-    <div className="zitu-page" dir="ltr">
+    <div className="zitu-page um-wrap" dir="ltr">
+      <style>{localStyle}</style>
       <div className="zitu-page__column">
         <button type="button" className="ds-back-btn" onClick={() => navBack(-1)}>
           <span className="ds-back-btn__icon" aria-hidden>←</span>
-          <span className="ds-back-btn__label">Back</span>
+          <span className="ds-back-btn__label">Retour</span>
         </button>
-        <header className="zitu-page__header">
-          <div className="zitu-page__header-icon">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2563eb" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+
+        <header className="um-hero">
+          <div className="zitu-page__header-icon" style={{ flexShrink: 0 }}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#2563eb" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
               <circle cx="9" cy="7" r="4" />
               <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
               <path d="M16 3.13a4 4 0 0 1 0 7.75" />
             </svg>
           </div>
-          <div className="zitu-page__header-text">
-            <h1>Gestion IAM: utilisateurs & permissions</h1>
-            <p>Comptes staff, comptes clients, droits d acces et suspension.</p>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <h1>Utilisateurs et permissions</h1>
+            <p>Gérez les comptes staff et clients, leurs accès aux pages, projets et parcelles, ainsi que les suspensions.</p>
           </div>
-          <div className="zitu-page__header-actions">
-            {mainTab === 'staff' ? (
-              <button type="button" className="zitu-page__btn zitu-page__btn--primary" onClick={openCreate}>
-                + New user
-              </button>
-            ) : null}
-          </div>
+          {mainTab === 'staff' ? (
+            <button type="button" className="um-hero__cta" onClick={openCreate}>
+              + Nouvel utilisateur
+            </button>
+          ) : null}
         </header>
 
-        <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+        <div className="um-tabs" role="tablist">
           <button
             type="button"
-            className={`zitu-page__btn ${mainTab === 'staff' ? 'zitu-page__btn--primary' : ''}`}
-            style={{ padding: '6px 12px', fontSize: 12 }}
+            role="tab"
+            aria-selected={mainTab === 'staff'}
+            className={`um-tab ${mainTab === 'staff' ? 'um-tab--on' : ''}`}
             onClick={() => setMainTab('staff')}
           >
-            Staff ({users.length})
+            Staff · {users.length}
           </button>
           <button
             type="button"
-            className={`zitu-page__btn ${mainTab === 'clients' ? 'zitu-page__btn--primary' : ''}`}
-            style={{ padding: '6px 12px', fontSize: 12 }}
+            role="tab"
+            aria-selected={mainTab === 'clients'}
+            className={`um-tab ${mainTab === 'clients' ? 'um-tab--on' : ''}`}
             onClick={() => setMainTab('clients')}
           >
-            Clients ({(clients || []).length})
+            Clients · {(clients || []).length}
           </button>
         </div>
 
-        <div className="zitu-page__stats zitu-page__stats--3" style={{ marginBottom: 12 }}>
-          <div className="zitu-page__stat">
-            <div className="zitu-page__stat-label">{mainTab === 'staff' ? 'Staff' : 'Clients'}</div>
-            <div className="zitu-page__stat-value">{stats.total}</div>
+        <div className="um-help">
+          <span aria-hidden>💡</span>
+          <span>
+            {mainTab === 'staff'
+              ? <><b>Staff</b> : collègues internes (admin, vente). Créez un compte puis définissez ses pages, projets et parcelles autorisés.</>
+              : <><b>Clients</b> : acheteurs ou vendeurs externes, souvent créés via inscription. Utilisez « Gérer l’accès » pour attribuer pages et parcelles.</>}
+          </span>
+        </div>
+
+        <div className="um-kpis">
+          <div className="um-kpi">
+            <div className="um-kpi__label">{mainTab === 'staff' ? 'Total staff' : 'Total clients'}</div>
+            <div className="um-kpi__value">{stats.total}</div>
+            <div className="um-kpi__hint">comptes au total</div>
           </div>
-          <div className="zitu-page__stat">
-            <div className="zitu-page__stat-label">{mainTab === 'staff' ? 'Page scoped' : 'With admin pages'}</div>
-            <div className="zitu-page__stat-value zitu-page__stat-value--mint">{stats.withPageScope}</div>
+          <div className="um-kpi">
+            <div className="um-kpi__label">Pages limitées</div>
+            <div className="um-kpi__value" style={{ color: '#047857' }}>{stats.withPageScope}</div>
+            <div className="um-kpi__hint">accès restreint à certaines pages</div>
           </div>
-          <div className="zitu-page__stat">
-            <div className="zitu-page__stat-label">{mainTab === 'staff' ? 'Project scoped' : 'Project scoped'}</div>
-            <div className="zitu-page__stat-value">{stats.withProjectScope}</div>
+          <div className="um-kpi">
+            <div className="um-kpi__label">Projets limités</div>
+            <div className="um-kpi__value">{stats.withProjectScope}</div>
+            <div className="um-kpi__hint">vue restreinte aux projets choisis</div>
           </div>
         </div>
 
-        <div className="zitu-page__filters">
-          <div className="zitu-page__search-wrap zitu-page__filters-grow">
+        <div className="um-toolbar">
+          <div className="zitu-page__search-wrap um-search">
             <input
               className="zitu-page__search"
-              placeholder={mainTab === 'staff' ? 'Search staff by name or email…' : 'Search clients by name, email, phone…'}
+              placeholder={mainTab === 'staff' ? 'Rechercher staff par nom ou e-mail…' : 'Rechercher client par nom, e-mail, téléphone…'}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
@@ -732,15 +808,15 @@ export default function UserManagementPage() {
         </div>
 
         {mainTab === 'staff' && filtered.length === 0 ? (
-          <div className="zitu-page__empty">
-            <strong>No staff found</strong>
-            Adjust search or create a new user.
+          <div className="um-empty">
+            <strong>Aucun membre staff trouvé</strong>
+            <div className="um-empty__hint">Essayez un autre terme de recherche ou cliquez sur « Nouvel utilisateur » pour en créer un.</div>
           </div>
         ) : null}
         {mainTab === 'clients' && filteredClients.length === 0 ? (
-          <div className="zitu-page__empty">
-            <strong>No clients found</strong>
-            Self-registered clients appear here after signup.
+          <div className="um-empty">
+            <strong>Aucun client trouvé</strong>
+            <div className="um-empty__hint">Les clients qui s’inscrivent sur la plate-forme apparaissent ici automatiquement.</div>
           </div>
         ) : null}
 
@@ -905,54 +981,71 @@ export default function UserManagementPage() {
         <AdminModal
           open={!!drawer}
           onClose={() => setDrawer(null)}
-          title={drawer === 'create' ? 'Create User' : `Edit User — ${form.name || ''}`}
+          title={drawer === 'create' ? 'Créer un utilisateur' : `Modifier l’utilisateur — ${form.name || ''}`}
           width={760}
         >
-          <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
-            {steps.map((s, idx) => (
-              <button
-                key={s}
-                type="button"
-                className={`zitu-page__btn ${formStep === s ? 'zitu-page__btn--primary' : ''}`}
-                style={{ padding: '4px 8px', fontSize: 10 }}
-                onClick={() => setFormStep(s)}
-              >
-                {idx + 1}. {stepLabels[s]}
-              </button>
-            ))}
+          <div className="um-stepper" role="tablist" aria-label="Étapes">
+            {steps.map((s, idx) => {
+              const isOn = formStep === s
+              const isDone = stepIndex > idx
+              return (
+                <button
+                  key={s}
+                  type="button"
+                  role="tab"
+                  aria-selected={isOn}
+                  className={`um-step ${isOn ? 'um-step--on' : ''} ${isDone ? 'um-step--done' : ''}`}
+                  onClick={() => setFormStep(s)}
+                >
+                  <span className="um-step__num">{isDone ? '✓' : idx + 1}</span>
+                  <span>{stepLabels[s]}</span>
+                </button>
+              )
+            })}
+          </div>
+
+          <div className="um-help" style={{ marginBottom: 12 }}>
+            <span aria-hidden>ℹ️</span>
+            <span>{stepHelp[formStep]}</span>
           </div>
 
           {formStep === 'identity' && (
-            <div className="zitu-page__section" style={{ margin: 0 }}>
-              <div className="zitu-page__section-title">User info</div>
+            <div className="um-section">
+              <h3 className="um-section__title">Informations du compte</h3>
+              <p className="um-section__sub">Ces données servent à identifier l’utilisateur et lui envoyer ses accès.</p>
               <div className="zitu-page__form-grid">
                 <div className="zitu-page__field">
-                  <label className="zitu-page__field-label">Full name</label>
-                  <input className="zitu-page__input" value={form.name || ''} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="Sami Bouaziz" />
+                  <label className="zitu-page__field-label">Nom complet *</label>
+                  <input className="zitu-page__input" value={form.name || ''} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="Ex : Sami Bouaziz" />
                 </div>
                 <div className="zitu-page__field">
-                  <label className="zitu-page__field-label">Email</label>
+                  <label className="zitu-page__field-label">E-mail *</label>
                   <input className="zitu-page__input" type="email" value={form.email || ''} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} placeholder="sami@zitouna.tn" disabled={drawer === 'edit'} />
+                  {drawer === 'edit' ? <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>L’e-mail ne peut pas être modifié après la création.</div> : null}
                 </div>
               </div>
               <div className="zitu-page__form-grid">
                 <div className="zitu-page__field">
-                  <label className="zitu-page__field-label">Phone</label>
+                  <label className="zitu-page__field-label">Téléphone</label>
                   <input className="zitu-page__input" value={form.phone || ''} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} placeholder="+216 71 000 000" />
                 </div>
                 <div className="zitu-page__field">
                   <label className="zitu-page__field-label">CIN</label>
-                  <input className="zitu-page__input" value={form.cin || ''} onChange={(e) => setForm((f) => ({ ...f, cin: e.target.value }))} placeholder="XXXXXXXX" maxLength={8} />
+                  <input className="zitu-page__input" value={form.cin || ''} onChange={(e) => setForm((f) => ({ ...f, cin: e.target.value }))} placeholder="8 chiffres" maxLength={8} />
                 </div>
               </div>
               {drawer === 'create' && (
                 <div className="zitu-page__field">
-                  <label className="zitu-page__field-label">Password</label>
-                  <input className="zitu-page__input" type="password" value={form.password || ''} onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))} placeholder="Min 6 characters" autoComplete="new-password" />
+                  <label className="zitu-page__field-label">Mot de passe *</label>
+                  <input className="zitu-page__input" type="password" value={form.password || ''} onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))} placeholder="Minimum 6 caractères" autoComplete="new-password" />
+                  <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 4 }}>L’utilisateur pourra le changer après sa première connexion.</div>
                 </div>
               )}
               {drawer === 'edit' && (
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12, paddingTop: 12, borderTop: '1px dashed #e2e8f0' }}>
+                  <div style={{ width: '100%', fontSize: 12, color: '#64748b', marginBottom: 4 }}>
+                    <b style={{ color: '#0f172a' }}>Suspension :</b> bloque temporairement la connexion sans supprimer le compte ni ses données.
+                  </div>
                   <button
                     type="button"
                     className="zitu-page__btn"
@@ -960,7 +1053,7 @@ export default function UserManagementPage() {
                     disabled={saving || form.status === 'suspended' || Boolean(form.suspendedAt)}
                     onClick={handleStaffSuspendToggle}
                   >
-                    Suspend staff
+                    Suspendre le compte
                   </button>
                   <button
                     type="button"
@@ -968,7 +1061,7 @@ export default function UserManagementPage() {
                     disabled={saving || (form.status !== 'suspended' && !form.suspendedAt)}
                     onClick={handleStaffSuspendToggle}
                   >
-                    Reactivate staff
+                    Réactiver le compte
                   </button>
                 </div>
               )}
@@ -976,80 +1069,110 @@ export default function UserManagementPage() {
           )}
 
           {formStep === 'pages' && (
-            <div className="zitu-page__section" style={{ margin: 0 }}>
-              <div className="zitu-page__section-title">Page Access</div>
-              <div style={{ display: 'flex', gap: 8, margin: '4px 0 8px' }}>
-                <button type="button" className={`zitu-page__btn ${pageMode === 'all' ? 'zitu-page__btn--primary' : ''}`} style={{ padding: '4px 8px', fontSize: 10 }} onClick={() => setForm((f) => ({ ...f, allowedPages: null }))}>All</button>
-                <button type="button" className={`zitu-page__btn ${pageMode === 'custom' ? 'zitu-page__btn--primary' : ''}`} style={{ padding: '4px 8px', fontSize: 10 }} onClick={() => setForm((f) => ({ ...f, allowedPages: Array.isArray(f.allowedPages) ? f.allowedPages : [] }))}>Custom</button>
+            <div className="um-section">
+              <h3 className="um-section__title">Pages accessibles</h3>
+              <p className="um-section__sub">« Toutes » = l’utilisateur voit toutes les pages de l’admin. « Personnalisé » = sélectionnez une à une.</p>
+              <div className="um-mode" role="tablist">
+                <button type="button" role="tab" aria-selected={pageMode === 'all'} className={`um-mode__btn ${pageMode === 'all' ? 'um-mode__btn--on' : ''}`} onClick={() => setForm((f) => ({ ...f, allowedPages: null }))}>Toutes</button>
+                <button type="button" role="tab" aria-selected={pageMode === 'custom'} className={`um-mode__btn ${pageMode === 'custom' ? 'um-mode__btn--on' : ''}`} onClick={() => setForm((f) => ({ ...f, allowedPages: Array.isArray(f.allowedPages) ? f.allowedPages : [] }))}>Personnalisé</button>
               </div>
               {pageMode === 'custom' ? (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                  {PAGE_OPTIONS.map((p) => {
-                    const on = formPages.includes(p.key)
-                    return (
-                      <button key={p.key} type="button" onClick={() => togglePage(p.key)} style={{ padding: '5px 10px', fontSize: 10, fontWeight: 600, borderRadius: 6, cursor: 'pointer', border: on ? '1px solid #93c5fd' : '1px solid #e2e8f0', background: on ? '#eff6ff' : '#fff', color: on ? '#1d4ed8' : '#94a3b8' }}>
-                        {p.label}
-                      </button>
-                    )
-                  })}
-                </div>
-              ) : <div style={{ fontSize: 10, color: '#64748b' }}>{`All ${allPageKeys.length} pages allowed.`}</div>}
-            </div>
-          )}
-
-          {formStep === 'projects' && (
-            <div className="zitu-page__section" style={{ margin: 0 }}>
-              <div className="zitu-page__section-title">Project Access</div>
-              <div style={{ display: 'flex', gap: 8, margin: '4px 0 8px' }}>
-                <button type="button" className={`zitu-page__btn ${projectMode === 'all' ? 'zitu-page__btn--primary' : ''}`} style={{ padding: '4px 8px', fontSize: 10 }} onClick={() => setForm((f) => ({ ...f, allowedProjectIds: null, allowedParcelKeys: null }))}>All</button>
-                <button type="button" className={`zitu-page__btn ${projectMode === 'custom' ? 'zitu-page__btn--primary' : ''}`} style={{ padding: '4px 8px', fontSize: 10 }} onClick={() => setForm((f) => ({ ...f, allowedProjectIds: Array.isArray(f.allowedProjectIds) ? f.allowedProjectIds : [], allowedParcelKeys: [] }))}>Custom</button>
-              </div>
-              {projects.length === 0 ? (
-                <div style={{ fontSize: 10, color: '#94a3b8' }}>No projects yet.</div>
-              ) : projectMode !== 'custom' ? (
-                <div style={{ fontSize: 10, color: '#64748b' }}>{`All ${allProjectIds.length} projects allowed.`}</div>
+                <>
+                  <div style={{ fontSize: 12, color: '#64748b', marginBottom: 8 }}>
+                    {formPages.length} page(s) sélectionnée(s) sur {allPageKeys.length}.
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {PAGE_OPTIONS.map((p) => {
+                      const on = formPages.includes(p.key)
+                      return (
+                        <button key={p.key} type="button" className={`um-chip ${on ? 'um-chip--on' : ''}`} onClick={() => togglePage(p.key)}>
+                          {on ? '✓ ' : ''}{p.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                  {projects.map((p) => {
-                    const on = formProjects.includes(p.id)
-                    return (
-                      <button key={p.id} type="button" onClick={() => toggleProject(p.id)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '7px 10px', fontSize: 11, fontWeight: 600, borderRadius: 8, cursor: 'pointer', border: on ? '1px solid #93c5fd' : '1px solid #e2e8f0', background: on ? '#eff6ff' : '#fff' }}>
-                        <span>{p.title}</span><span style={{ color: on ? '#1d4ed8' : '#94a3b8' }}>{on ? 'Selected' : 'Select'}</span>
-                      </button>
-                    )
-                  })}
+                <div style={{ fontSize: 13, color: '#047857', padding: '8px 12px', background: '#ecfdf5', borderRadius: 8, border: '1px solid #a7f3d0' }}>
+                  ✓ Accès complet : les {allPageKeys.length} pages sont autorisées.
                 </div>
               )}
             </div>
           )}
 
+          {formStep === 'projects' && (
+            <div className="um-section">
+              <h3 className="um-section__title">Projets visibles</h3>
+              <p className="um-section__sub">Contrôle quels projets apparaissent à l’utilisateur. Retirer un projet retire aussi ses parcelles.</p>
+              <div className="um-mode" role="tablist">
+                <button type="button" role="tab" aria-selected={projectMode === 'all'} className={`um-mode__btn ${projectMode === 'all' ? 'um-mode__btn--on' : ''}`} onClick={() => setForm((f) => ({ ...f, allowedProjectIds: null, allowedParcelKeys: null }))}>Tous</button>
+                <button type="button" role="tab" aria-selected={projectMode === 'custom'} className={`um-mode__btn ${projectMode === 'custom' ? 'um-mode__btn--on' : ''}`} onClick={() => setForm((f) => ({ ...f, allowedProjectIds: Array.isArray(f.allowedProjectIds) ? f.allowedProjectIds : [], allowedParcelKeys: [] }))}>Personnalisé</button>
+              </div>
+              {projects.length === 0 ? (
+                <div className="um-empty" style={{ padding: 20 }}>
+                  <strong>Aucun projet</strong>
+                  <div className="um-empty__hint">Créez d’abord un projet depuis la page Projets.</div>
+                </div>
+              ) : projectMode !== 'custom' ? (
+                <div style={{ fontSize: 13, color: '#047857', padding: '8px 12px', background: '#ecfdf5', borderRadius: 8, border: '1px solid #a7f3d0' }}>
+                  ✓ Accès complet : les {allProjectIds.length} projets sont autorisés.
+                </div>
+              ) : (
+                <>
+                  <div style={{ fontSize: 12, color: '#64748b', marginBottom: 8 }}>
+                    {formProjects.length} projet(s) sélectionné(s) sur {allProjectIds.length}.
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {projects.map((p) => {
+                      const on = formProjects.includes(p.id)
+                      return (
+                        <button key={p.id} type="button" className={`um-row-item ${on ? 'um-row-item--on' : ''}`} onClick={() => toggleProject(p.id)}>
+                          <span>{p.title}</span>
+                          <span className="um-row-item__status">{on ? '✓ Autorisé' : 'Cliquer pour ajouter'}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
           {formStep === 'pieces' && (
-            <div className="zitu-page__section" style={{ margin: 0 }}>
-              <div className="zitu-page__section-title">Pieces Access (Parcelles)</div>
-              <div style={{ display: 'flex', gap: 8, margin: '4px 0 8px' }}>
-                <button type="button" className={`zitu-page__btn ${pieceMode === 'all' ? 'zitu-page__btn--primary' : ''}`} style={{ padding: '4px 8px', fontSize: 10 }} onClick={() => setForm((f) => ({ ...f, allowedParcelKeys: null }))}>All</button>
-                <button type="button" className={`zitu-page__btn ${pieceMode === 'custom' ? 'zitu-page__btn--primary' : ''}`} style={{ padding: '4px 8px', fontSize: 10 }} onClick={() => setForm((f) => ({ ...f, allowedParcelKeys: Array.isArray(f.allowedParcelKeys) ? f.allowedParcelKeys : [] }))} disabled={pieceOptions.length === 0}>Custom</button>
+            <div className="um-section">
+              <h3 className="um-section__title">Parcelles autorisées</h3>
+              <p className="um-section__sub">Restreint l’accès aux parcelles précises à l’intérieur des projets autorisés.</p>
+              <div className="um-mode" role="tablist">
+                <button type="button" role="tab" aria-selected={pieceMode === 'all'} className={`um-mode__btn ${pieceMode === 'all' ? 'um-mode__btn--on' : ''}`} onClick={() => setForm((f) => ({ ...f, allowedParcelKeys: null }))}>Toutes</button>
+                <button type="button" role="tab" aria-selected={pieceMode === 'custom'} className={`um-mode__btn ${pieceMode === 'custom' ? 'um-mode__btn--on' : ''}`} onClick={() => setForm((f) => ({ ...f, allowedParcelKeys: Array.isArray(f.allowedParcelKeys) ? f.allowedParcelKeys : [] }))} disabled={pieceOptions.length === 0}>Personnalisé</button>
               </div>
               {pieceOptions.length === 0 ? (
-                <div style={{ fontSize: 10, color: '#94a3b8' }}>No pieces available in selected projects.</div>
+                <div className="um-empty" style={{ padding: 20 }}>
+                  <strong>Aucune parcelle disponible</strong>
+                  <div className="um-empty__hint">Sélectionnez au moins un projet à l’étape précédente.</div>
+                </div>
               ) : pieceMode !== 'custom' ? (
-                <div style={{ fontSize: 10, color: '#64748b' }}>{`All ${allVisiblePieceKeys.length} pieces allowed.`}</div>
+                <div style={{ fontSize: 13, color: '#047857', padding: '8px 12px', background: '#ecfdf5', borderRadius: 8, border: '1px solid #a7f3d0' }}>
+                  ✓ Accès complet : les {allVisiblePieceKeys.length} parcelles sont autorisées.
+                </div>
               ) : (
-                <div style={{ display: 'grid', gap: 8 }}>
-                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <div style={{ display: 'grid', gap: 10 }}>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', fontSize: 12, color: '#64748b' }}>
+                    <span>{formPieces.length} / {allVisiblePieceKeys.length} parcelles sélectionnées</span>
+                    <div style={{ flex: 1 }} />
                     <button
                       type="button"
                       className="zitu-page__btn zitu-page__btn--sm"
                       onClick={() => setForm((f) => ({ ...f, allowedParcelKeys: [...allVisiblePieceKeys] }))}
                     >
-                      Select all visible pieces
+                      Tout sélectionner
                     </button>
                     <button
                       type="button"
                       className="zitu-page__btn zitu-page__btn--sm"
                       onClick={() => setForm((f) => ({ ...f, allowedParcelKeys: [] }))}
                     >
-                      Clear all
+                      Tout vider
                     </button>
                   </div>
 

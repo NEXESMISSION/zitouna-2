@@ -257,6 +257,79 @@
   filter: none !important;
 }
 
+/* ══════════════════════════════════════════════════════════════
+   SKELETON LOADING — matches SellPage sp-sk-* shimmer
+   ══════════════════════════════════════════════════════════════ */
+.cp-card--skeleton {
+  pointer-events: none; cursor: default;
+  border-left-color: var(--200) !important;
+  background: var(--fg) !important;
+}
+.cp-sk-box,
+.cp-sk-line {
+  display: block;
+  background: linear-gradient(90deg, #eef2f7 0%, #f8fafc 50%, #eef2f7 100%);
+  background-size: 200% 100%;
+  animation: cp-sk-shimmer 1.3s ease-in-out infinite;
+  border-radius: 6px;
+}
+.cp-sk-box { width: 26px; height: 26px; border-radius: 7px; }
+.cp-sk-line--title { height: 11px; width: 55%; margin: 1px 0 4px; }
+.cp-sk-line--sub   { height: 9px;  width: 75%; margin: 0; }
+.cp-sk-line--badge { height: 16px; width: 64px; border-radius: 999px; flex-shrink: 0; }
+.cp-sk-line--cell  { height: 10px; width: 70%; }
+.cp-sk-line--btn   { height: 24px; width: 100%; border-radius: 7px; }
+@keyframes cp-sk-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   PAGINATION — matches SellPage sp-pager
+   ══════════════════════════════════════════════════════════════ */
+.cp-pager {
+  display: flex; align-items: center; justify-content: center; flex-wrap: wrap;
+  gap: 4px; margin: 8px 0 12px; padding: 6px; font-size: 12px;
+}
+.cp-pager__btn {
+  min-width: 30px; height: 30px; padding: 0 9px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--fg); border: 1.5px solid var(--200);
+  border-radius: 7px; color: var(--600); font-weight: 600;
+  cursor: pointer; transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+.cp-pager__btn:hover:not(:disabled):not(.cp-pager__btn--active) {
+  border-color: var(--teal-l); color: var(--teal);
+}
+.cp-pager__btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.cp-pager__btn--nav { font-size: 16px; line-height: 1; color: var(--500); }
+.cp-pager__btn--active {
+  background: var(--teal); border-color: var(--teal); color: #fff;
+  box-shadow: 0 2px 6px rgba(69,119,120,0.25);
+}
+.cp-pager__ellipsis { padding: 0 5px; color: var(--400); user-select: none; }
+.cp-pager__info { margin-left: 8px; font-size: 11px; color: var(--500); }
+@media (max-width: 480px) {
+  .cp-pager__info { width: 100%; margin: 3px 0 0; text-align: center; }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   CARD REFRESH — rounder, softer, SellPage feel
+   ══════════════════════════════════════════════════════════════ */
+.cp-card {
+  padding: 12px 14px !important;
+  border-radius: 14px !important;
+  border-left-width: 4px !important;
+  box-shadow: 0 1px 3px rgba(0,0,0,.06);
+}
+.cp-card:hover { box-shadow: 0 4px 14px rgba(37,99,235,0.10); }
+.cp-card--blue   { border-left-color: #2563eb !important; }
+.cp-card--orange { border-left-color: #d97706 !important; }
+.cp-card--purple { border-left-color: #7c3aed !important; }
+.cp-card--green  { border-left-color: #059669 !important; }
+.cp-card--red    { border-left-color: #dc2626 !important; }
+.cp-card--gray   { border-left-color: #94a3b8 !important; }
+
 /* ═══ EMPTY STATE ═══ */
 .cp-empty {
   text-align: center; padding: 20px 12px;

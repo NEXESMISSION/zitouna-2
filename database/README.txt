@@ -4,9 +4,9 @@ Run the files in order in the Supabase SQL Editor (role: postgres).
 
   01_reset_full.sql            (optional) full wipe: auth.users + public schema
   01b_reset_keep_accounts.sql  (optional) wipe data, keep auth + admin_users + linked clients
-  02_schema.sql                REQUIRED — tables, enums, indexes, triggers
-  03_functions.sql             REQUIRED — helper predicates, RPCs (is_active_staff, etc.)
-  04_rls.sql                   REQUIRED — RLS policies, grants, auth↔client recovery
+  02_schema.sql                REQUIRED — tables, enums, indexes, check constraints, touch triggers
+  03_functions.sql             REQUIRED — helper predicates, RPCs, autolink triggers, sale-invariant trigger
+  04_rls.sql                   REQUIRED — RLS policies (staff + delegated seller), grants, auth↔client recovery
   05_seed.sql                  optional — demo catalogue (projects, parcels, offers, slots)
 
 Fresh start from zero:

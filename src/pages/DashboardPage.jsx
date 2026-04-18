@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useCountUp } from '../hooks/useCountUp.js'
 import { useNavigate } from 'react-router-dom'
 import TopBar from '../TopBar.jsx'
@@ -9,7 +9,7 @@ import { supabase } from '../lib/supabase.js'
 import {
   useAmbassadorReferralSummary,
   useInstallmentsScoped,
-
+  useMyCommissionLedger,
   useProjectsScoped,
   useSalesBySellerClientId,
   useSalesScoped,
@@ -74,12 +74,39 @@ export default function DashboardPage() {
     clientProfile,
     logout,
     refreshAuth,
-    profileStatus,
   } = useAuth()
 
   const displayName = adminUser?.name || user?.firstname || user?.name || 'Investisseur'
 
   const clientId = clientProfile?.id || null
+
+  // Self-heal on mount: if the logged-in user has no clientProfile yet but
+  // DOES have an auth.uid, call heal_my_client_profile_now() which links any
+  // orphan clients row (stub created by a delegated seller + buyer email
+  // matches the auth user). Silent if already linked. This replaces the
+  // "you must log out and log back in for the link to take effect" behavior.
+  const healedRef = useRef(false)
+  useEffect(() => {
+    if (healedRef.current) return
+    if (!user?.id) return
+    if (clientProfile?.id) return
+    healedRef.current = true
+    ;(async () => {
+      try {
+        const { data, error } = await supabase.rpc('heal_my_client_profile_now')
+        if (error) {
+          console.warn('[Dashboard] heal_my_client_profile_now error:', error.message)
+          return
+        }
+        if (data?.linked > 0 || (data?.ok && data?.clientId)) {
+          console.info('[Dashboard] profile healed:', data)
+          refreshAuth?.()
+        }
+      } catch (e) {
+        console.warn('[Dashboard] heal failed:', e?.message || e)
+      }
+    })()
+  }, [user?.id, clientProfile?.id, refreshAuth])
 
   const { sales: mySalesRaw } = useSalesScoped({ clientId })
   const { plans: myPlans, refresh: refreshPlans } = useInstallmentsScoped({ clientId })
@@ -87,9 +114,22 @@ export default function DashboardPage() {
   const showAmbassadorCard = Boolean(clientId)
   const { summary: referralSummary, loading: referralLoading, refresh: refreshReferralSummary } =
     useAmbassadorReferralSummary(showAmbassadorCard)
+  const { events: myCommissionEvents, loading: ledgerLoading, refresh: refreshCommissionLedger } = useMyCommissionLedger(clientId || false)
+  const [referralLoadStale, setReferralLoadStale] = useState(false)
+  useEffect(() => {
+    if (!referralLoading) {
+      setReferralLoadStale(false)
+      return undefined
+    }
+    setReferralLoadStale(false)
+    const t = window.setTimeout(() => setReferralLoadStale(true), 30000)
+    return () => window.clearTimeout(t)
+  }, [referralLoading])
+  const referralHasError = referralSummary?.reason === 'rpc_error' || referralLoadStale
   const [payoutBusy, setPayoutBusy] = useState(false)
   const [payoutError, setPayoutError] = useState('')
   const payoutIdempotencyRef = useRef(null)
+  const [payoutConfirmOpen, setPayoutConfirmOpen] = useState(false)
   // Hybrid rule: staff / Super Admin can ALSO buy. The buyer portfolio is
   // visible whenever a clientProfile has resolved (clientId present); the
   // per-sale filter below excludes sales where the current user is the seller
@@ -162,6 +202,70 @@ export default function DashboardPage() {
     )
   }, [clientId, ambassadorSales])
 
+  const referralLevelsExposed = useMemo(
+    () => (ambassadorReferralRows || []).some((r) => r && r.level != null),
+    [ambassadorReferralRows],
+  )
+  const referralDirectCount = useMemo(
+    () => (ambassadorReferralRows || []).filter((r) => r && (r.level === 1 || !r.level)).length,
+    [ambassadorReferralRows],
+  )
+  const referralIndirectCount = useMemo(
+    () => (ambassadorReferralRows || []).filter((r) => r && r.level && r.level !== 1).length,
+    [ambassadorReferralRows],
+  )
+
+  /*
+   * Parrainage forecast:
+   *
+   *   Count distinct filleuls from ambassadorReferralRows and estimate what
+   *   the user would earn if each filleul closed one more parcel at 85 000 DT.
+   *   Per-level "rule amount" is inferred from the first existing commission
+   *   event at each level (they all share the same rule on the backend today).
+   *   If no events exist yet, we can't reliably estimate → hide the widget.
+   */
+  const PARRAINAGE_SAMPLE_PARCEL_PRICE = 85000
+  const parrainageFilleulCount = useMemo(() => {
+    const set = new Set()
+    for (const row of ambassadorReferralRows || []) {
+      const bid = row?.clientId || row?.buyerClientId || row?.buyerId
+      if (bid != null) set.add(String(bid))
+    }
+    return set.size
+  }, [ambassadorReferralRows])
+  const parrainageLevelRules = useMemo(() => {
+    const byLevel = new Map()
+    for (const ev of myCommissionEvents || []) {
+      if (ev?.kind === 'payout') continue
+      const lvl = Number(ev?.level || 0)
+      if (!lvl) continue
+      const amt = Number(ev?.amount || 0)
+      if (!amt) continue
+      if (!byLevel.has(lvl)) byLevel.set(lvl, amt)
+    }
+    return byLevel
+  }, [myCommissionEvents])
+  const parrainageForecast = useMemo(() => {
+    if (!showAmbassadorCard) return null
+    if (!parrainageFilleulCount) return null
+    if (parrainageLevelRules.size === 0) return null
+    const l1PerSale = parrainageLevelRules.get(1) || 0
+    const l2PerSale = parrainageLevelRules.get(2) || 0
+    const currentLifetime = Number(referralSummary?.l1Total ?? 0) + Number(referralSummary?.l2Total ?? 0)
+    const potentialPerFilleul = l1PerSale + l2PerSale
+    const potentialTotal = parrainageFilleulCount * potentialPerFilleul
+    if (potentialTotal <= 0) return null
+    return {
+      filleulCount: parrainageFilleulCount,
+      parcelPrice: PARRAINAGE_SAMPLE_PARCEL_PRICE,
+      l1PerSale,
+      l2PerSale,
+      potentialPerFilleul,
+      potentialTotal,
+      currentLifetime,
+    }
+  }, [showAmbassadorCard, parrainageFilleulCount, parrainageLevelRules, referralSummary])
+
   const referralVerificationBlocked =
     referralSummary?.identityVerificationBlocked === true
 
@@ -195,6 +299,7 @@ export default function DashboardPage() {
       await requestAmbassadorPayout(bal, idem)
       payoutIdempotencyRef.current = null
       await refreshReferralSummary({ force: true })
+      setPayoutConfirmOpen(false)
     } catch (e) {
       setPayoutError(e?.message || 'Erreur')
     } finally {
@@ -203,6 +308,99 @@ export default function DashboardPage() {
   }, [referralSummary, refreshReferralSummary, referralVerificationBlocked])
 
   const [activeTab, setActiveTab] = useState('portfolio')
+
+  /*
+   * Real-time parrainage subscriptions.
+   *
+   *   While the Parrainage tab is mounted AND the buyer has a clientProfile,
+   *   subscribe to commission_events and commission_payout_requests filtered
+   *   to this beneficiary. Any server-side event (new commission credited,
+   *   payout status flip) triggers a refresh of both the referral summary
+   *   (wallet totals) and the commission ledger (per-event cards). The hooks
+   *   themselves keep their own global subscriptions; these scoped filters
+   *   catch mutations faster for the currently viewed client.
+   */
+  useEffect(() => {
+    if (activeTab !== 'parrainage') return undefined
+    const beneficiaryId = clientProfile?.id
+    if (!beneficiaryId) return undefined
+    const filter = `beneficiary_client_id=eq.${beneficiaryId}`
+    const reactEvent = () => {
+      try { refreshReferralSummary?.() } catch { /* noop */ }
+      try { refreshCommissionLedger?.() } catch { /* noop */ }
+    }
+    const channel = supabase
+      .channel(`parrainage-live-${beneficiaryId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'commission_events', filter }, reactEvent)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'commission_payout_requests', filter }, reactEvent)
+      .subscribe()
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [activeTab, clientProfile?.id, refreshReferralSummary, refreshCommissionLedger])
+
+  /*
+   * CSV export: flatten myCommissionEvents into a spreadsheet-friendly CSV
+   * with a stable column order. Uses only Blob + createObjectURL so no
+   * library is needed. Values that may contain separators are quoted with
+   * RFC 4180 escaping.
+   */
+  const handleExportCommissionsCsv = useCallback(() => {
+    const rows = Array.isArray(myCommissionEvents) ? myCommissionEvents : []
+    if (rows.length === 0) return
+    const escape = (value) => {
+      if (value == null) return ''
+      const str = String(value)
+      if (/[",;\r\n]/.test(str)) return `"${str.replace(/"/g, '""')}"`
+      return str
+    }
+    const statusLabels = {
+      paid: 'Payé',
+      payable: 'À virer',
+      pending: 'En attente',
+      cancelled: 'Annulé',
+      pending_review: 'En revue',
+      approved: 'Approuvé',
+      rejected: 'Refusé',
+    }
+    const header = ['Date', 'Niveau', 'Montant DT', 'Statut', 'Type', 'Vendeur', 'Acheteur', 'Projet', 'Code vente']
+    const lines = [header.join(';')]
+    for (const ev of rows) {
+      const isPayout = ev?.kind === 'payout'
+      const dateRaw = ev?.createdAt || ev?.sale?.notaryCompletedAt || ev?.paidAt || ev?.reviewedAt || ''
+      const dateFr = dateRaw
+        ? (() => { try { return new Date(dateRaw).toLocaleDateString('fr-FR') } catch { return String(dateRaw) } })()
+        : ''
+      const level = isPayout ? '' : (ev?.level ?? '')
+      const amountRaw = Number(ev?.amount || 0)
+      const amount = (isPayout ? -Math.abs(amountRaw) : amountRaw)
+        .toLocaleString('fr-FR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
+      const statusKey = ev?.status || ''
+      const status = statusLabels[statusKey] || statusKey
+      const type = isPayout ? 'payout' : 'commission'
+      const seller = isPayout ? '' : (ev?.seller?.name || '')
+      const buyer = isPayout ? '' : (ev?.buyer?.name || '')
+      const project = isPayout ? '' : (ev?.project?.title || '')
+      const saleCode = isPayout ? (ev?.code || '') : (ev?.sale?.code || '')
+      lines.push([dateFr, level, amount, status, type, seller, buyer, project, saleCode].map(escape).join(';'))
+    }
+    // Prepend UTF-8 BOM so Excel opens the file with accents preserved.
+    const csv = '\uFEFF' + lines.join('\r\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const now = new Date()
+    const pad = (n) => String(n).padStart(2, '0')
+    const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `commissions-${stamp}.csv`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    // Release the object URL after the download tick completes.
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }, [myCommissionEvents])
+
   const [focusedPlanId, setFocusedPlanId] = useState(null)
   const [ipPayTarget, setIpPayTarget] = useState(null)
   const [ipReceiptName, setIpReceiptName] = useState('')
@@ -769,105 +967,55 @@ export default function DashboardPage() {
                   <p className="inv-wallet__lead">
                     Commissions créditées au tampon légal, retirables selon les règles finance.
                   </p>
+                  {!showAmbassadorCard && (
+                    <p
+                      className="inv-wallet__lead"
+                      style={{ marginTop: 4, opacity: 0.7, fontStyle: 'italic' }}
+                    >
+                      Reliez votre profil client pour activer le parrainage
+                    </p>
+                  )}
                 </div>
-                <span className="inv-wallet__pill">
-                  {ambassadorReferralRows.length} filleul{ambassadorReferralRows.length !== 1 ? 's' : ''}
-                </span>
+                {referralLevelsExposed ? (
+                  <span className="inv-wallet__pill">
+                    {referralDirectCount} direct{referralDirectCount !== 1 ? 's' : ''} ·{' '}
+                    {referralIndirectCount} indirect{referralIndirectCount !== 1 ? 's' : ''}
+                  </span>
+                ) : (
+                  <span className="inv-wallet__pill">
+                    {ambassadorReferralRows.length} filleul{ambassadorReferralRows.length !== 1 ? 's' : ''}
+                  </span>
+                )}
               </header>
 
-              {!showAmbassadorCard ? (() => {
-                const reason = profileStatus?.reason || 'pending'
-                const supportRef = (user?.id || '').slice(0, 8)
-                const copy = (() => {
-                  if (reason === 'phone_conflict') return {
-                    tone: 'error',
-                    title: 'Numéro de téléphone déjà utilisé',
-                    body: "Ce numéro est déjà lié à un autre compte. Contactez le support pour vérification — votre profil ne peut pas être créé automatiquement.",
-                    showRetry: false,
-                  }
-                  if (reason === 'ambiguous_client_profile') return {
-                    tone: 'error',
-                    title: 'Profil client ambigu',
-                    body: "Plusieurs profils sont liés à ce compte. Un opérateur support doit consolider ces entrées.",
-                    showRetry: false,
-                  }
-                  if (reason === 'rpc_error') return {
-                    tone: 'error',
-                    title: 'Erreur technique — profil indisponible',
-                    body: profileStatus?.message || "Une erreur serveur empêche le chargement de votre profil. Réessayez ou contactez le support.",
-                    showRetry: true,
-                  }
-                  if (reason === 'admin_no_buyer_profile') return {
-                    // Hybrid-friendly copy: the staff session has no buyer row
-                    // linked yet, but it will appear automatically when a sale
-                    // or parrainage points to this account. Not a dead-end.
-                    tone: 'warn',
-                    title: 'Aucune activité acheteur encore rattachée',
-                    body: "Dès qu'une vente ou un parrainage sera lié à ce compte (par téléphone ou e-mail), votre portefeuille apparaîtra ici automatiquement.",
-                    showRetry: true,
-                  }
-                  return {
-                    tone: 'warn',
-                    title: 'Profil client en cours de rattachement',
-                    body: "Votre compte n'est pas encore relié à un dossier client. La synchronisation peut prendre quelques instants après inscription.",
-                    showRetry: true,
-                  }
-                })()
-                const migrated = profileStatus?.migrated
-                const migratedHasActivity = migrated && (
-                  (migrated.sales || 0) + (migrated.plans || 0) + (migrated.grants || 0)
-                  + (migrated.commissions || 0) + (migrated.wallets || 0) > 0
-                )
-                return (
-                  <div className={`inv-wallet__alert inv-wallet__alert--${copy.tone}`} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    <strong>{copy.title}</strong>
-                    <span style={{ fontSize: 12, opacity: 0.85 }}>{copy.body}</span>
-                    {supportRef && (
-                      <span style={{ fontSize: 11, opacity: 0.6 }}>
-                        ID compte (extrait) : <code>{supportRef}</code>
-                      </span>
-                    )}
-                    {migrated && (
-                      <details style={{ fontSize: 11, opacity: 0.7 }}>
-                        <summary style={{ cursor: 'pointer' }}>
-                          Détails techniques du rattachement
-                          {migratedHasActivity ? ' (activité détectée)' : ' (rien à rattacher)'}
-                        </summary>
-                        <div style={{ marginTop: 4, fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>
-                          {`ventes=${migrated.sales ?? 0}  plans=${migrated.plans ?? 0}  `}
-                          {`accès=${migrated.grants ?? 0}  commissions=${migrated.commissions ?? 0}  `}
-                          {`wallets=${migrated.wallets ?? 0}`}
-                          {profileStatus?.message ? `\nerreur: ${profileStatus.message}` : ''}
-                        </div>
-                      </details>
-                    )}
-                    {copy.showRetry && (
-                      <button
-                        type="button"
-                        className="inv-wallet__btn"
-                        style={{ alignSelf: 'flex-start' }}
-                        onClick={() => refreshAuth()}
-                      >
-                        🔄 Réessayer
-                      </button>
-                    )}
-                  </div>
-                )
-              })() : referralLoading ? (
+              {showAmbassadorCard && referralLoading && !referralHasError ? (
                 <p className="inv-wallet__loading">Chargement du portefeuille…</p>
+              ) : showAmbassadorCard && referralHasError ? (
+                <div className="inv-wallet__alert inv-wallet__alert--error">
+                  <p style={{ margin: 0, marginBottom: 6 }}>
+                    Impossible de charger le portefeuille. Vérifiez votre connexion puis réessayez.
+                  </p>
+                  <button
+                    type="button"
+                    className="inv-wallet__btn"
+                    onClick={() => refreshReferralSummary()}
+                  >
+                    Réessayer
+                  </button>
+                </div>
               ) : (
                   <>
                     <div className="inv-wallet__hero">
                       <span className="inv-wallet__hero-label">Disponible au retrait</span>
                       <strong className="inv-wallet__hero-amount">
-                        {(referralSummary?.walletBalance ?? 0).toLocaleString('fr-FR', {
+                        {(showAmbassadorCard ? (referralSummary?.walletBalance ?? 0) : 0).toLocaleString('fr-FR', {
                           minimumFractionDigits: 0,
                           maximumFractionDigits: 2,
                         })}{' '}
                         <span className="inv-wallet__hero-currency">DT</span>
                       </strong>
                       <span className="inv-wallet__hero-meta">
-                        Retrait min. {referralSummary?.minPayoutAmount ?? 0} DT · virement traité par la finance
+                        Retrait min. {showAmbassadorCard ? (referralSummary?.minPayoutAmount ?? 0) : 0} DT · virement traité par la finance
                       </span>
                     </div>
 
@@ -875,7 +1023,7 @@ export default function DashboardPage() {
                       <div className="inv-wallet__phase">
                         <span className="inv-wallet__phase-label">Gains en attente</span>
                         <span className="inv-wallet__phase-value">
-                          {(referralSummary?.gainsAccrued ?? 0).toLocaleString('fr-FR', {
+                          {(showAmbassadorCard ? (referralSummary?.gainsAccrued ?? 0) : 0).toLocaleString('fr-FR', {
                             minimumFractionDigits: 0,
                             maximumFractionDigits: 2,
                           })}{' '}
@@ -886,7 +1034,7 @@ export default function DashboardPage() {
                       <div className="inv-wallet__phase">
                         <span className="inv-wallet__phase-label">Crédit légal</span>
                         <span className="inv-wallet__phase-value">
-                          {(referralSummary?.commissionsReleased ?? 0).toLocaleString('fr-FR', {
+                          {(showAmbassadorCard ? (referralSummary?.commissionsReleased ?? 0) : 0).toLocaleString('fr-FR', {
                             minimumFractionDigits: 0,
                             maximumFractionDigits: 2,
                           })}{' '}
@@ -895,6 +1043,225 @@ export default function DashboardPage() {
                         <span className="inv-wallet__phase-hint">Tampon légal · pas encore payé</span>
                       </div>
                     </div>
+
+                    <div className="inv-wallet__breakdown">
+                      <div className="inv-wallet__bd-row">
+                        <span className="inv-wallet__bd-label">Commission directe (L1)</span>
+                        <span className="inv-wallet__bd-amount">{(Number(showAmbassadorCard ? referralSummary?.l1Total : 0) || 0).toLocaleString('fr-FR')} <small>DT</small></span>
+                      </div>
+                      <div className="inv-wallet__bd-row">
+                        <span className="inv-wallet__bd-label">Commission indirecte (L2+)</span>
+                        <span className="inv-wallet__bd-amount">{(Number(showAmbassadorCard ? referralSummary?.l2Total : 0) || 0).toLocaleString('fr-FR')} <small>DT</small></span>
+                      </div>
+                    </div>
+
+                    {parrainageForecast && (
+                      <section className="inv-forecast" aria-label="Potentiel de parrainage">
+                        <div className="inv-forecast__head">
+                          <span className="inv-forecast__kicker">Projection</span>
+                          <strong className="inv-forecast__title">Votre potentiel avec vos filleuls actuels</strong>
+                        </div>
+                        <p className="inv-forecast__lead">
+                          Si chacun de vos <strong>{parrainageForecast.filleulCount}</strong>{' '}
+                          filleul{parrainageForecast.filleulCount !== 1 ? 's' : ''} vend une parcelle à{' '}
+                          <strong>{parrainageForecast.parcelPrice.toLocaleString('fr-FR')} DT</strong>,
+                          vous pourriez percevoir{' '}
+                          <strong className="inv-forecast__total">
+                            {parrainageForecast.potentialTotal.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} DT
+                          </strong>{' '}
+                          en commissions (directes + indirectes).
+                        </p>
+                        <div className="inv-forecast__grid">
+                          <div className="inv-forecast__cell">
+                            <span className="inv-forecast__lbl">Direct (L1) / vente</span>
+                            <span className="inv-forecast__val">{parrainageForecast.l1PerSale.toLocaleString('fr-FR')} DT</span>
+                          </div>
+                          <div className="inv-forecast__cell">
+                            <span className="inv-forecast__lbl">Indirect (L2+) / vente</span>
+                            <span className="inv-forecast__val">{parrainageForecast.l2PerSale.toLocaleString('fr-FR')} DT</span>
+                          </div>
+                          <div className="inv-forecast__cell">
+                            <span className="inv-forecast__lbl">Par filleul</span>
+                            <span className="inv-forecast__val">{parrainageForecast.potentialPerFilleul.toLocaleString('fr-FR')} DT</span>
+                          </div>
+                          <div className="inv-forecast__cell">
+                            <span className="inv-forecast__lbl">Gagné à ce jour</span>
+                            <span className="inv-forecast__val">{parrainageForecast.currentLifetime.toLocaleString('fr-FR')} DT</span>
+                          </div>
+                        </div>
+                        <svg
+                          className="inv-forecast__bars"
+                          viewBox="0 0 220 60"
+                          preserveAspectRatio="none"
+                          aria-hidden="true"
+                        >
+                          {(() => {
+                            const max = Math.max(
+                              parrainageForecast.currentLifetime,
+                              parrainageForecast.potentialTotal,
+                              1,
+                            )
+                            const currentW = Math.max(2, (parrainageForecast.currentLifetime / max) * 210)
+                            const potentialW = Math.max(2, (parrainageForecast.potentialTotal / max) * 210)
+                            return (
+                              <>
+                                <rect x="5" y="8" width={currentW} height="16" rx="4" fill="#a8cc50" opacity="0.85" />
+                                <rect x="5" y="36" width={potentialW} height="16" rx="4" fill="#7ab020" />
+                              </>
+                            )
+                          })()}
+                        </svg>
+                        <div className="inv-forecast__legend">
+                          <span><span className="inv-forecast__dot" style={{ background: '#a8cc50' }} /> Actuel</span>
+                          <span><span className="inv-forecast__dot" style={{ background: '#7ab020' }} /> Potentiel</span>
+                        </div>
+                      </section>
+                    )}
+
+                    {showAmbassadorCard && (
+                      <div className="inv-ledger">
+                        <div className="inv-ledger__head">
+                          <h4 className="inv-ledger__title">D'où viennent vos commissions</h4>
+                          <div className="inv-ledger__head-right">
+                            <span className="inv-ledger__count">{myCommissionEvents.length} commission{myCommissionEvents.length !== 1 ? 's' : ''}</span>
+                            {myCommissionEvents.length > 0 && (
+                              <button
+                                type="button"
+                                className="inv-wallet__export"
+                                onClick={handleExportCommissionsCsv}
+                                aria-label="Exporter les commissions au format CSV"
+                              >
+                                Exporter (CSV)
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                        <div className="inv-ledger__explainer">
+                          <div className="inv-ledger__explainer-row"><span className="inv-ledger__explainer-dot" style={{ background: '#2563eb' }} />
+                            <strong>Commission directe</strong> — vous avez vendu vous-même.
+                          </div>
+                          <div className="inv-ledger__explainer-row"><span className="inv-ledger__explainer-dot" style={{ background: '#f59e0b' }} />
+                            <strong>Commission indirecte</strong> — quelqu'un que vous avez parrainé (ou dans votre ligne) a vendu.
+                          </div>
+                        </div>
+                        {ledgerLoading && myCommissionEvents.length === 0 ? (
+                          <div className="inv-ledger__empty">Chargement…</div>
+                        ) : myCommissionEvents.length === 0 ? (
+                          <div className="inv-ledger__empty">
+                            Aucune commission pour l'instant. Vos gains apparaîtront ici dès qu'une de vos ventes (ou une vente de votre ligne) passe chez le notaire.
+                          </div>
+                        ) : (() => {
+                          const commissionOnly = myCommissionEvents.filter((e) => e.kind !== 'payout')
+                          const payoutsOnly = myCommissionEvents.filter((e) => e.kind === 'payout')
+                          const directEvents = commissionOnly.filter((e) => (e.level || 0) === 1)
+                          const indirectEvents = commissionOnly.filter((e) => (e.level || 0) >= 2)
+                          const statusMap = {
+                            paid: { label: 'Payé', tone: 'good' },
+                            payable: { label: 'À virer', tone: 'info' },
+                            pending: { label: 'En attente', tone: 'warn' },
+                            cancelled: { label: 'Annulé', tone: 'bad' },
+                            pending_review: { label: 'En revue', tone: 'warn' },
+                            approved: { label: 'Approuvé', tone: 'info' },
+                            rejected: { label: 'Refusé', tone: 'bad' },
+                          }
+                          const renderPayoutCard = (pr) => {
+                            const st = statusMap[pr.status] || { label: pr.status || '—', tone: 'warn' }
+                            return (
+                              <li key={pr.id} className="inv-ledger__row">
+                                <div className="inv-ledger__lvl" style={{ background: '#0f766e' }}>💸</div>
+                                <div className="inv-ledger__body">
+                                  <div className="inv-ledger__top">
+                                    <span className="inv-ledger__amount inv-ledger__amount--neg">−{(Number(pr.amount) || 0).toLocaleString('fr-FR')} <small>DT</small></span>
+                                    <span className={`inv-ledger__status inv-ledger__status--${st.tone}`}>{st.label}</span>
+                                  </div>
+                                  <div className="inv-ledger__grid">
+                                    <span className="inv-ledger__lbl">Type</span>
+                                    <span className="inv-ledger__val">Demande de retrait</span>
+                                    {pr.code && (<>
+                                      <span className="inv-ledger__lbl">Code</span>
+                                      <span className="inv-ledger__val"><code style={{ fontSize: 11 }}>{pr.code}</code></span>
+                                    </>)}
+                                    {pr.createdAt && (<>
+                                      <span className="inv-ledger__lbl">Demandé</span>
+                                      <span className="inv-ledger__val">{fmtDate(pr.createdAt)}</span>
+                                    </>)}
+                                    {pr.reviewedAt && (<>
+                                      <span className="inv-ledger__lbl">Revue</span>
+                                      <span className="inv-ledger__val">{fmtDate(pr.reviewedAt)}</span>
+                                    </>)}
+                                    {pr.paidAt && (<>
+                                      <span className="inv-ledger__lbl">Versé</span>
+                                      <span className="inv-ledger__val">{fmtDate(pr.paidAt)}</span>
+                                    </>)}
+                                  </div>
+                                </div>
+                              </li>
+                            )
+                          }
+                          const renderCard = (ev) => {
+                            const lvl = ev.level || 0
+                            const levelBg = lvl === 1 ? '#2563eb' : lvl === 2 ? '#f59e0b' : lvl === 3 ? '#10b981' : lvl >= 4 ? '#8b5cf6' : '#64748b'
+                            const st = statusMap[ev.status] || { label: ev.status || '—', tone: 'warn' }
+                            const sellerName = ev.seller?.name || '—'
+                            const buyerName = ev.buyer?.name || '—'
+                            const project = ev.project?.title || '—'
+                            // Honest display: show the raw facts (actual seller, actual
+                            // buyer, level) without inferring a story. User can spot
+                            // anomalies themselves (e.g. L1 credited but they weren't
+                            // the seller → data bug).
+                            return (
+                              <li key={ev.id} className="inv-ledger__row">
+                                <div className="inv-ledger__lvl" style={{ background: levelBg }}>L{lvl}</div>
+                                <div className="inv-ledger__body">
+                                  <div className="inv-ledger__top">
+                                    <span className="inv-ledger__amount">+{(Number(ev.amount) || 0).toLocaleString('fr-FR')} <small>DT</small></span>
+                                    <span className={`inv-ledger__status inv-ledger__status--${st.tone}`}>{st.label}</span>
+                                  </div>
+                                  <div className="inv-ledger__grid">
+                                    <span className="inv-ledger__lbl">Vendeur</span>
+                                    <span className="inv-ledger__val">{sellerName}</span>
+                                    <span className="inv-ledger__lbl">Acheteur</span>
+                                    <span className="inv-ledger__val">{buyerName}</span>
+                                    <span className="inv-ledger__lbl">Projet</span>
+                                    <span className="inv-ledger__val">{project}</span>
+                                    {ev.sale?.code && (<>
+                                      <span className="inv-ledger__lbl">Code vente</span>
+                                      <span className="inv-ledger__val"><code style={{ fontSize: 11 }}>{ev.sale.code}</code></span>
+                                    </>)}
+                                    {ev.sale?.notaryCompletedAt && (<>
+                                      <span className="inv-ledger__lbl">Finalisé</span>
+                                      <span className="inv-ledger__val">{fmtDate(ev.sale.notaryCompletedAt)}</span>
+                                    </>)}
+                                  </div>
+                                </div>
+                              </li>
+                            )
+                          }
+                          return (
+                            <>
+                              {directEvents.length > 0 && (
+                                <div className="inv-ledger__section">
+                                  <div className="inv-ledger__section-title">Vos ventes directes</div>
+                                  <ul className="inv-ledger__list">{directEvents.map(renderCard)}</ul>
+                                </div>
+                              )}
+                              {indirectEvents.length > 0 && (
+                                <div className="inv-ledger__section">
+                                  <div className="inv-ledger__section-title">Ventes de votre ligne (parrainage)</div>
+                                  <ul className="inv-ledger__list">{indirectEvents.map(renderCard)}</ul>
+                                </div>
+                              )}
+                              {payoutsOnly.length > 0 && (
+                                <div className="inv-ledger__section">
+                                  <div className="inv-ledger__section-title">Demandes de retrait</div>
+                                  <ul className="inv-ledger__list">{payoutsOnly.map(renderPayoutCard)}</ul>
+                                </div>
+                              )}
+                            </>
+                          )
+                        })()}
+                      </div>
+                    )}
                   </>
                 )}
 
@@ -986,7 +1353,7 @@ export default function DashboardPage() {
                         || (referralSummary?.walletBalance ?? 0) < (referralSummary?.minPayoutAmount ?? 0)
                         || (referralSummary?.walletBalance ?? 0) <= 0
                       }
-                      onClick={handleAmbassadorPayout}
+                      onClick={() => { setPayoutError(''); setPayoutConfirmOpen(true) }}
                     >
                       {payoutBusy ? 'Traitement…' : 'Retirer les gains'}
                     </button>
@@ -994,6 +1361,58 @@ export default function DashboardPage() {
                       Le virement bancaire reste soumis à validation interne.
                     </p>
                   </div>
+
+                  {payoutConfirmOpen && (() => {
+                    const bal = Number(referralSummary?.walletBalance ?? 0)
+                    const min = Number(referralSummary?.minPayoutAmount ?? 0)
+                    return (
+                      <div className="inv-payout__overlay" role="dialog" aria-modal="true" onClick={() => !payoutBusy && setPayoutConfirmOpen(false)}>
+                        <div className="inv-payout__modal" onClick={(e) => e.stopPropagation()}>
+                          <header className="inv-payout__head">
+                            <div style={{ fontSize: 28 }}>💸</div>
+                            <div>
+                              <h3 className="inv-payout__title">Confirmer le retrait</h3>
+                              <p className="inv-payout__sub">Votre demande sera transmise à la finance.</p>
+                            </div>
+                          </header>
+
+                          <div className="inv-payout__amount">
+                            <span className="inv-payout__amount-lbl">Montant demandé</span>
+                            <span className="inv-payout__amount-val">{bal.toLocaleString('fr-FR')} <small>DT</small></span>
+                          </div>
+
+                          <ul className="inv-payout__notes">
+                            <li>
+                              <strong>Seuil minimum&nbsp;:</strong> {min.toLocaleString('fr-FR')} DT. Vous êtes au-dessus, la demande peut partir.
+                            </li>
+                            <li>
+                              <strong>Validation interne&nbsp;:</strong> l'équipe finance vérifie puis déclenche le virement bancaire. Délai habituel&nbsp;: 3 à 7 jours ouvrés.
+                            </li>
+                            <li>
+                              <strong>Commissions bloquées&nbsp;:</strong> pendant le traitement, les gains inclus dans la demande sont verrouillés et n'apparaissent plus comme "disponibles".
+                            </li>
+                            <li>
+                              <strong>Traçabilité&nbsp;:</strong> une ligne "Demande de retrait" apparaît dans votre historique ci-dessous, avec le statut mis à jour à chaque étape (En revue → Approuvé → Payé).
+                            </li>
+                            <li>
+                              <strong>En cas de refus&nbsp;:</strong> les gains retournent automatiquement dans votre portefeuille, vous pouvez redemander plus tard.
+                            </li>
+                          </ul>
+
+                          {payoutError && <div className="inv-payout__err">Erreur&nbsp;: {payoutError}</div>}
+
+                          <div className="inv-payout__actions">
+                            <button type="button" className="inv-payout__btn inv-payout__btn--secondary" onClick={() => setPayoutConfirmOpen(false)} disabled={payoutBusy}>
+                              Annuler
+                            </button>
+                            <button type="button" className="inv-payout__btn inv-payout__btn--primary" onClick={handleAmbassadorPayout} disabled={payoutBusy}>
+                              {payoutBusy ? 'Envoi…' : `Confirmer le retrait de ${bal.toLocaleString('fr-FR')} DT`}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })()}
                 </>
               )}
 
