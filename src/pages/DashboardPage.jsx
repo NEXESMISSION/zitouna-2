@@ -108,7 +108,7 @@ export default function DashboardPage() {
     })()
   }, [user?.id, clientProfile?.id, refreshAuth])
 
-  const { sales: mySalesRaw } = useSalesScoped({ clientId })
+  const { sales: mySalesRaw, loading: salesLoading } = useSalesScoped({ clientId })
   const { plans: myPlans, refresh: refreshPlans } = useInstallmentsScoped({ clientId })
   const { sales: ambassadorSales } = useSalesBySellerClientId(clientId || '')
   const showAmbassadorCard = Boolean(clientId)
@@ -163,7 +163,10 @@ export default function DashboardPage() {
     () => [...new Set((mySalesAll || []).map((s) => s.projectId).filter(Boolean))],
     [mySalesAll]
   )
-  const { projects: allProjects } = useProjectsScoped(scopedProjectIds)
+  const { projects: allProjects, loading: projectsLoading } = useProjectsScoped(scopedProjectIds)
+  // Combined "is the portfolio still loading its primary data?" flag — drives
+  // the skeleton shimmer so the user never stares at an empty page.
+  const portfolioLoading = Boolean(clientId) && (salesLoading || projectsLoading) && mySalesAll.length === 0
 
   const { myPurchases } = useMemo(() => {
     const flat = []
@@ -643,41 +646,59 @@ export default function DashboardPage() {
             <div className="inv-kpi-strip" aria-live="polite">
               <div className="inv-kpi">
                 <span className="inv-kpi__value inv-kpi__value--green">
-                  {Math.round(animTrees).toLocaleString('fr-FR')}
+                  {salesLoading ? <span className="inv-sk inv-sk--num" /> : Math.round(animTrees).toLocaleString('fr-FR')}
                 </span>
                 <span className="inv-kpi__label">Oliviers</span>
               </div>
               <div className="inv-kpi-sep" />
               <div className="inv-kpi">
                 <span className="inv-kpi__value">
-                  {Math.round(animInvested).toLocaleString('fr-FR')}
+                  {salesLoading ? <span className="inv-sk inv-sk--num" /> : Math.round(animInvested).toLocaleString('fr-FR')}
                 </span>
                 <span className="inv-kpi__label">TND investis</span>
               </div>
               <div className="inv-kpi-sep" />
               <div className="inv-kpi">
                 <span className="inv-kpi__value inv-kpi__value--green">
-                  {Math.round(animRevenue).toLocaleString('fr-FR')}
+                  {salesLoading ? <span className="inv-sk inv-sk--num" /> : Math.round(animRevenue).toLocaleString('fr-FR')}
                 </span>
                 <span className="inv-kpi__label">TND / an</span>
               </div>
               <div className="inv-kpi-sep" />
               <div className="inv-kpi">
-                <span className="inv-kpi__value inv-kpi__value--blue">{animRoi.toFixed(1)}%</span>
+                <span className="inv-kpi__value inv-kpi__value--blue">
+                  {salesLoading ? <span className="inv-sk inv-sk--num" /> : `${animRoi.toFixed(1)}%`}
+                </span>
                 <span className="inv-kpi__label">ROI</span>
               </div>
             </div>
 
             <h3 className="inv-section-title">Mes parcelles</h3>
 
-            {myPurchases.length === 0 && mySalesInProgress.length > 0 && (
+            {salesLoading && myPurchases.length === 0 && mySalesInProgress.length === 0 && (
+              <div className="inv-parcels" aria-busy="true" aria-live="polite">
+                {[0, 1, 2].map((i) => (
+                  <div key={i} className="inv-parcel-card inv-parcel-card--sk">
+                    <div className="inv-sk inv-sk--map" />
+                    <div className="inv-parcel-card__body">
+                      <div className="inv-sk inv-sk--title" />
+                      <div className="inv-sk inv-sk--line" />
+                      <div className="inv-sk inv-sk--line" style={{ width: '60%' }} />
+                      <div className="inv-sk inv-sk--line" style={{ width: '45%' }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {!salesLoading && myPurchases.length === 0 && mySalesInProgress.length > 0 && (
               <div className="inv-progress-notice">
                 Vous avez {mySalesInProgress.length} achat{mySalesInProgress.length !== 1 ? 's' : ''} en cours de finalisation.
                 Les parcelles s&apos;affichent ici uniquement après <strong>finalisation notaire</strong>.
               </div>
             )}
 
-            {myPurchases.length === 0 && mySalesInProgress.length === 0 && (
+            {!salesLoading && myPurchases.length === 0 && mySalesInProgress.length === 0 && (
               <div className="inv-empty">
                 <strong>Aucune parcelle</strong>
                 <p>Vous ne possédez pas encore de parcelles.</p>
@@ -783,26 +804,26 @@ export default function DashboardPage() {
                     const sale = (mySalesRaw || []).find((s) => String(s.id) === String(focusedPlan.saleId)) || {}
                     const m = computeInstallmentSaleMetrics(sale, focusedPlan)
                     return (
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8, marginTop: 12 }}>
-                        <div style={{ padding: '10px 12px', borderRadius: 12, background: '#ecfdf5', border: '1px solid #a7f3d0' }}>
-                          <div style={{ fontSize: 9, fontWeight: 800, color: '#065f46', textTransform: 'uppercase', letterSpacing: '.03em' }}>Validé</div>
-                          <div style={{ fontSize: 15, fontWeight: 800, color: '#065f46' }}>{formatMoneyTnd(m.cashValidatedStrict)}</div>
-                          <div style={{ fontSize: 10, color: '#047857' }}>Araboun + mensualités confirmées</div>
+                      <div className="ip-metrics ip-metrics--embedded">
+                        <div className="ip-metric ip-metric--ok">
+                          <div className="ip-metric__label">Validé</div>
+                          <div className="ip-metric__value">{formatMoneyTnd(m.cashValidatedStrict)}</div>
+                          <div className="ip-metric__hint">Araboun + mensualités confirmées</div>
                         </div>
-                        <div style={{ padding: '10px 12px', borderRadius: 12, background: '#eff6ff', border: '1px solid #bfdbfe' }}>
-                          <div style={{ fontSize: 9, fontWeight: 800, color: '#1e40af', textTransform: 'uppercase', letterSpacing: '.03em' }}>En révision</div>
-                          <div style={{ fontSize: 15, fontWeight: 800, color: '#1e40af' }}>{formatMoneyTnd(m.submittedAmount)}</div>
-                          <div style={{ fontSize: 10, color: '#1d4ed8' }}>Reçus envoyés, en attente</div>
+                        <div className="ip-metric ip-metric--review">
+                          <div className="ip-metric__label">En révision</div>
+                          <div className="ip-metric__value">{formatMoneyTnd(m.submittedAmount)}</div>
+                          <div className="ip-metric__hint">Reçus envoyés, en attente</div>
                         </div>
-                        <div style={{ padding: '10px 12px', borderRadius: 12, background: '#fef2f2', border: '1px solid #fecaca' }}>
-                          <div style={{ fontSize: 9, fontWeight: 800, color: '#991b1b', textTransform: 'uppercase', letterSpacing: '.03em' }}>À corriger</div>
-                          <div style={{ fontSize: 15, fontWeight: 800, color: '#991b1b' }}>{formatMoneyTnd(m.rejectedAmount)}</div>
-                          <div style={{ fontSize: 10, color: '#b91c1c' }}>Reçus refusés à renvoyer</div>
+                        <div className="ip-metric ip-metric--bad">
+                          <div className="ip-metric__label">À corriger</div>
+                          <div className="ip-metric__value">{formatMoneyTnd(m.rejectedAmount)}</div>
+                          <div className="ip-metric__hint">Reçus refusés à renvoyer</div>
                         </div>
-                        <div style={{ padding: '10px 12px', borderRadius: 12, background: '#fff', border: '1px solid #e2e8f0' }}>
-                          <div style={{ fontSize: 9, fontWeight: 800, color: '#475569', textTransform: 'uppercase', letterSpacing: '.03em' }}>Reste à valider</div>
-                          <div style={{ fontSize: 15, fontWeight: 800, color: '#0f172a' }}>{formatMoneyTnd(m.remainingStrict)}</div>
-                          <div style={{ fontSize: 10, color: '#64748b' }}>Sur un total de {formatMoneyTnd(m.saleAgreed)}</div>
+                        <div className="ip-metric ip-metric--neutral">
+                          <div className="ip-metric__label">Reste à valider</div>
+                          <div className="ip-metric__value">{formatMoneyTnd(m.remainingStrict)}</div>
+                          <div className="ip-metric__hint">Sur un total de {formatMoneyTnd(m.saleAgreed)}</div>
                         </div>
                       </div>
                     )
@@ -1200,7 +1221,7 @@ export default function DashboardPage() {
                           }
                           const renderCard = (ev) => {
                             const lvl = ev.level || 0
-                            const levelBg = lvl === 1 ? '#2563eb' : lvl === 2 ? '#f59e0b' : lvl === 3 ? '#10b981' : lvl >= 4 ? '#8b5cf6' : '#64748b'
+                            const lvlMod = lvl === 1 ? 'l1' : lvl === 2 ? 'l2' : lvl === 3 ? 'l3' : lvl >= 4 ? 'l4' : null
                             const st = statusMap[ev.status] || { label: ev.status || '—', tone: 'warn' }
                             const sellerName = ev.seller?.name || '—'
                             const buyerName = ev.buyer?.name || '—'
@@ -1211,7 +1232,7 @@ export default function DashboardPage() {
                             // the seller → data bug).
                             return (
                               <li key={ev.id} className="inv-ledger__row">
-                                <div className="inv-ledger__lvl" style={{ background: levelBg }}>L{lvl}</div>
+                                <div className={`inv-ledger__lvl${lvlMod ? ` inv-ledger__lvl--${lvlMod}` : ''}`}>L{lvl}</div>
                                 <div className="inv-ledger__body">
                                   <div className="inv-ledger__top">
                                     <span className="inv-ledger__amount">+{(Number(ev.amount) || 0).toLocaleString('fr-FR')} <small>DT</small></span>

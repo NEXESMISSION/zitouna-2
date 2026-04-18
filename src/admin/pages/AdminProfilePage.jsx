@@ -19,10 +19,9 @@ const COMMERCIAL_GROUP = ACQUISITION_GROUP
 const GOVERNANCE_GROUP = ['/admin/users']
 const ASSETS_GROUP = ['/admin/projects', '/admin/clients']
 const REMUNERATION_GROUP = [
-  '/admin/referral-settings',
+  '/admin/commissions',
   '/admin/commission-ledger',
   '/admin/audit-log',
-  '/admin/access-grants',
   '/admin/ui-elements',
 ]
 
@@ -38,10 +37,9 @@ const ICON_BY_PATH = {
   '/admin/recouvrement': '💳',
   '/admin/call-center': '📞',
   '/admin/commercial-calendar': '🗓️',
-  '/admin/referral-settings': '🏷️',
-  '/admin/commission-ledger': '💰',
+  '/admin/commissions': '💰',
+  '/admin/commission-ledger': '📒',
   '/admin/audit-log': '📜',
-  '/admin/access-grants': '🔑',
   '/admin/users': '🛡️',
   '/admin/ui-elements': '🎨',
 }
@@ -59,10 +57,9 @@ const HINT_BY_PATH = {
   '/admin/recouvrement': 'Relancer les paiements en retard.',
   '/admin/call-center': 'Gérer les appels entrants et sortants.',
   '/admin/commercial-calendar': 'Planifier les rendez-vous commerciaux.',
-  '/admin/referral-settings': 'Configurer les règles de parrainage.',
+  '/admin/commissions': 'Suivre et analyser les commissions.',
   '/admin/commission-ledger': 'Consulter le registre des commissions.',
   '/admin/audit-log': "Visualiser l'historique des actions.",
-  '/admin/access-grants': 'Gérer les accès temporaires.',
   '/admin/users': 'Créer et gérer les comptes internes.',
   '/admin/ui-elements': "Personnaliser l'apparence de l'interface.",
 }

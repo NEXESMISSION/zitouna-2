@@ -8,91 +8,65 @@ import SaleSnapshotTracePanel from '../components/SaleSnapshotTracePanel.jsx'
 import AdminModal from '../components/AdminModal.jsx'
 import './coordination-page.css'
 import './zitouna-admin-page.css'
+import './sell-field.css'
 
 const SLOT_OPTIONS = ['09:00', '10:30', '12:00', '14:00', '15:30', '17:00']
+const PER_PAGE = 10
 
+// ----------------------------------------------------------------------------
+// Small helpers
+// ----------------------------------------------------------------------------
 function todayIso() {
-  // Local-date ISO (YYYY-MM-DD) — NOT toISOString(), which converts to UTC
-  // and can return yesterday around midnight for users east of UTC.
   const d = new Date()
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
-
+function toIsoDate(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
 function fmtDate(iso) {
   if (!iso) return '—'
   try {
     return new Date(iso).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })
-  } catch {
-    return String(iso)
-  }
+  } catch { return String(iso) }
 }
-
-function fmtMoney(v) {
-  return `${(Number(v) || 0).toLocaleString('fr-FR')} TND`
-}
-
+function fmtMoney(v) { return `${(Number(v) || 0).toLocaleString('fr-FR')} TND` }
 function initials(name) {
   const parts = String(name || '').trim().split(/\s+/).filter(Boolean)
   if (parts.length === 0) return 'CL'
   return `${parts[0][0] || ''}${parts[1]?.[0] || ''}`.toUpperCase()
 }
-
 function normalizePlotIds(sale) {
-  const ids = Array.isArray(sale?.plotIds)
-    ? sale.plotIds
-    : sale?.plotId != null
-      ? [sale.plotId]
-      : []
+  const ids = Array.isArray(sale?.plotIds) ? sale.plotIds : sale?.plotId != null ? [sale.plotId] : []
   return ids.map((x) => Number(x)).filter((n) => Number.isFinite(n))
 }
-
-/** Parcel PKs for `parcels.id` / `updateParcelStatus` (not parcel_number). */
 function parcelDbIdsFromSale(sale) {
-  const raw =
-    Array.isArray(sale?.parcelIds) && sale.parcelIds.length > 0
-      ? sale.parcelIds
-      : sale?.parcelId != null && sale.parcelId !== ''
-        ? [sale.parcelId]
-        : []
+  const raw = Array.isArray(sale?.parcelIds) && sale.parcelIds.length > 0
+    ? sale.parcelIds
+    : sale?.parcelId != null && sale.parcelId !== '' ? [sale.parcelId] : []
   return [...new Set(raw.map((x) => Number(x)).filter((n) => Number.isFinite(n)))]
 }
-
-function typeLabel(type) {
-  return type === 'finance' ? 'Finance' : 'Juridique'
-}
-
-function dateTimeKey(a) {
-  return `${a.date || ''} ${a.time || ''}`
-}
-
-/** Parse stored timestamptz into calendar date + HH:MM (local). */
+function typeLabel(t) { return t === 'finance' ? 'Finance' : 'Juridique' }
 function coordAtToDateTime(iso) {
   if (!iso) return null
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return null
-  const date = toIsoDate(d)
-  const time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-  return { date, time }
+  return { date: toIsoDate(d), time: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` }
 }
-
-function toIsoDate(d) {
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
+function startOfMonth(d) { return new Date(d.getFullYear(), d.getMonth(), 1) }
+function addMonths(d, n) { return new Date(d.getFullYear(), d.getMonth() + n, 1) }
+function monthGrid(anchor) {
+  const first = startOfMonth(anchor)
+  const startWeekday = (first.getDay() + 6) % 7
+  const daysInMonth = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate()
+  const cells = []
+  let day = 1 - startWeekday
+  for (let i = 0; i < 42; i += 1) {
+    const cur = new Date(first.getFullYear(), first.getMonth(), day)
+    cells.push({ date: cur, inMonth: day >= 1 && day <= daysInMonth })
+    day += 1
+  }
+  return cells
 }
-
-function startOfMonth(d) {
-  return new Date(d.getFullYear(), d.getMonth(), 1)
-}
-
-function addMonths(d, n) {
-  return new Date(d.getFullYear(), d.getMonth() + n, 1)
-}
-
 function getPagerPages(current, total) {
   if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1)
   const out = [1]
@@ -105,20 +79,9 @@ function getPagerPages(current, total) {
   return out
 }
 
-function monthGrid(anchorDate) {
-  const first = startOfMonth(anchorDate)
-  const startWeekday = (first.getDay() + 6) % 7
-  const daysInMonth = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate()
-  const cells = []
-  let day = 1 - startWeekday
-  for (let i = 0; i < 42; i += 1) {
-    const cur = new Date(first.getFullYear(), first.getMonth(), day)
-    cells.push({ date: cur, inMonth: day >= 1 && day <= daysInMonth })
-    day += 1
-  }
-  return cells
-}
-
+// ----------------------------------------------------------------------------
+// Page
+// ----------------------------------------------------------------------------
 export default function CoordinationPage() {
   const navigate = useNavigate()
   const { adminUser, user } = useAuth()
@@ -126,7 +89,7 @@ export default function CoordinationPage() {
   const { clients } = useClients()
   const { adminUsers } = useAdminUsers()
   const { updateParcelStatus } = useProjects()
-  // Write-only audit: call db directly. Avoids useWorkspaceAudit() eagerly fetching 8000 log rows we never display here.
+
   const appendAuditLog = useCallback(async (entry) => {
     try {
       await db.appendAuditEntry({
@@ -149,64 +112,43 @@ export default function CoordinationPage() {
   const [query, setQuery] = useState('')
   const [view, setView] = useState('sales')
   const [page, setPage] = useState(1)
-  const COORD_PER_PAGE = 10
   const [monthAnchor, setMonthAnchor] = useState(() => startOfMonth(new Date()))
   const [selectedDate, setSelectedDate] = useState(() => toIsoDate(new Date()))
   const [scheduler, setScheduler] = useState({
-    open: false,
-    sale: null,
-    type: 'finance',
-    date: todayIso(),
-    time: SLOT_OPTIONS[0],
-    notes: '',
+    open: false, sale: null, type: 'finance',
+    date: todayIso(), time: SLOT_OPTIONS[0], notes: '',
   })
-  const [selectedAppointment, setSelectedAppointment] = useState(null)
   const [schedulingSaving, setSchedulingSaving] = useState(false)
+  const [selectedAppointment, setSelectedAppointment] = useState(null)
   const [detailSale, setDetailSale] = useState(null)
+  const [expiryOpen, setExpiryOpen] = useState(false)
 
+  // ---- derived lists -------------------------------------------------------
   const appointments = useMemo(() => {
     const agentName = adminUser?.name || user?.name || 'Equipe coordination'
     const rows = []
     for (const sale of sales || []) {
       if (['cancelled', 'rejected', 'completed'].includes(String(sale.status || ''))) continue
       const fin = coordAtToDateTime(sale.coordinationFinanceAt)
-      if (fin) {
-        rows.push({
-          id: `APT-${sale.id}-finance`,
-          saleId: sale.id,
-          type: 'finance',
-          date: fin.date,
-          time: fin.time,
-          notes: '',
-          clientName: sale.clientName || 'Client',
-          projectTitle: sale.projectTitle || 'Projet',
-          plotLabel: normalizePlotIds(sale).map((id) => `#${id}`).join(', ') || '—',
-          amount: sale.agreedPrice || 0,
-          agentName,
-          status: 'planned',
-          coordinationNotes: sale.coordinationNotes || '',
-        })
-      }
+      if (fin) rows.push({
+        id: `APT-${sale.id}-finance`, saleId: sale.id, type: 'finance',
+        date: fin.date, time: fin.time, notes: '',
+        clientName: sale.clientName || 'Client', projectTitle: sale.projectTitle || 'Projet',
+        plotLabel: normalizePlotIds(sale).map((id) => `#${id}`).join(', ') || '—',
+        amount: sale.agreedPrice || 0, agentName, status: 'planned',
+        coordinationNotes: sale.coordinationNotes || '',
+      })
       const jur = coordAtToDateTime(sale.coordinationJuridiqueAt)
-      if (jur) {
-        rows.push({
-          id: `APT-${sale.id}-juridique`,
-          saleId: sale.id,
-          type: 'juridique',
-          date: jur.date,
-          time: jur.time,
-          notes: '',
-          clientName: sale.clientName || 'Client',
-          projectTitle: sale.projectTitle || 'Projet',
-          plotLabel: normalizePlotIds(sale).map((id) => `#${id}`).join(', ') || '—',
-          amount: sale.agreedPrice || 0,
-          agentName,
-          status: 'planned',
-          coordinationNotes: sale.coordinationNotes || '',
-        })
-      }
+      if (jur) rows.push({
+        id: `APT-${sale.id}-juridique`, saleId: sale.id, type: 'juridique',
+        date: jur.date, time: jur.time, notes: '',
+        clientName: sale.clientName || 'Client', projectTitle: sale.projectTitle || 'Projet',
+        plotLabel: normalizePlotIds(sale).map((id) => `#${id}`).join(', ') || '—',
+        amount: sale.agreedPrice || 0, agentName, status: 'planned',
+        coordinationNotes: sale.coordinationNotes || '',
+      })
     }
-    return rows.sort((a, b) => dateTimeKey(a).localeCompare(dateTimeKey(b)))
+    return rows.sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`))
   }, [sales, adminUser?.name, user?.name])
 
   const salesForCoordination = useMemo(() => {
@@ -219,119 +161,17 @@ export default function CoordinationPage() {
       })
       .filter((s) => {
         if (!q) return true
-        const client = String(s.clientName || '').toLowerCase()
-        const project = String(s.projectTitle || '').toLowerCase()
-        const code = String(s.code || s.id || '').toLowerCase()
-        const plots = normalizePlotIds(s).join(',').toLowerCase()
-        return client.includes(q) || project.includes(q) || code.includes(q) || plots.includes(q)
+        const hay = `${s.clientName || ''} ${s.projectTitle || ''} ${s.code || s.id || ''} ${normalizePlotIds(s).join(',')}`.toLowerCase()
+        return hay.includes(q)
       })
       .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
   }, [sales, query])
 
-  const coordPageCount = Math.max(1, Math.ceil(salesForCoordination.length / COORD_PER_PAGE))
-  useEffect(() => {
-    if (page > coordPageCount) setPage(1)
-  }, [page, coordPageCount])
-  useEffect(() => { setPage(1) }, [query])
-  const pagedSales = useMemo(
-    () => salesForCoordination.slice((page - 1) * COORD_PER_PAGE, page * COORD_PER_PAGE),
-    [salesForCoordination, page],
-  )
-
   const planningBySale = useMemo(() => {
     const map = new Map()
-    for (const apt of appointments) {
-      const key = `${apt.saleId}:${apt.type}`
-      map.set(key, apt)
-    }
+    for (const a of appointments) map.set(`${a.saleId}:${a.type}`, a)
     return map
   }, [appointments])
-
-  const selectedAppointmentSale = useMemo(() => {
-    if (!selectedAppointment) return null
-    return (sales || []).find((s) => String(s.id) === String(selectedAppointment.saleId)) || null
-  }, [selectedAppointment, sales])
-
-  const openScheduler = (sale, type) => {
-    const existing = planningBySale.get(`${sale.id}:${type}`)
-    setScheduler({
-      open: true,
-      sale,
-      type,
-      date: existing?.date || todayIso(),
-      time: existing?.time || SLOT_OPTIONS[0],
-      notes: existing?.notes || '',
-    })
-  }
-
-  const closeScheduler = () => {
-    setScheduler((prev) => ({ ...prev, open: false, sale: null, notes: '' }))
-  }
-
-  const confirmSchedule = async () => {
-    if (!scheduler.sale || schedulingSaving) return
-    const sale = scheduler.sale
-    const atIso = new Date(`${scheduler.date}T${scheduler.time}:00`).toISOString()
-    const tag = scheduler.type === 'finance' ? 'Finance' : 'Juridique'
-    const addition = scheduler.notes.trim()
-      ? `[${scheduler.date} ${scheduler.time} ${tag}] ${scheduler.notes.trim()}`
-      : ''
-    const prevNotes = String(sale.coordinationNotes || '').trim()
-    const coordinationNotes = addition ? (prevNotes ? `${prevNotes}\n${addition}` : addition) : prevNotes
-    const patch = { coordinationNotes }
-    if (scheduler.type === 'finance') {
-      patch.coordinationFinanceAt = atIso
-      // Keep a single action for finance: planning dispatches to finance queue.
-      if (canonicalSaleStatus(sale.status) === 'pending_coordination') {
-        patch.status = 'pending_finance'
-        patch.pipelineStatus = 'pending_finance'
-      }
-    }
-    else patch.coordinationJuridiqueAt = atIso
-    setSchedulingSaving(true)
-    const withTimeout = (p, ms, label) => Promise.race([
-      p,
-      new Promise((_, rej) => setTimeout(() => rej(new Error(`${label}_timeout`)), ms)),
-    ])
-    try {
-      await withTimeout(salesUpdate(sale.id, patch), 15_000, 'salesUpdate')
-      // audit log is best-effort — never block the appointment save on it.
-      withTimeout(
-        appendAuditLog({
-          action: 'coordination_appointment_set',
-          entity: 'sale',
-          entityId: String(sale.id),
-          actorUserId: adminUser?.id || null,
-          actorEmail: adminUser?.email || '',
-          details: `${tag} ${scheduler.date} ${scheduler.time}`,
-        }),
-        8_000,
-        'appendAuditLog',
-      ).catch((e) => console.warn('[Coord] appendAuditLog (non-blocking):', e?.message || e))
-      closeScheduler()
-    } catch (e) {
-      console.error('[Coord] confirmSchedule failed:', e?.message || e, e)
-    } finally {
-      setSchedulingSaving(false)
-    }
-  }
-
-  const plannedCount = appointments.length
-  const appointmentsByDate = useMemo(() => {
-    const map = new Map()
-    for (const apt of appointments) {
-      const key = apt.date || ''
-      if (!map.has(key)) map.set(key, [])
-      map.get(key).push(apt)
-    }
-    for (const [, list] of map) {
-      list.sort((a, b) => String(a.time || '').localeCompare(String(b.time || '')))
-    }
-    return map
-  }, [appointments])
-  const monthCells = useMemo(() => monthGrid(monthAnchor), [monthAnchor])
-  const dayAgenda = useMemo(() => appointmentsByDate.get(selectedDate) || [], [appointmentsByDate, selectedDate])
-  const monthLabel = monthAnchor.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
 
   const reservationExpiryQueue = useMemo(() => {
     const now = Date.now()
@@ -349,6 +189,87 @@ export default function CoordinationPage() {
     })
   }, [sales])
 
+  const pageCount = Math.max(1, Math.ceil(salesForCoordination.length / PER_PAGE))
+  useEffect(() => { if (page > pageCount) setPage(1) }, [page, pageCount])
+  useEffect(() => { setPage(1) }, [query])
+  const pagedSales = useMemo(
+    () => salesForCoordination.slice((page - 1) * PER_PAGE, page * PER_PAGE),
+    [salesForCoordination, page],
+  )
+
+  const selectedAppointmentSale = useMemo(() => {
+    if (!selectedAppointment) return null
+    return (sales || []).find((s) => String(s.id) === String(selectedAppointment.saleId)) || null
+  }, [selectedAppointment, sales])
+
+  const appointmentsByDate = useMemo(() => {
+    const map = new Map()
+    for (const a of appointments) {
+      if (!map.has(a.date)) map.set(a.date, [])
+      map.get(a.date).push(a)
+    }
+    for (const [, list] of map) list.sort((a, b) => String(a.time).localeCompare(String(b.time)))
+    return map
+  }, [appointments])
+  const monthCells = useMemo(() => monthGrid(monthAnchor), [monthAnchor])
+  const dayAgenda = useMemo(() => appointmentsByDate.get(selectedDate) || [], [appointmentsByDate, selectedDate])
+  const monthLabel = monthAnchor.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
+  const plannedCount = appointments.length
+
+  // ---- actions -------------------------------------------------------------
+  const openScheduler = (sale, type) => {
+    const existing = planningBySale.get(`${sale.id}:${type}`)
+    setScheduler({
+      open: true, sale, type,
+      date: existing?.date || todayIso(),
+      time: existing?.time || SLOT_OPTIONS[0],
+      notes: existing?.notes || '',
+    })
+  }
+  const closeScheduler = () => setScheduler((p) => ({ ...p, open: false, sale: null, notes: '' }))
+
+  const confirmSchedule = async () => {
+    if (!scheduler.sale || schedulingSaving) return
+    const sale = scheduler.sale
+    const atIso = new Date(`${scheduler.date}T${scheduler.time}:00`).toISOString()
+    const tag = typeLabel(scheduler.type)
+    const addition = scheduler.notes.trim()
+      ? `[${scheduler.date} ${scheduler.time} ${tag}] ${scheduler.notes.trim()}`
+      : ''
+    const prevNotes = String(sale.coordinationNotes || '').trim()
+    const coordinationNotes = addition ? (prevNotes ? `${prevNotes}\n${addition}` : addition) : prevNotes
+    const patch = { coordinationNotes }
+    if (scheduler.type === 'finance') {
+      patch.coordinationFinanceAt = atIso
+      if (canonicalSaleStatus(sale.status) === 'pending_coordination') {
+        patch.status = 'pending_finance'
+        patch.pipelineStatus = 'pending_finance'
+      }
+    } else {
+      patch.coordinationJuridiqueAt = atIso
+    }
+    setSchedulingSaving(true)
+    const withTimeout = (p, ms, label) => Promise.race([
+      p, new Promise((_, rej) => setTimeout(() => rej(new Error(`${label}_timeout`)), ms)),
+    ])
+    try {
+      await withTimeout(salesUpdate(sale.id, patch), 15_000, 'salesUpdate')
+      withTimeout(
+        appendAuditLog({
+          action: 'coordination_appointment_set', entity: 'sale', entityId: String(sale.id),
+          actorUserId: adminUser?.id || null, actorEmail: adminUser?.email || '',
+          details: `${tag} ${scheduler.date} ${scheduler.time}`,
+        }), 8_000, 'appendAuditLog',
+      ).catch((e) => console.warn('[Coord] audit:', e?.message || e))
+      closeScheduler()
+    } catch (e) {
+      console.error('[Coord] confirmSchedule failed:', e?.message || e)
+    } finally {
+      setSchedulingSaving(false)
+    }
+  }
+
+  // Reservation expiry auto-queueing (unchanged from v1)
   useEffect(() => {
     if (!sales?.length) return
     let cancelled = false
@@ -368,54 +289,33 @@ export default function CoordinationPage() {
           await salesUpdate(s.id, { reservationStatus: 'expired_pending_review' })
           try {
             await db.insertSaleReservationEvent({
-              saleId: s.id,
-              eventType: 'reservation_expired_queue',
-              fromStatus: st,
-              toStatus: 'expired_pending_review',
-              actorUserId: null,
-              details: 'Délai dépassé — file revue manuelle (pas de libération auto)',
+              saleId: s.id, eventType: 'reservation_expired_queue',
+              fromStatus: st, toStatus: 'expired_pending_review',
+              actorUserId: null, details: 'Délai dépassé — file revue manuelle',
             })
-          } catch (e) {
-            console.error(e)
-          }
-        } catch (e) {
-          console.error(e)
-        }
+          } catch (e) { console.error(e) }
+        } catch (e) { console.error(e) }
       }
     })()
-    return () => {
-      cancelled = true
-    }
+    return () => { cancelled = true }
   }, [sales, salesUpdate])
 
   const extendReservation = async (sale, hours = 24) => {
     const prevSt = String(sale.reservationStatus || '')
     const next = new Date(Date.now() + hours * 3600000).toISOString()
-    await salesUpdate(sale.id, {
-      reservationExpiresAt: next,
-      reservationStatus: 'extended',
-    })
+    await salesUpdate(sale.id, { reservationExpiresAt: next, reservationStatus: 'extended' })
     await appendAuditLog({
-      action: 'reservation_extended',
-      entity: 'sale',
-      entityId: String(sale.id),
-      actorUserId: adminUser?.id || null,
-      actorEmail: adminUser?.email || '',
-      details: `+${hours}h`,
+      action: 'reservation_extended', entity: 'sale', entityId: String(sale.id),
+      actorUserId: adminUser?.id || null, actorEmail: adminUser?.email || '', details: `+${hours}h`,
     })
     try {
       await db.insertSaleReservationEvent({
-        saleId: sale.id,
-        eventType: 'reservation_extended',
-        fromStatus: prevSt,
-        toStatus: 'extended',
-        actorUserId: adminUser?.id || null,
-        details: `Prolongation ${hours}h`,
+        saleId: sale.id, eventType: 'reservation_extended',
+        fromStatus: prevSt, toStatus: 'extended',
+        actorUserId: adminUser?.id || null, details: `Prolongation ${hours}h`,
         metadata: { newExpiresAt: next },
       })
-    } catch (e) {
-      console.error(e)
-    }
+    } catch (e) { console.error(e) }
   }
 
   const releaseExpiredReservation = async (sale) => {
@@ -425,216 +325,125 @@ export default function CoordinationPage() {
       reservationStatus: 'released',
       reservationReleasedAt: new Date().toISOString(),
       reservationReleaseReason: 'manual_release_after_expiry',
-      status: 'cancelled',
-      pipelineStatus: 'cancelled',
+      status: 'cancelled', pipelineStatus: 'cancelled',
     })
     for (const pid of parcelDbIds) {
-      try {
-        await updateParcelStatus(pid, 'available')
-      } catch {
-        /* ignore */
-      }
+      try { await updateParcelStatus(pid, 'available') } catch { /* ignore */ }
     }
     await appendAuditLog({
-      action: 'reservation_released',
-      entity: 'sale',
-      entityId: String(sale.id),
-      actorUserId: adminUser?.id || null,
-      actorEmail: adminUser?.email || '',
+      action: 'reservation_released', entity: 'sale', entityId: String(sale.id),
+      actorUserId: adminUser?.id || null, actorEmail: adminUser?.email || '',
       details: 'File expirée — libération parcelle(s)',
     })
     try {
       await db.insertSaleReservationEvent({
-        saleId: sale.id,
-        eventType: 'reservation_released',
-        fromStatus: prevSt,
-        toStatus: 'released',
+        saleId: sale.id, eventType: 'reservation_released',
+        fromStatus: prevSt, toStatus: 'released',
         actorUserId: adminUser?.id || null,
         details: 'Libération manuelle après expiration',
       })
-    } catch (e) {
-      console.error(e)
-    }
+    } catch (e) { console.error(e) }
   }
 
+  // ---- render --------------------------------------------------------------
+  const dateError = scheduler.open && scheduler.date && scheduler.time
+    && new Date(`${scheduler.date}T${scheduler.time}:00`).getTime() < Date.now()
+    ? 'La date et l’heure doivent être dans le futur.' : ''
+
   return (
-    <div className="coord-page coord-page--v2">
-      <button type="button" className="ds-back-btn" onClick={() => navigate(-1)}>
-        <span className="ds-back-btn__icon" aria-hidden>←</span>
-        <span className="ds-back-btn__label">Retour</span>
+    <div className="sell-field coord-v3" dir="ltr">
+      <button type="button" className="sp-back-btn" onClick={() => navigate(-1)}>
+        <span className="sp-back-btn__icon-wrap" aria-hidden>←</span>
+        <span>Retour</span>
       </button>
 
-      {/* Hero: clearer primary title + single KPI summary line */}
-      <section className="cp-hero cp-hero--v2">
-        <div className="cp-hero__top">
-          <div className="cp-hero__icon" aria-hidden>🧭</div>
-          <div>
-            <h1 className="cp-hero__name">Coordination des ventes</h1>
-            <p className="cp-hero__role">Planifier les rendez-vous Finance et Juridique</p>
-          </div>
+      {/* ── Topbar: title + compact KPIs ─────────────────────────────── */}
+      <header className="cv-topbar">
+        <div className="cv-topbar__title">
+          <h1 className="cv-topbar__h1">Coordination</h1>
+          <p className="cv-topbar__sub">Planifier les rendez-vous Finance et Juridique.</p>
         </div>
-        <div className="cp-hero__kpi" role="group" aria-label="Résumé">
-          <div className="cp-hero__kpi-block">
-            <span className="cp-hero__kpi-num">{salesForCoordination.length}</span>
-            <span className="cp-hero__kpi-unit">À traiter</span>
-          </div>
-          <span className="cp-hero__kpi-sep" />
-          <div className="cp-hero__kpi-block">
-            <span className="cp-hero__kpi-num">{plannedCount}</span>
-            <span className="cp-hero__kpi-unit">Planifiés</span>
-          </div>
+        <div className="cv-topbar__kpis">
+          <span className="cv-kpi-pill" title="Dossiers en attente de rendez-vous">
+            <strong>{salesForCoordination.length}</strong>
+            <span>à planifier</span>
+          </span>
+          <span className="cv-kpi-pill cv-kpi-pill--good" title="Rendez-vous planifiés">
+            <strong>{plannedCount}</strong>
+            <span>planifiés</span>
+          </span>
+          {reservationExpiryQueue.length > 0 ? (
+            <button
+              type="button"
+              className="cv-kpi-pill cv-kpi-pill--warn"
+              onClick={() => setExpiryOpen(true)}
+              title="Réservations expirées — cliquez pour gérer"
+            >
+              ⚠ <strong>{reservationExpiryQueue.length}</strong>
+              <span>expirée{reservationExpiryQueue.length > 1 ? 's' : ''}</span>
+            </button>
+          ) : null}
         </div>
-      </section>
+      </header>
 
-      {/* Inline guidance: one clear sentence explaining what the admin does here */}
-      <div className="cp-guide" role="note">
-        <span className="cp-guide__ico" aria-hidden>ℹ️</span>
-        <div>
-          <strong>Votre mission :</strong> pour chaque dossier, fixez un rendez-vous
-          Finance puis un rendez-vous Juridique. Le calendrier récapitule tout.
-        </div>
-      </div>
-
-      {reservationExpiryQueue.length > 0 ? (
-        <section className="cp-alert">
-          <div className="cp-alert__head">
-            <span className="cp-alert__ico" aria-hidden>⚠️</span>
-            <div>
-              <h2 className="cp-alert__title">Réservations expirées — à revoir</h2>
-              <p className="cp-alert__sub">
-                {reservationExpiryQueue.length} dossier(s) sans validation Finance après 48h.
-                Prolongez la réservation ou libérez la parcelle.
-              </p>
-            </div>
-          </div>
-          <div className="cp-alert__list">
-            {reservationExpiryQueue.map((sale) => {
-              const plotLabel = normalizePlotIds(sale).map((id) => `#${id}`).join(', ') || '—'
-              return (
-                <article key={sale.id} className="cp-card cp-card--warn">
-                  <div className="cp-card__top">
-                    <span className="cp-card__initials">{initials(sale.clientName)}</span>
-                    <div className="cp-card__info">
-                      <p className="cp-card__name">{sale.clientName || 'Client'}</p>
-                      <p className="cp-card__sub">{sale.projectTitle || 'Projet'} • Parcelle {plotLabel}</p>
-                    </div>
-                    <span className="cp-card__badge cp-detail__badge--orange">Expirée</span>
-                  </div>
-                  <div className="cp-card__actions cp-card__actions--stack">
-                    <div className="cp-card__actions-inline">
-                      <button
-                        type="button"
-                        className="cp-card__btn"
-                        title="Accorder 24h supplémentaires avant libération"
-                        onClick={() => extendReservation(sale, 24)}
-                      >
-                        Prolonger de 24 h
-                      </button>
-                      <button
-                        type="button"
-                        className="cp-card__btn cp-card__btn--secondary"
-                        title="Rendre la parcelle disponible et annuler la vente"
-                        onClick={() => releaseExpiredReservation(sale)}
-                      >
-                        Libérer la parcelle
-                      </button>
-                    </div>
-                  </div>
-                </article>
-              )
-            })}
-          </div>
-        </section>
-      ) : null}
-
-      {/* Tabs — clearer labels, touch-friendly */}
-      <div className="cp-tabs cp-tabs--v2" role="tablist">
+      {/* ── Tabs ─────────────────────────────────────────────────────── */}
+      <div className="cv-tabs" role="tablist">
         <button
-          type="button"
-          role="tab"
-          aria-selected={view === 'sales'}
-          className={`cp-tab${view === 'sales' ? ' cp-tab--on' : ''}`}
+          type="button" role="tab" aria-selected={view === 'sales'}
+          className={`cv-tab${view === 'sales' ? ' cv-tab--on' : ''}`}
           onClick={() => setView('sales')}
         >
-          <span className="cp-tab__main">Dossiers à planifier</span>
-          <span className="cp-tab__sub">Fixer les rendez-vous</span>
-          <span className="cp-tab__badge" aria-label={`${salesForCoordination.length} dossier(s)`}>
-            {salesForCoordination.length}
-          </span>
+          Dossiers
+          <span className="cv-tab__count">{salesForCoordination.length}</span>
         </button>
         <button
-          type="button"
-          role="tab"
-          aria-selected={view === 'calendar'}
-          className={`cp-tab${view === 'calendar' ? ' cp-tab--on' : ''}`}
+          type="button" role="tab" aria-selected={view === 'calendar'}
+          className={`cv-tab${view === 'calendar' ? ' cv-tab--on' : ''}`}
           onClick={() => setView('calendar')}
         >
-          <span className="cp-tab__main">Calendrier</span>
-          <span className="cp-tab__sub">Voir tous les rendez-vous</span>
-          <span className="cp-tab__badge" aria-label={`${plannedCount} rendez-vous`}>
-            {plannedCount}
-          </span>
+          Calendrier
+          <span className="cv-tab__count">{plannedCount}</span>
         </button>
       </div>
 
       {view === 'sales' && (
         <>
-          {/* Section summary — what the admin does in this view */}
-          <p className="cp-section-lede">
-            Liste des dossiers en attente de coordination. Planifiez Finance puis Juridique.
-          </p>
-
-          <div className="cp-search">
-            <span className="cp-search__ico" aria-hidden>🔎</span>
+          <div className="cv-search">
             <input
-              className="cp-search__input"
-              type="search"
-              aria-label="Rechercher un dossier"
-              placeholder="Rechercher par client, projet, code ou parcelle…"
-              value={query}
+              type="search" value={query}
               onChange={(e) => setQuery(e.target.value)}
+              placeholder="Rechercher un client, projet, code ou parcelle…"
+              aria-label="Rechercher un dossier"
             />
           </div>
 
-          <section className="cp-queue">
+          <section className="sp-cards cv-queue">
             {salesLoading && salesForCoordination.length === 0 ? (
               Array.from({ length: 5 }).map((_, i) => (
-                <article key={`cp-sk-${i}`} className="cp-card cp-card--skeleton" aria-hidden>
-                  <div className="cp-card__top">
-                    <span className="cp-card__initials cp-sk-box" />
-                    <div className="cp-card__info">
-                      <p className="cp-sk-line cp-sk-line--title" />
-                      <p className="cp-sk-line cp-sk-line--sub" />
+                <article key={`sk-${i}`} className="sp-card sp-card--skeleton" aria-hidden>
+                  <div className="sp-card__head">
+                    <div className="sp-card__user">
+                      <span className="sp-sk-box" />
+                      <div>
+                        <span className="sp-sk-line sp-sk-line--title" />
+                        <span className="sp-sk-line sp-sk-line--sub" />
+                      </div>
                     </div>
-                    <span className="cp-sk-line cp-sk-line--badge" />
-                  </div>
-                  <div className="cp-card__grid">
-                    <div><span className="cp-sk-line cp-sk-line--cell" /></div>
-                    <div><span className="cp-sk-line cp-sk-line--cell" /></div>
-                    <div><span className="cp-sk-line cp-sk-line--cell" /></div>
-                    <div><span className="cp-sk-line cp-sk-line--cell" /></div>
-                  </div>
-                  <div className="cp-card__actions">
-                    <div className="cp-card__actions-inline">
-                      <span className="cp-sk-line cp-sk-line--btn" />
-                      <span className="cp-sk-line cp-sk-line--btn" />
-                    </div>
+                    <span className="sp-sk-line sp-sk-line--badge" />
                   </div>
                 </article>
               ))
             ) : salesForCoordination.length === 0 ? (
-              <div className="cp-empty">
-                <div className="cp-empty__ico" aria-hidden>📭</div>
-                <p className="cp-empty__title">Aucun dossier à coordonner</p>
-                <p className="cp-empty__hint">
+              <div className="sp-empty">
+                <span className="sp-empty__emoji" aria-hidden>📭</span>
+                <div className="sp-empty__title">Aucun dossier à coordonner</div>
+                <p style={{ margin: '4px 0 10px', fontSize: 12, color: '#64748b' }}>
                   Dès qu’une vente passe en « En attente coordination », elle apparaîtra ici.
                 </p>
-                <button
-                  type="button"
-                  className="cp-empty__cta"
-                  onClick={() => setView('calendar')}
-                >
-                  Ouvrir le calendrier
+                <button type="button" className="sp-cta-btn" onClick={() => setView('calendar')}>
+                  <span className="sp-cta-btn__icon">📅</span>
+                  <span className="sp-cta-btn__text">Ouvrir le calendrier</span>
+                  <span className="sp-cta-btn__arrow">→</span>
                 </button>
               </div>
             ) : (
@@ -642,8 +451,6 @@ export default function CoordinationPage() {
                 const client = clients.find((c) => String(c.id) === String(sale.clientId))
                 const sellerClient = sale.sellerClientId ? clients.find((c) => String(c.id) === String(sale.sellerClientId)) : null
                 const sellerAgent = sale.agentId ? adminUsers.find((u) => String(u.id) === String(sale.agentId)) : null
-                const sellerName = sellerClient?.name || sellerAgent?.name || sellerAgent?.email || '—'
-                const sellerPhone = sellerClient?.phone || sellerAgent?.phone || ''
                 const statusMeta = getSaleStatusMeta(sale.status)
                 const plotLabel = normalizePlotIds(sale).map((id) => `#${id}`).join(', ') || '—'
                 const financePlan = planningBySale.get(`${sale.id}:finance`)
@@ -651,150 +458,96 @@ export default function CoordinationPage() {
                 return (
                   <article
                     key={sale.id}
-                    className={`cp-card cp-card--${statusMeta.badge || 'gray'}`}
-                    role="button"
-                    tabIndex={0}
+                    className="sp-card cv-card"
+                    role="button" tabIndex={0}
                     onClick={() => setDetailSale({ sale, client, sellerClient, sellerAgent })}
-                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setDetailSale({ sale, client, sellerClient, sellerAgent }) } }}
-                    style={{ cursor: 'pointer' }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        setDetailSale({ sale, client, sellerClient, sellerAgent })
+                      }
+                    }}
                   >
-                    <div className="cp-card__top">
-                      <span className="cp-card__initials" aria-hidden>{initials(sale.clientName)}</span>
-                      <div className="cp-card__info">
-                        <p className="cp-card__name">{sale.clientName || 'Client'}</p>
-                        <p className="cp-card__sub">{sale.projectTitle || 'Projet'} • Parcelle {plotLabel}</p>
+                    <div className="sp-card__head">
+                      <div className="sp-card__user">
+                        <span className="sp-card__initials" aria-hidden>{initials(sale.clientName)}</span>
+                        <div>
+                          <p className="sp-card__name">{sale.clientName || 'Client'}</p>
+                          <p className="sp-card__sub">{sale.projectTitle || 'Projet'} · Parcelle {plotLabel}</p>
+                        </div>
                       </div>
-                      <span className={`cp-card__badge cp-detail__badge--${statusMeta.badge || 'gray'}`}>
+                      <span className={`sp-badge sp-badge--${statusMeta.badge || 'gray'}`}>
                         {statusMeta.label}
                       </span>
                     </div>
 
-                    <div className="cp-card__grid">
-                      <div>
-                        <div className="cp-card__lbl" title="Prix total convenu avec le client">Montant</div>
-                        <div className="cp-card__val">{fmtMoney(sale.agreedPrice)}</div>
-                      </div>
-                      <div>
-                        <div className="cp-card__lbl" title="Somme déjà versée par le client">Acompte</div>
-                        <div className="cp-card__val">{fmtMoney(sale.deposit)}</div>
-                      </div>
-                      <div>
-                        <div className="cp-card__lbl" title="Statut de la validation Finance">Finance</div>
-                        <div className="cp-card__val">
-                          {sale.financeValidatedAt
-                            ? `Validé (${fmtDate(sale.financeValidatedAt)})`
-                            : (sale.financeConfirmedAt ? `Confirmé (${fmtDate(sale.financeConfirmedAt)})` : 'En attente')}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="cp-card__lbl" title="Statut du passage chez le notaire">Notaire</div>
-                        <div className="cp-card__val">
-                          {sale.notaryCompletedAt ? `Terminé (${fmtDate(sale.notaryCompletedAt)})` : 'En cours'}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="cp-card__lbl">Parcelle(s)</div>
-                        <div className="cp-card__val cp-card__plot">{plotLabel}</div>
-                      </div>
-                      <div>
-                        <div className="cp-card__lbl">Contact client</div>
-                        <div className="cp-card__val">
-                          {client?.phone
-                            ? <a href={`tel:${client.phone}`} className="cp-card__phone" onClick={(e) => e.stopPropagation()}>{client.phone}</a>
-                            : <span className="cp-card__muted">Non renseigné</span>}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="cp-card__lbl" title="Qui a réalisé cette vente">Vendeur</div>
-                        <div className="cp-card__val" style={{ fontWeight: 600 }}>
-                          {sellerName}
-                          {sellerPhone && (
-                            <div className="cp-card__muted" style={{ fontWeight: 400, fontSize: 11, marginTop: 2 }}>{sellerPhone}</div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Scheduled status — visible at a glance before actions */}
-                    <div className="cp-card__status">
-                      <div className={`cp-card__status-item${financePlan ? ' cp-card__status-item--ok' : ''}`}>
-                        <span className="cp-card__status-dot" aria-hidden />
-                        <span className="cp-card__status-lbl">Finance</span>
-                        <span className="cp-card__status-val">
-                          {financePlan ? `${fmtDate(financePlan.date)} • ${financePlan.time}` : 'À planifier'}
+                    <div className="cv-card__plan">
+                      <div className={`cv-card__plan-row${financePlan ? ' cv-card__plan-row--ok' : ''}`}>
+                        <span className="cv-card__plan-dot" aria-hidden />
+                        <span className="cv-card__plan-lbl">Finance</span>
+                        <span className="cv-card__plan-val">
+                          {financePlan ? `${fmtDate(financePlan.date)} · ${financePlan.time}` : 'À planifier'}
                         </span>
                       </div>
-                      <div className={`cp-card__status-item${juridiquePlan ? ' cp-card__status-item--ok' : ''}`}>
-                        <span className="cp-card__status-dot" aria-hidden />
-                        <span className="cp-card__status-lbl">Juridique</span>
-                        <span className="cp-card__status-val">
-                          {juridiquePlan ? `${fmtDate(juridiquePlan.date)} • ${juridiquePlan.time}` : 'À planifier'}
+                      <div className={`cv-card__plan-row${juridiquePlan ? ' cv-card__plan-row--ok' : ''}`}>
+                        <span className="cv-card__plan-dot" aria-hidden />
+                        <span className="cv-card__plan-lbl">Juridique</span>
+                        <span className="cv-card__plan-val">
+                          {juridiquePlan ? `${fmtDate(juridiquePlan.date)} · ${juridiquePlan.time}` : 'À planifier'}
                         </span>
                       </div>
                     </div>
 
-                    <div className="cp-card__actions cp-card__actions--stack" onClick={(e) => e.stopPropagation()}>
-                      <div className="cp-card__actions-inline">
-                        <button
-                          type="button"
-                          className={`cp-card__btn${financePlan ? ' cp-card__btn--secondary' : ''}`}
-                          title="Fixer (ou modifier) le rendez-vous Finance"
-                          onClick={(e) => { e.stopPropagation(); openScheduler(sale, 'finance') }}
-                        >
-                          {financePlan ? 'Modifier Finance' : 'Planifier Finance'}
-                        </button>
-                        <button
-                          type="button"
-                          className={`cp-card__btn${juridiquePlan ? ' cp-card__btn--secondary' : ''}`}
-                          title="Fixer (ou modifier) le rendez-vous Juridique"
-                          onClick={(e) => { e.stopPropagation(); openScheduler(sale, 'juridique') }}
-                        >
-                          {juridiquePlan ? 'Modifier Juridique' : 'Planifier Juridique'}
-                        </button>
-                      </div>
+                    <div className="cv-card__actions" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        className={`cv-btn${financePlan ? ' cv-btn--ghost' : ' cv-btn--primary'}`}
+                        onClick={(e) => { e.stopPropagation(); openScheduler(sale, 'finance') }}
+                      >
+                        {financePlan ? 'Modifier Finance' : 'Planifier Finance'}
+                      </button>
+                      <button
+                        type="button"
+                        className={`cv-btn${juridiquePlan ? ' cv-btn--ghost' : ' cv-btn--primary'}`}
+                        onClick={(e) => { e.stopPropagation(); openScheduler(sale, 'juridique') }}
+                      >
+                        {juridiquePlan ? 'Modifier Juridique' : 'Planifier Juridique'}
+                      </button>
                     </div>
                   </article>
                 )
               })
             )}
           </section>
-          {salesForCoordination.length > COORD_PER_PAGE && (
-            <div className="cp-pager" role="navigation" aria-label="Pagination">
+
+          {salesForCoordination.length > PER_PAGE && (
+            <div className="sp-pager" role="navigation" aria-label="Pagination">
               <button
-                type="button"
-                className="cp-pager__btn cp-pager__btn--nav"
+                type="button" className="sp-pager__btn"
                 disabled={page <= 1}
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 aria-label="Page précédente"
-              >
-                ‹
-              </button>
-              {getPagerPages(page, coordPageCount).map((p, i) =>
+              >‹</button>
+              {getPagerPages(page, pageCount).map((p, i) =>
                 p === '…' ? (
-                  <span key={`dots-${i}`} className="cp-pager__ellipsis" aria-hidden>…</span>
+                  <span key={`dots-${i}`} className="sp-pager__ellipsis" aria-hidden>…</span>
                 ) : (
                   <button
-                    key={p}
-                    type="button"
-                    className={`cp-pager__btn${p === page ? ' cp-pager__btn--active' : ''}`}
+                    key={p} type="button"
+                    className={`sp-pager__btn${p === page ? ' sp-pager__btn--active' : ''}`}
                     onClick={() => setPage(p)}
                     aria-current={p === page ? 'page' : undefined}
-                  >
-                    {p}
-                  </button>
+                  >{p}</button>
                 ),
               )}
               <button
-                type="button"
-                className="cp-pager__btn cp-pager__btn--nav"
-                disabled={page >= coordPageCount}
-                onClick={() => setPage((p) => Math.min(coordPageCount, p + 1))}
+                type="button" className="sp-pager__btn"
+                disabled={page >= pageCount}
+                onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
                 aria-label="Page suivante"
-              >
-                ›
-              </button>
-              <span className="cp-pager__info">
-                {(page - 1) * COORD_PER_PAGE + 1}–{Math.min(page * COORD_PER_PAGE, salesForCoordination.length)} / {salesForCoordination.length}
+              >›</button>
+              <span className="sp-pager__info">
+                {(page - 1) * PER_PAGE + 1}–{Math.min(page * PER_PAGE, salesForCoordination.length)} / {salesForCoordination.length}
               </span>
             </div>
           )}
@@ -802,95 +555,83 @@ export default function CoordinationPage() {
       )}
 
       {view === 'calendar' && (
-        <section className="cp-block cp-block--calendar" style={{ marginTop: 10 }}>
-          <div className="cp-block__head">
-            <span className="cp-block__ico" aria-hidden>📅</span>
-            <div>
-              <h2 className="cp-block__title">Calendrier des rendez-vous</h2>
-              <p className="cp-block__sub">Finance et Juridique</p>
+        <section className="cv-cal">
+          {appointments.length === 0 ? (
+            <div className="sp-empty">
+              <span className="sp-empty__emoji" aria-hidden>🗓️</span>
+              <div className="sp-empty__title">Aucun rendez-vous planifié</div>
+              <p style={{ margin: '4px 0 10px', fontSize: 12, color: '#64748b' }}>
+                Commencez par planifier un rendez-vous depuis l’onglet « Dossiers ».
+              </p>
+              <button type="button" className="sp-cta-btn" onClick={() => setView('sales')}>
+                <span className="sp-cta-btn__icon">📋</span>
+                <span className="sp-cta-btn__text">Aller aux dossiers</span>
+                <span className="sp-cta-btn__arrow">→</span>
+              </button>
             </div>
-          </div>
-          <p className="cp-section-lede cp-section-lede--in-block">
-            Cliquez sur un jour pour voir les rendez-vous, puis sur un rendez-vous pour son détail.
-          </p>
-          <div className="cp-cal-wrap">
-            {appointments.length === 0 ? (
-              <div className="cp-empty">
-                <div className="cp-empty__ico" aria-hidden>🗓️</div>
-                <p className="cp-empty__title">Aucun rendez-vous planifié</p>
-                <p className="cp-empty__hint">Commencez par planifier un rendez-vous depuis l’onglet « Dossiers à planifier ».</p>
-                <button
-                  type="button"
-                  className="cp-empty__cta"
-                  onClick={() => setView('sales')}
-                >
-                  Aller aux dossiers
-                </button>
+          ) : (
+            <>
+              <div className="cv-cal__nav">
+                <button type="button" className="cv-cal__nav-btn" onClick={() => setMonthAnchor((d) => addMonths(d, -1))}>‹</button>
+                <span className="cv-cal__month">{monthLabel}</span>
+                <button type="button" className="cv-cal__nav-btn" onClick={() => setMonthAnchor((d) => addMonths(d, 1))}>›</button>
               </div>
-            ) : (
-              <>
-                <div className="cp-cal-toolbar">
-                  <button type="button" className="cp-cal-nav" onClick={() => setMonthAnchor((d) => addMonths(d, -1))}>‹</button>
-                  <span className="cp-cal-month">{monthLabel}</span>
-                  <button type="button" className="cp-cal-nav" onClick={() => setMonthAnchor((d) => addMonths(d, 1))}>›</button>
-                </div>
-
-                <div className="cp-cal-weekhead">
-                  {['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'].map((d) => (
-                    <span key={d} className="cp-cal-weekday">{d}</span>
-                  ))}
-                </div>
-
-                <div className="cp-cal-grid-month">
-                  {monthCells.map((cell) => {
-                    const iso = toIsoDate(cell.date)
-                    const count = (appointmentsByDate.get(iso) || []).length
-                    const isSel = iso === selectedDate
-                    return (
-                      <button
-                        key={`${iso}-${cell.inMonth ? 'in' : 'out'}`}
-                        type="button"
-                        className={`cp-cal-day${cell.inMonth ? '' : ' cp-cal-day--muted'}${isSel ? ' cp-cal-day--selected' : ''}`}
-                        onClick={() => setSelectedDate(iso)}
-                      >
-                        <span className="cp-cal-day__num">{cell.date.getDate()}</span>
-                        {count > 0 ? <span className="cp-cal-day__dot">{count}</span> : null}
-                      </button>
-                    )
-                  })}
-                </div>
-
-                <div className="cp-cal-agenda">
-                  <div className="cp-cal-agenda__head">{fmtDate(selectedDate)}</div>
-                  {dayAgenda.length === 0 ? (
-                    <div className="cp-empty" style={{ border: 'none', borderRadius: 0, padding: 16 }}>
-                      Aucun rendez-vous ce jour.
-                    </div>
-                  ) : (
-                    dayAgenda.map((apt) => (
-                      <button
-                        key={`${apt.id}-${dateTimeKey(apt)}`}
-                        type="button"
-                        className="cp-cal-item"
-                        onClick={() => setSelectedAppointment(apt)}
-                      >
-                        <span className="cp-cal-item__time">{apt.time}</span>
-                        <span className="cp-cal-item__body">
-                          <span className="cp-cal-item__kind">{typeLabel(apt.type)}</span>
-                          <span className="cp-cal-item__name">{apt.clientName}</span>
-                          <span className="cp-cal-item__sub">{apt.projectTitle} • {apt.plotLabel}</span>
-                        </span>
-                      </button>
-                    ))
-                  )}
-                </div>
-              </>
-            )}
-          </div>
+              <div className="cv-cal__week">
+                {['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'].map((d) => (
+                  <span key={d} className="cv-cal__weekday">{d}</span>
+                ))}
+              </div>
+              <div className="cv-cal__grid">
+                {monthCells.map((cell) => {
+                  const iso = toIsoDate(cell.date)
+                  const count = (appointmentsByDate.get(iso) || []).length
+                  const isSel = iso === selectedDate
+                  return (
+                    <button
+                      key={`${iso}-${cell.inMonth ? 'in' : 'out'}`}
+                      type="button"
+                      className={`cv-cal__day${cell.inMonth ? '' : ' cv-cal__day--muted'}${isSel ? ' cv-cal__day--sel' : ''}`}
+                      onClick={() => setSelectedDate(iso)}
+                    >
+                      <span className="cv-cal__day-num">{cell.date.getDate()}</span>
+                      {count > 0 ? <span className="cv-cal__day-dot">{count}</span> : null}
+                    </button>
+                  )
+                })}
+              </div>
+              <div className="cv-cal__agenda">
+                <div className="cv-cal__agenda-head">{fmtDate(selectedDate)}</div>
+                {dayAgenda.length === 0 ? (
+                  <div className="cv-cal__agenda-empty">Aucun rendez-vous ce jour.</div>
+                ) : (
+                  dayAgenda.map((apt) => (
+                    <button
+                      key={apt.id} type="button"
+                      className="cv-cal__item"
+                      onClick={() => setSelectedAppointment(apt)}
+                    >
+                      <span className="cv-cal__item-time">{apt.time}</span>
+                      <span className="cv-cal__item-body">
+                        <span className={`cv-cal__item-kind cv-cal__item-kind--${apt.type}`}>{typeLabel(apt.type)}</span>
+                        <span className="cv-cal__item-name">{apt.clientName}</span>
+                        <span className="cv-cal__item-sub">{apt.projectTitle} · {apt.plotLabel}</span>
+                      </span>
+                    </button>
+                  ))
+                )}
+              </div>
+            </>
+          )}
         </section>
       )}
 
-      <AdminModal open={Boolean(detailSale)} onClose={() => setDetailSale(null)} title="Détails de la vente" width={560}>
+      {/* ── Detail modal (opens on card click) ────────────────────────── */}
+      <AdminModal
+        open={Boolean(detailSale)}
+        onClose={() => setDetailSale(null)}
+        title="Détails de la vente"
+        width={560}
+      >
         {detailSale && (() => {
           const s = detailSale.sale
           const c = detailSale.client
@@ -899,267 +640,254 @@ export default function CoordinationPage() {
           const plots = normalizePlotIds(s).map((id) => `#${id}`).join(', ') || '—'
           const stMeta = getSaleStatusMeta(s.status)
           return (
-            <div className="cp-detail" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-                  <div style={{ fontWeight: 700, fontSize: 16 }}>{s.clientName || 'Client'}</div>
-                  <span className={`cp-card__badge cp-detail__badge--${stMeta.badge || 'gray'}`}>{stMeta.label}</span>
+            <div className="cv-detail">
+              <div className="cv-detail__head">
+                <div>
+                  <div className="cv-detail__name">{s.clientName || 'Client'}</div>
+                  <div className="cv-detail__code">Code : <code>{s.code || s.id}</code></div>
                 </div>
-                <div style={{ color: 'var(--adm-text-dim)', fontSize: 13 }}>Code vente : <code>{s.code || s.id}</code></div>
+                <span className={`sp-badge sp-badge--${stMeta.badge || 'gray'}`}>{stMeta.label}</span>
               </div>
 
-              <section style={{ border: '1px solid var(--adm-border)', borderRadius: 8, padding: 12 }}>
-                <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 13, letterSpacing: 0.3 }}>VENDEUR</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', rowGap: 6, fontSize: 13 }}>
-                  <div style={{ color: 'var(--adm-text-dim)' }}>Nom</div>
-                  <div style={{ fontWeight: 600 }}>{sc?.name || sa?.name || sa?.email || '—'}</div>
-                  <div style={{ color: 'var(--adm-text-dim)' }}>Rôle</div>
-                  <div>{sa?.role ? `Staff — ${sa.role}` : (sc ? 'Vendeur délégué (client)' : '—')}</div>
-                  {(sc?.phone || sa?.phone) && (<>
-                    <div style={{ color: 'var(--adm-text-dim)' }}>Téléphone</div>
-                    <div style={{ direction: 'ltr' }}>{sc?.phone || sa?.phone}</div>
-                  </>)}
-                  {(sc?.email || sa?.email) && (<>
-                    <div style={{ color: 'var(--adm-text-dim)' }}>Email</div>
-                    <div>{sc?.email || sa?.email}</div>
-                  </>)}
-                </div>
-              </section>
+              <DetailBlock title="Vendeur">
+                <Row k="Nom" v={sc?.name || sa?.name || sa?.email || '—'} />
+                <Row k="Rôle" v={sa?.role ? `Staff — ${sa.role}` : (sc ? 'Vendeur délégué (client)' : '—')} />
+                {(sc?.phone || sa?.phone) && <Row k="Téléphone" v={sc?.phone || sa?.phone} />}
+                {(sc?.email || sa?.email) && <Row k="Email" v={sc?.email || sa?.email} />}
+              </DetailBlock>
 
-              <section style={{ border: '1px solid var(--adm-border)', borderRadius: 8, padding: 12 }}>
-                <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 13, letterSpacing: 0.3 }}>ACHETEUR</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', rowGap: 6, fontSize: 13 }}>
-                  <div style={{ color: 'var(--adm-text-dim)' }}>Nom</div>
-                  <div style={{ fontWeight: 600 }}>{c?.name || s.clientName || '—'}</div>
-                  <div style={{ color: 'var(--adm-text-dim)' }}>Téléphone</div>
-                  <div style={{ direction: 'ltr' }}>{c?.phone || s.buyerPhoneNormalized || '—'}</div>
-                  {c?.cin && (<>
-                    <div style={{ color: 'var(--adm-text-dim)' }}>CIN</div>
-                    <div style={{ direction: 'ltr', fontFamily: 'ui-monospace, monospace' }}>{c.cin}</div>
-                  </>)}
-                  {c?.email && (<>
-                    <div style={{ color: 'var(--adm-text-dim)' }}>Email</div>
-                    <div>{c.email}</div>
-                  </>)}
-                  {c?.city && (<>
-                    <div style={{ color: 'var(--adm-text-dim)' }}>Ville</div>
-                    <div>{c.city}</div>
-                  </>)}
-                </div>
-              </section>
+              <DetailBlock title="Acheteur">
+                <Row k="Nom" v={c?.name || s.clientName || '—'} />
+                <Row k="Téléphone" v={c?.phone || s.buyerPhoneNormalized || '—'} />
+                {c?.cin && <Row k="CIN" v={c.cin} mono />}
+                {c?.email && <Row k="Email" v={c.email} />}
+                {c?.city && <Row k="Ville" v={c.city} />}
+              </DetailBlock>
 
-              <section style={{ border: '1px solid var(--adm-border)', borderRadius: 8, padding: 12 }}>
-                <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 13, letterSpacing: 0.3 }}>PROJET & PARCELLES</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', rowGap: 6, fontSize: 13 }}>
-                  <div style={{ color: 'var(--adm-text-dim)' }}>Projet</div>
-                  <div style={{ fontWeight: 600 }}>{s.projectTitle || s.projectId || '—'}</div>
-                  <div style={{ color: 'var(--adm-text-dim)' }}>Parcelle(s)</div>
-                  <div>{plots}</div>
-                </div>
-              </section>
+              <DetailBlock title="Projet & parcelles">
+                <Row k="Projet" v={s.projectTitle || s.projectId || '—'} />
+                <Row k="Parcelle(s)" v={plots} />
+              </DetailBlock>
 
-              <section style={{ border: '1px solid var(--adm-border)', borderRadius: 8, padding: 12 }}>
-                <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 13, letterSpacing: 0.3 }}>MONTANTS</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', rowGap: 6, fontSize: 13 }}>
-                  <div style={{ color: 'var(--adm-text-dim)' }}>Prix convenu</div>
-                  <div style={{ fontWeight: 600 }}>{fmtMoney(s.agreedPrice)}</div>
-                  <div style={{ color: 'var(--adm-text-dim)' }}>Acompte</div>
-                  <div>{fmtMoney(s.deposit)}</div>
-                  <div style={{ color: 'var(--adm-text-dim)' }}>Mode</div>
-                  <div>{s.paymentType === 'installments' ? `Échelonné — ${s.offerName || ''}` : 'Comptant'}</div>
-                  {s.paymentType === 'installments' && (<>
-                    <div style={{ color: 'var(--adm-text-dim)' }}>Durée</div>
-                    <div>{s.offerDuration || 0} mois · {s.offerDownPayment || 0}% apport</div>
-                  </>)}
-                </div>
-              </section>
-
-              <section style={{ border: '1px solid var(--adm-border)', borderRadius: 8, padding: 12 }}>
-                <div style={{ fontWeight: 700, marginBottom: 8, fontSize: 13, letterSpacing: 0.3 }}>PLANIFICATION</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', rowGap: 6, fontSize: 13 }}>
-                  <div style={{ color: 'var(--adm-text-dim)' }}>Finance</div>
-                  <div>{s.coordinationFinanceAt ? `${fmtDate(s.coordinationFinanceAt)} ${new Date(s.coordinationFinanceAt).toTimeString().slice(0, 5)}` : <span className="cp-card__muted">À planifier</span>}</div>
-                  <div style={{ color: 'var(--adm-text-dim)' }}>Juridique</div>
-                  <div>{s.coordinationJuridiqueAt ? `${fmtDate(s.coordinationJuridiqueAt)} ${new Date(s.coordinationJuridiqueAt).toTimeString().slice(0, 5)}` : <span className="cp-card__muted">À planifier</span>}</div>
-                </div>
-                {s.coordinationNotes && (
-                  <div style={{ marginTop: 10, padding: 8, background: 'var(--adm-bg-subtle, #f8f9fa)', borderRadius: 6, fontSize: 12, whiteSpace: 'pre-wrap' }}>
-                    {s.coordinationNotes}
-                  </div>
+              <DetailBlock title="Montants">
+                <Row k="Prix convenu" v={fmtMoney(s.agreedPrice)} />
+                <Row k="Acompte" v={fmtMoney(s.deposit)} />
+                <Row k="Mode" v={s.paymentType === 'installments' ? `Échelonné — ${s.offerName || ''}` : 'Comptant'} />
+                {s.paymentType === 'installments' && (
+                  <Row k="Durée" v={`${s.offerDuration || 0} mois · ${s.offerDownPayment || 0}% apport`} />
                 )}
-              </section>
+              </DetailBlock>
 
-              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                <button className="adm-btn adm-btn--secondary" onClick={() => setDetailSale(null)}>Fermer</button>
-                <button className="adm-btn adm-btn--primary" onClick={() => { setDetailSale(null); openScheduler(s, 'finance') }}>Planifier Finance</button>
-                <button className="adm-btn adm-btn--primary" onClick={() => { setDetailSale(null); openScheduler(s, 'juridique') }}>Planifier Juridique</button>
+              <DetailBlock title="Planification">
+                <Row k="Finance"
+                  v={s.coordinationFinanceAt
+                    ? `${fmtDate(s.coordinationFinanceAt)} ${new Date(s.coordinationFinanceAt).toTimeString().slice(0, 5)}`
+                    : <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>À planifier</span>
+                  } />
+                <Row k="Juridique"
+                  v={s.coordinationJuridiqueAt
+                    ? `${fmtDate(s.coordinationJuridiqueAt)} ${new Date(s.coordinationJuridiqueAt).toTimeString().slice(0, 5)}`
+                    : <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>À planifier</span>
+                  } />
+                {s.coordinationNotes && (
+                  <div className="cv-detail__notes">{s.coordinationNotes}</div>
+                )}
+              </DetailBlock>
+
+              <div className="cv-detail__footer">
+                <button className="cv-btn cv-btn--ghost" onClick={() => setDetailSale(null)}>Fermer</button>
+                <button className="cv-btn cv-btn--primary" onClick={() => { setDetailSale(null); openScheduler(s, 'finance') }}>Planifier Finance</button>
+                <button className="cv-btn cv-btn--primary" onClick={() => { setDetailSale(null); openScheduler(s, 'juridique') }}>Planifier Juridique</button>
               </div>
             </div>
           )
         })()}
       </AdminModal>
 
-      {scheduler.open && scheduler.sale && (() => {
-        // Validation: the chosen date/time must be in the future.
-        const chosen = scheduler.date && scheduler.time
-          ? new Date(`${scheduler.date}T${scheduler.time}:00`)
-          : null
-        const dateError = chosen && chosen.getTime() < Date.now()
-          ? 'La date et l’heure doivent être dans le futur.'
-          : ''
-        return (
-        <div className="cp-overlay" role="presentation" onClick={closeScheduler}>
-          <div className="cp-sheet cp-sheet--v2" role="dialog" aria-modal="true" aria-labelledby="cp-sheet-title" onClick={(e) => e.stopPropagation()}>
-            <div className="cp-sheet__head">
-              <h3 id="cp-sheet-title" className="cp-sheet__title">
-                Planifier un rendez-vous {typeLabel(scheduler.type)}
-              </h3>
-              <button
-                type="button"
-                className="cp-sheet__close"
-                aria-label="Fermer"
-                onClick={closeScheduler}
-              >
-                ✕
-              </button>
-            </div>
+      {/* ── Expired reservations modal ──────────────────────────────── */}
+      <AdminModal
+        open={expiryOpen}
+        onClose={() => setExpiryOpen(false)}
+        title={`Réservations expirées (${reservationExpiryQueue.length})`}
+        width={500}
+      >
+        <div className="cv-expiry">
+          <p className="cv-expiry__hint">
+            Ces dossiers n’ont pas été validés à temps. Prolongez la réservation ou libérez la parcelle.
+          </p>
+          {reservationExpiryQueue.length === 0 ? (
+            <div className="cv-expiry__empty">Aucune réservation expirée.</div>
+          ) : (
+            <ul className="cv-expiry__list">
+              {reservationExpiryQueue.map((sale) => {
+                const plotLabel = normalizePlotIds(sale).map((id) => `#${id}`).join(', ') || '—'
+                return (
+                  <li key={sale.id} className="cv-expiry__item">
+                    <div className="cv-expiry__item-head">
+                      <span className="sp-card__initials">{initials(sale.clientName)}</span>
+                      <div>
+                        <div className="cv-expiry__item-name">{sale.clientName || 'Client'}</div>
+                        <div className="cv-expiry__item-sub">{sale.projectTitle || 'Projet'} · Parcelle {plotLabel}</div>
+                      </div>
+                    </div>
+                    <div className="cv-expiry__item-actions">
+                      <button className="cv-btn cv-btn--ghost" onClick={() => extendReservation(sale, 24)}>
+                        Prolonger 24 h
+                      </button>
+                      <button className="cv-btn cv-btn--danger" onClick={() => releaseExpiredReservation(sale)}>
+                        Libérer la parcelle
+                      </button>
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </div>
+      </AdminModal>
 
-            <p className="cp-sheet__lede">
-              Choisissez le type, la date et l’heure. Le rendez-vous apparaîtra immédiatement dans le calendrier.
-            </p>
-
-            <div className="cp-sheet__recap">
-              <div className="cp-sheet__recap-lbl">Dossier concerné</div>
-              <div className="cp-sheet__recap-line">
+      {/* ── Scheduler modal ─────────────────────────────────────────── */}
+      <AdminModal
+        open={scheduler.open && Boolean(scheduler.sale)}
+        onClose={closeScheduler}
+        title={`Planifier un rendez-vous ${typeLabel(scheduler.type)}`}
+        width={480}
+      >
+        {scheduler.sale && (
+          <div className="cv-sched">
+            <div className="cv-sched__recap">
+              <div className="cv-sched__recap-lbl">Dossier</div>
+              <div className="cv-sched__recap-val">
                 <strong>{scheduler.sale.clientName || 'Client'}</strong>
-                <span className="cp-recap-dim">• {scheduler.sale.projectTitle || 'Projet'}</span>
+                <span className="cv-sched__recap-dim"> · {scheduler.sale.projectTitle || 'Projet'}</span>
               </div>
-              <div className="cp-sheet__recap-meta">Montant convenu : {fmtMoney(scheduler.sale.agreedPrice)}</div>
+              <div className="cv-sched__recap-meta">{fmtMoney(scheduler.sale.agreedPrice)}</div>
             </div>
 
-            <div style={{ margin: '0 0 12px' }}>
-              <SaleSnapshotTracePanel sale={scheduler.sale} />
-            </div>
+            <div className="cv-sched__trace"><SaleSnapshotTracePanel sale={scheduler.sale} /></div>
 
-            <label className="cp-sheet__label" htmlFor="cp-type">
-              Type de rendez-vous
-              <span className="cp-sheet__hint"> — Finance valide le paiement, Juridique prépare le contrat.</span>
-            </label>
-            <div id="cp-type" className="cp-sheet__pills" role="radiogroup" aria-label="Type de rendez-vous">
+            <label className="cv-sched__label">Type</label>
+            <div className="cv-sched__pills" role="radiogroup">
               <button
-                type="button"
-                role="radio"
-                aria-checked={scheduler.type === 'finance'}
-                className={`cp-pill${scheduler.type === 'finance' ? ' cp-pill--on' : ''}`}
+                type="button" role="radio" aria-checked={scheduler.type === 'finance'}
+                className={`cv-pill${scheduler.type === 'finance' ? ' cv-pill--on' : ''}`}
                 onClick={() => setScheduler((p) => ({ ...p, type: 'finance' }))}
-              >
-                Finance
-              </button>
+              >Finance</button>
               <button
-                type="button"
-                role="radio"
-                aria-checked={scheduler.type === 'juridique'}
-                className={`cp-pill${scheduler.type === 'juridique' ? ' cp-pill--on' : ''}`}
+                type="button" role="radio" aria-checked={scheduler.type === 'juridique'}
+                className={`cv-pill${scheduler.type === 'juridique' ? ' cv-pill--on' : ''}`}
                 onClick={() => setScheduler((p) => ({ ...p, type: 'juridique' }))}
-              >
-                Juridique
-              </button>
+              >Juridique</button>
             </div>
 
-            <label className="cp-sheet__label" htmlFor="cp-date">Date du rendez-vous</label>
+            <label className="cv-sched__label" htmlFor="cv-date">Date</label>
             <input
-              id="cp-date"
-              className={`cp-sheet__date-input${dateError ? ' cp-sheet__date-input--err' : ''}`}
-              type="date"
-              value={scheduler.date}
-              min={todayIso()}
+              id="cv-date" type="date"
+              className={`cv-sched__input${dateError ? ' cv-sched__input--err' : ''}`}
+              value={scheduler.date} min={todayIso()}
               aria-invalid={Boolean(dateError)}
               onChange={(e) => setScheduler((p) => ({ ...p, date: e.target.value }))}
             />
-            <div className="cp-sheet__date-hint">Sélectionnez le jour souhaité (aujourd’hui ou plus tard).</div>
 
-            <label className="cp-sheet__label">Créneau horaire</label>
-            <div className="cp-sheet__times" role="radiogroup" aria-label="Créneau horaire">
-              {SLOT_OPTIONS.map((slot) => (
-                <button
-                  key={slot}
-                  type="button"
-                  role="radio"
-                  aria-checked={scheduler.time === slot}
-                  className={`cp-time${scheduler.time === slot ? ' cp-time--on' : ''}`}
-                  onClick={() => setScheduler((p) => ({ ...p, time: slot }))}
-                >
-                  {slot}
-                </button>
-              ))}
+            <label className="cv-sched__label" htmlFor="cv-time">
+              Heure
+              <span className="cv-sched__label-hint"> — n’importe quelle heure, à la minute près.</span>
+            </label>
+            <div className="cv-sched__time-row">
+              <input
+                id="cv-time"
+                type="time"
+                className="cv-sched__input cv-sched__time-input"
+                step="300"
+                value={scheduler.time}
+                onChange={(e) => setScheduler((p) => ({ ...p, time: e.target.value || '09:00' }))}
+              />
+              <div className="cv-sched__time-quick" role="radiogroup" aria-label="Créneaux rapides">
+                {SLOT_OPTIONS.map((slot) => (
+                  <button
+                    key={slot} type="button" role="radio"
+                    aria-checked={scheduler.time === slot}
+                    className={`cv-time${scheduler.time === slot ? ' cv-time--on' : ''}`}
+                    onClick={() => setScheduler((p) => ({ ...p, time: slot }))}
+                  >{slot}</button>
+                ))}
+              </div>
             </div>
 
-            <label className="cp-sheet__label" htmlFor="cp-notes">Notes (facultatif)</label>
+            <label className="cv-sched__label" htmlFor="cv-notes">Notes</label>
             <textarea
-              id="cp-notes"
-              className="cp-sheet__date-input"
-              rows={3}
+              id="cv-notes" rows={3}
+              className="cv-sched__input"
               value={scheduler.notes}
+              placeholder="Pièces à apporter, contexte…"
               onChange={(e) => setScheduler((p) => ({ ...p, notes: e.target.value }))}
-              placeholder="Ex. : pièces à apporter, contexte particulier…"
             />
 
-            {dateError ? (
-              <div className="cp-sheet__error" role="alert">
-                <span aria-hidden>⚠</span>
-                <div>{dateError}</div>
+            {dateError ? <div className="cv-sched__err">⚠ {dateError}</div> : null}
+
+            <div className="cv-sched__actions">
+              <button type="button" className="cv-btn cv-btn--ghost" onClick={closeScheduler}>Annuler</button>
+              <button
+                type="button" className="cv-btn cv-btn--primary"
+                disabled={schedulingSaving || Boolean(dateError)}
+                onClick={() => void confirmSchedule()}
+              >
+                {schedulingSaving ? 'Enregistrement…' : 'Confirmer'}
+              </button>
+            </div>
+          </div>
+        )}
+      </AdminModal>
+
+      {/* ── Appointment detail modal (from calendar) ────────────────── */}
+      <AdminModal
+        open={Boolean(selectedAppointment)}
+        onClose={() => setSelectedAppointment(null)}
+        title="Détail du rendez-vous"
+        width={460}
+      >
+        {selectedAppointment && (
+          <div className="cv-apt">
+            {selectedAppointmentSale && (
+              <div style={{ marginBottom: 12 }}>
+                <SaleSnapshotTracePanel sale={selectedAppointmentSale} />
               </div>
+            )}
+            <Row k="Type" v={typeLabel(selectedAppointment.type)} />
+            <Row k="Client" v={selectedAppointment.clientName} />
+            <Row k="Projet" v={selectedAppointment.projectTitle} />
+            <Row k="Parcelles" v={selectedAppointment.plotLabel} />
+            <Row k="Date" v={fmtDate(selectedAppointment.date)} />
+            <Row k="Heure" v={selectedAppointment.time} />
+            <Row k="Montant" v={fmtMoney(selectedAppointment.amount)} />
+            <Row k="Agent" v={selectedAppointment.agentName} />
+            {selectedAppointment.coordinationNotes ? (
+              <div className="cv-detail__notes">{selectedAppointment.coordinationNotes}</div>
             ) : null}
-
-            <div className="cp-sheet__notice">
-              <span aria-hidden>ℹ</span>
-              <div>
-                Le rendez-vous sera ajouté au calendrier de coordination.
-                <strong> Vous pouvez le modifier plus tard.</strong>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              className="cp-sheet__confirm"
-              disabled={schedulingSaving || Boolean(dateError)}
-              onClick={() => void confirmSchedule()}
-            >
-              {schedulingSaving ? 'Enregistrement…' : 'Confirmer le rendez-vous'}
-            </button>
           </div>
-        </div>
-        )
-      })()}
+        )}
+      </AdminModal>
+    </div>
+  )
+}
 
-      {selectedAppointment && (
-        <div className="cp-overlay" role="presentation" onClick={() => setSelectedAppointment(null)}>
-          <div className="cp-sheet" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
-            <div className="cp-sheet__head">
-              <h3 className="cp-sheet__title">Detail du rendez-vous</h3>
-              <button type="button" className="cp-sheet__close" onClick={() => setSelectedAppointment(null)}>✕</button>
-            </div>
-            <div className="cp-cal-modal">
-              {selectedAppointmentSale ? (
-                <div style={{ marginBottom: 12 }}>
-                  <SaleSnapshotTracePanel sale={selectedAppointmentSale} />
-                </div>
-              ) : null}
-              <div className="cp-cal-modal__row"><span>Type</span><strong>{typeLabel(selectedAppointment.type)}</strong></div>
-              <div className="cp-cal-modal__row"><span>Client</span><strong>{selectedAppointment.clientName}</strong></div>
-              <div className="cp-cal-modal__row"><span>Projet</span><strong>{selectedAppointment.projectTitle}</strong></div>
-              <div className="cp-cal-modal__row"><span>Parcelles</span><strong>{selectedAppointment.plotLabel}</strong></div>
-              <div className="cp-cal-modal__row"><span>Date</span><strong>{fmtDate(selectedAppointment.date)}</strong></div>
-              <div className="cp-cal-modal__row"><span>Heure</span><strong>{selectedAppointment.time}</strong></div>
-              <div className="cp-cal-modal__row"><span>Montant vente</span><strong>{fmtMoney(selectedAppointment.amount)}</strong></div>
-              <div className="cp-cal-modal__row"><span>Agent</span><strong>{selectedAppointment.agentName}</strong></div>
-              {selectedAppointment.coordinationNotes ? (
-                <div className="cp-cal-modal__notes">{selectedAppointment.coordinationNotes}</div>
-              ) : null}
-            </div>
-          </div>
-        </div>
-      )}
+// ----------------------------------------------------------------------------
+// Small presentational helpers used only inside the detail/appt modals.
+// ----------------------------------------------------------------------------
+function DetailBlock({ title, children }) {
+  return (
+    <section className="cv-detail__block">
+      <div className="cv-detail__block-title">{title}</div>
+      <div className="cv-detail__block-body">{children}</div>
+    </section>
+  )
+}
+
+function Row({ k, v, mono }) {
+  return (
+    <div className="cv-detail__row">
+      <span className="cv-detail__row-k">{k}</span>
+      <span className={`cv-detail__row-v${mono ? ' cv-detail__row-v--mono' : ''}`}>{v}</span>
     </div>
   )
 }

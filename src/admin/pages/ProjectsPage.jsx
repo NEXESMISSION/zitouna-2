@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useProjects, useOffers } from '../../lib/useSupabase.js'
 import { upsertProject } from '../../lib/db.js'
+import { emitInvalidate } from '../../lib/dataEvents.js'
 import AdminModal from '../components/AdminModal.jsx'
 import './zitouna-admin-page.css'
 import './projects-admin.css'
@@ -113,6 +114,7 @@ export default function ProjectsPage() {
         year: Number(form.year.trim()) || new Date().getFullYear(),
         mapUrl: form.mapUrl.trim(),
       })
+      emitInvalidate('projects')
       setShowCreate(false)
       setForm(EMPTY_FORM)
     } catch (e) {

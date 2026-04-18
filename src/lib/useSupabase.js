@@ -4,9 +4,19 @@ import { supabase } from './supabase.js'
 import * as db from './db.js'
 import { emitInvalidate, onInvalidate } from './dataEvents.js'
 
-const DEFAULT_FETCH_TIMEOUT_MS = 30000
+// 20s timeout — high enough that slow free-tier DBs don't cascade-fail, low
+// enough that a truly stuck socket still surfaces in the UI. On timeout the
+// store retries once (see `doFetch`) before giving up.
+const DEFAULT_FETCH_TIMEOUT_MS = 20000
 
-function withTimeout(promise, timeoutMs = DEFAULT_FETCH_TIMEOUT_MS, label = 'request') {
+async function withTimeout(promiseOrFactory, timeoutMs = DEFAULT_FETCH_TIMEOUT_MS, label = 'request') {
+  // Accept both: an already-running promise (legacy callers) OR a factory
+  // function. A factory defers request creation until after the initial-auth
+  // gate resolves, so the first fetch on a cold page load carries the JWT
+  // and RLS can match against the active user.
+  const promise = typeof promiseOrFactory === 'function'
+    ? (await awaitInitialAuth(), promiseOrFactory())
+    : promiseOrFactory
   let timeoutId = null
   const timeoutPromise = new Promise((_, reject) => {
     timeoutId = window.setTimeout(() => {
@@ -18,76 +28,226 @@ function withTimeout(promise, timeoutMs = DEFAULT_FETCH_TIMEOUT_MS, label = 'req
   })
 }
 
-export function useProjects() {
-  const [projects, setProjects] = useState([])
-  const [loading, setLoading] = useState(true)
-  const loadedOnceRef = useRef(false)
-  const refreshTimerRef = useRef(null)
-  const refreshInFlightRef = useRef(false)
-
-  const refresh = useCallback(async () => {
-    if (refreshInFlightRef.current) return
-    refreshInFlightRef.current = true
-    setLoading(!loadedOnceRef.current)
-    try {
-      const data = await withTimeout(db.fetchProjects(), DEFAULT_FETCH_TIMEOUT_MS, 'fetchProjects')
-      setProjects(data)
-    } catch (e) {
-      console.error('fetchProjects', e)
-    } finally {
-      refreshInFlightRef.current = false
-      loadedOnceRef.current = true
-      setLoading(false)
+// ----------------------------------------------------------------------------
+// Initial-auth gate. Resolves on first `INITIAL_SESSION`/`SIGNED_IN` event;
+// a 2s safety timer unblocks anon pages. Reset on `SIGNED_OUT` so the next
+// login starts from a clean slate.
+// ----------------------------------------------------------------------------
+let _initialAuthPromise = null
+function buildInitialAuthPromise() {
+  return new Promise((resolve) => {
+    const safetyTimer = window.setTimeout(() => resolve(), 2000)
+    const done = () => {
+      window.clearTimeout(safetyTimer)
+      try { sub?.subscription?.unsubscribe() } catch { /* ignore */ }
+      resolve()
     }
-  }, [])
+    const sub = supabase.auth.onAuthStateChange((event) => {
+      if (
+        event === 'INITIAL_SESSION' ||
+        event === 'SIGNED_IN' ||
+        event === 'SIGNED_OUT' ||
+        event === 'TOKEN_REFRESHED'
+      ) done()
+    })
+  })
+}
+export function awaitInitialAuth() {
+  if (!_initialAuthPromise) _initialAuthPromise = buildInitialAuthPromise()
+  return _initialAuthPromise
+}
+// Reset the gate on sign-out so a fresh login is awaited (and stale cached
+// data is cleared by cache stores below).
+supabase.auth.onAuthStateChange((event) => {
+  if (event === 'SIGNED_OUT') {
+    _initialAuthPromise = null
+    for (const reset of _storeResetHandlers) reset()
+  }
+})
 
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      setLoading(!loadedOnceRef.current)
+// ============================================================================
+// Cached store factory — the core of Fix A.
+//
+// Problem this solves: every hook used to fetch on every mount, so
+// navigating between pages refetched the same data, overwhelming free-tier
+// Supabase. With this store:
+//   • State lives at module scope — reused across pages.
+//   • First subscriber triggers ONE fetch; later subscribers read cached data.
+//   • A single realtime channel per table (singleton).
+//   • Stale-while-revalidate: return cache instantly, refetch in background.
+//   • Debounced burst refresh (for realtime event storms).
+//   • One automatic retry on timeout.
+// ============================================================================
+const DEFAULT_STALE_MS = 15_000
+const _storeResetHandlers = new Set()
+
+function createCachedStore({ key, fetcher, realtimeTables = [], staleMs = DEFAULT_STALE_MS, initial = [] }) {
+  let state = { data: initial, loading: true, loadedAt: 0, error: null }
+  const listeners = new Set()
+  let inflight = null
+  let channel = null
+  let refreshTimer = null
+  let subCount = 0
+
+  function publish(patch) {
+    state = { ...state, ...patch }
+    for (const fn of listeners) {
+      try { fn(state) } catch (e) { console.error(`[cache:${key}] listener`, e) }
+    }
+  }
+
+  async function doFetch({ retry = true } = {}) {
+    if (inflight) return inflight
+    inflight = (async () => {
       try {
-        const data = await withTimeout(db.fetchProjects(), DEFAULT_FETCH_TIMEOUT_MS, 'fetchProjects')
-        if (!cancelled) setProjects(data)
+        const data = await withTimeout(() => fetcher(), DEFAULT_FETCH_TIMEOUT_MS, `fetch${key}`)
+        publish({ data, loading: false, loadedAt: Date.now(), error: null })
       } catch (e) {
-        console.error('fetchProjects', e)
+        const msg = String(e?.message || e)
+        const timedOut = msg.includes('timed out')
+        if (timedOut && retry) {
+          console.warn(`[cache:${key}] timeout — retrying once…`)
+          inflight = null
+          return doFetch({ retry: false })
+        }
+        console.error(`[cache:${key}]`, e)
+        publish({ loading: false, error: e instanceof Error ? e : new Error(msg) })
       } finally {
-        loadedOnceRef.current = true
-        if (!cancelled) setLoading(false)
+        inflight = null
       }
     })()
-    const channel = supabase
-      .channel('realtime-projects-parcels')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'projects' }, () => {
-        if (refreshTimerRef.current) window.clearTimeout(refreshTimerRef.current)
-        refreshTimerRef.current = window.setTimeout(() => refresh(), 500)
+    return inflight
+  }
+
+  function scheduleRefresh(ms = 350) {
+    if (refreshTimer) window.clearTimeout(refreshTimer)
+    refreshTimer = window.setTimeout(() => {
+      refreshTimer = null
+      doFetch()
+    }, ms)
+  }
+
+  async function refresh({ force = false, background = false } = {}) {
+    const fresh = state.loadedAt && Date.now() - state.loadedAt < staleMs
+    if (!force && fresh) return state.data
+    if (!background && !state.loadedAt) publish({ loading: true })
+    await doFetch()
+    return state.data
+  }
+
+  function mutateLocal(fn) {
+    const next = fn(state.data)
+    if (next !== state.data) publish({ data: next })
+  }
+
+  function setupChannel() {
+    if (channel || realtimeTables.length === 0) return
+    let ch = supabase.channel(`cache:${key}`)
+    for (const table of realtimeTables) {
+      ch = ch.on('postgres_changes', { event: '*', schema: 'public', table }, () => {
+        scheduleRefresh(500)
       })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'parcels' }, () => {
-        if (refreshTimerRef.current) window.clearTimeout(refreshTimerRef.current)
-        refreshTimerRef.current = window.setTimeout(() => refresh(), 500)
-      })
-      .subscribe()
-    const unsubBus = onInvalidate('projects', () => refresh())
-    return () => {
-      cancelled = true
-      if (refreshTimerRef.current) window.clearTimeout(refreshTimerRef.current)
-      supabase.removeChannel(channel)
-      unsubBus()
     }
-  }, [refresh])
+    ch.subscribe()
+    channel = ch
+  }
 
-  const updateParcelStatus = useCallback(
-    async (parcelDbId, status) => {
-      try {
-        await db.updateParcelStatus(parcelDbId, status)
-        await refresh()
-        emitInvalidate('projects')
-      } catch (e) {
-        console.error('updateParcelStatus', e)
-      }
-    },
-    [refresh],
-  )
+  function teardownChannel() {
+    if (channel) {
+      try { supabase.removeChannel(channel) } catch { /* ignore */ }
+      channel = null
+    }
+    if (refreshTimer) {
+      window.clearTimeout(refreshTimer)
+      refreshTimer = null
+    }
+  }
 
+  function subscribe(fn) {
+    listeners.add(fn)
+    subCount += 1
+    if (subCount === 1) setupChannel()
+    // Kick off the first load if we have no data yet AND nothing in-flight.
+    // Subsequent subscribers just read the cached state — no new fetch.
+    if (!state.loadedAt && !inflight) refresh().catch(() => {})
+    // Hand the new subscriber the current snapshot immediately so it renders
+    // cached data without waiting for the next publish.
+    try { fn(state) } catch { /* ignore */ }
+    return () => {
+      listeners.delete(fn)
+      subCount -= 1
+      if (subCount === 0) teardownChannel()
+    }
+  }
+
+  function reset() {
+    state = { data: initial, loading: true, loadedAt: 0, error: null }
+    inflight = null
+    if (refreshTimer) { window.clearTimeout(refreshTimer); refreshTimer = null }
+    for (const fn of listeners) { try { fn(state) } catch { /* ignore */ } }
+  }
+  _storeResetHandlers.add(reset)
+
+  return { getState: () => state, subscribe, refresh, scheduleRefresh, mutateLocal, reset }
+}
+
+function useCachedStore(store) {
+  const [snap, setSnap] = useState(() => store.getState())
+  useEffect(() => store.subscribe(setSnap), [store])
+  return snap
+}
+
+// ── Store instances — one per top-level resource ────────────────────────────
+const _salesStore = createCachedStore({
+  key: 'sales',
+  fetcher: () => db.fetchSales(),
+  realtimeTables: ['sales'],
+})
+const _clientsStore = createCachedStore({
+  key: 'clients',
+  fetcher: () => db.fetchClients(),
+  realtimeTables: ['clients'],
+})
+const _projectsStore = createCachedStore({
+  key: 'projects',
+  fetcher: () => db.fetchProjects(),
+  realtimeTables: ['projects', 'parcels'],
+})
+const _adminUsersStore = createCachedStore({
+  key: 'admin_users',
+  fetcher: () => db.fetchAdminUsers(),
+  realtimeTables: ['admin_users'],
+})
+const _offersStore = createCachedStore({
+  key: 'offers',
+  fetcher: () => db.fetchOffers(),
+  realtimeTables: ['project_offers'],
+  initial: null,
+})
+const _installmentsStore = createCachedStore({
+  key: 'installments',
+  fetcher: () => db.fetchInstallments(),
+  realtimeTables: ['installment_plans', 'installment_payments'],
+})
+
+// Bus → store: pages that emit `emitInvalidate('sales')` bump the cache.
+onInvalidate('sales',            () => _salesStore.refresh({ force: true, background: true }))
+onInvalidate('clients',          () => _clientsStore.refresh({ force: true, background: true }))
+onInvalidate('projects',         () => _projectsStore.refresh({ force: true, background: true }))
+onInvalidate('installmentPlans', () => _installmentsStore.refresh({ force: true, background: true }))
+
+export function useProjects() {
+  const { data: projects, loading } = useCachedStore(_projectsStore)
+  const refresh = useCallback(() => _projectsStore.refresh({ force: true }), [])
+  const updateParcelStatus = useCallback(async (parcelDbId, status) => {
+    try {
+      await db.updateParcelStatus(parcelDbId, status)
+      _projectsStore.scheduleRefresh(250)
+      emitInvalidate('projects')
+    } catch (e) {
+      console.error('updateParcelStatus', e)
+    }
+  }, [])
   return { projects, loading, refresh, updateParcelStatus }
 }
 
@@ -247,110 +407,26 @@ export function usePublicVisitSlotOptions() {
 }
 
 export function useClients() {
-  const [clients, setClients] = useState([])
-  const [loading, setLoading] = useState(true)
-  const loadedOnceRef = useRef(false)
-
-  const refresh = useCallback(async () => {
-    setLoading(!loadedOnceRef.current)
-    try {
-      const rows = await withTimeout(db.fetchClients(), DEFAULT_FETCH_TIMEOUT_MS, 'fetchClients')
-      setClients(rows)
-    } catch (e) {
-      console.error('fetchClients', e)
-    } finally {
-      loadedOnceRef.current = true
-      setLoading(false)
-    }
+  const { data: clients, loading } = useCachedStore(_clientsStore)
+  const refresh = useCallback(() => _clientsStore.refresh({ force: true }), [])
+  const upsert = useCallback(async (client) => {
+    const saved = await db.upsertClient(client)
+    _clientsStore.scheduleRefresh(250)
+    emitInvalidate('clients')
+    return saved
   }, [])
-
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      setLoading(!loadedOnceRef.current)
-      try {
-        const rows = await withTimeout(db.fetchClients(), DEFAULT_FETCH_TIMEOUT_MS, 'fetchClients')
-        if (!cancelled) setClients(rows)
-      } catch (e) {
-        console.error('fetchClients', e)
-      } finally {
-        loadedOnceRef.current = true
-        if (!cancelled) setLoading(false)
-      }
-    })()
-    const channel = supabase
-      .channel('realtime-clients')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'clients' }, () => refresh())
-      .subscribe()
-    const unsubBus = onInvalidate('clients', () => refresh())
-    return () => {
-      cancelled = true
-      supabase.removeChannel(channel)
-      unsubBus()
-    }
-  }, [refresh])
-
-  const upsert = useCallback(
-    async (client) => {
-      const saved = await db.upsertClient(client)
-      await refresh()
-      emitInvalidate('clients')
-      return saved
-    },
-    [refresh],
-  )
-
-  const remove = useCallback(
-    async (clientId) => {
-      await db.deleteClient(clientId)
-      await refresh()
-      emitInvalidate('clients')
-    },
-    [refresh],
-  )
-
+  const remove = useCallback(async (clientId) => {
+    await db.deleteClient(clientId)
+    _clientsStore.mutateLocal((prev) => (prev || []).filter((c) => String(c.id) !== String(clientId)))
+    _clientsStore.scheduleRefresh(250)
+    emitInvalidate('clients')
+  }, [])
   return { clients, loading, refresh, upsert, remove }
 }
 
 export function useOffers() {
-  const [liveOffers, setLiveOffers] = useState(null)
-  const [loading, setLoading] = useState(true)
-
-  const refresh = useCallback(async () => {
-    setLoading(true)
-    try {
-      const by = await db.fetchOffers()
-      setLiveOffers(by)
-    } catch (e) {
-      console.error('fetchOffers', e)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      setLoading(true)
-      try {
-        const by = await db.fetchOffers()
-        if (!cancelled) setLiveOffers(by)
-      } catch (e) {
-        console.error('fetchOffers', e)
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
-    const channel = supabase
-      .channel('realtime-offers')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'project_offers' }, () => refresh())
-      .subscribe()
-    return () => {
-      cancelled = true
-      supabase.removeChannel(channel)
-    }
-  }, [refresh])
-
+  const { data: liveOffers, loading, error } = useCachedStore(_offersStore)
+  const refresh = useCallback(() => _offersStore.refresh({ force: true }), [])
   const offersByProject = useMemo(() => {
     const out = {}
     const base = liveOffers && typeof liveOffers === 'object' ? liveOffers : {}
@@ -365,111 +441,46 @@ export function useOffers() {
     }
     return out
   }, [liveOffers])
-
-  return { offersByProject, loading, refresh }
+  return { offersByProject, loading, error: error || null, refresh }
 }
 
 export function useSales() {
-  const [sales, setSales] = useState([])
-  const [loading, setLoading] = useState(true)
-  const refreshTimer = useRef(null)
-  const creatingIds = useRef(new Set())
-  const loadedOnceRef = useRef(false)
+  const { data: sales, loading, error } = useCachedStore(_salesStore)
+  const refresh = useCallback(() => _salesStore.refresh({ force: true }), [])
 
-  const refresh = useCallback(async () => {
-    setLoading(!loadedOnceRef.current)
-    try {
-      const rows = await withTimeout(db.fetchSales(), DEFAULT_FETCH_TIMEOUT_MS, 'fetchSales')
-      setSales(rows)
-    } catch (e) {
-      console.error('fetchSales', e)
-    } finally {
-      loadedOnceRef.current = true
-      setLoading(false)
+  const create = useCallback(async (sale) => {
+    const row = await db.createSale({
+      ...sale,
+      buyerPhoneNormalized: normalizePhone(sale.buyerPhoneNormalized || sale.buyerPhone || ''),
+    })
+    // Optimistic: insert the new row at the top immediately, then schedule a
+    // background refresh to pick up joined fields the insert didn't return.
+    if (row?.id) {
+      _salesStore.mutateLocal((prev) => [row, ...(prev || [])])
     }
+    _salesStore.scheduleRefresh(350)
+    emitInvalidate('sales')
+    return row
   }, [])
 
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      setLoading(!loadedOnceRef.current)
-      try {
-        const rows = await withTimeout(db.fetchSales(), DEFAULT_FETCH_TIMEOUT_MS, 'fetchSales')
-        if (!cancelled) setSales(rows)
-      } catch (e) {
-        console.error('fetchSales', e)
-      } finally {
-        loadedOnceRef.current = true
-        if (!cancelled) setLoading(false)
-      }
-    })()
-    const channel = supabase
-      .channel('realtime-sales')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'sales' }, () => {
-        // Debounce refresh bursts (multiple row updates happen in a row).
-        if (refreshTimer.current) window.clearTimeout(refreshTimer.current)
-        refreshTimer.current = window.setTimeout(() => refresh(), 350)
-      })
-      .subscribe()
-    // Local event bus: any other page that mutates sales bumps us immediately,
-    // even when Supabase realtime replication isn't enabled for this table.
-    const unsubBus = onInvalidate('sales', () => refresh())
-    return () => {
-      cancelled = true
-      if (refreshTimer.current) window.clearTimeout(refreshTimer.current)
-      supabase.removeChannel(channel)
-      unsubBus()
-    }
-  }, [refresh])
+  const update = useCallback(async (saleId, patch = {}) => {
+    await db.updateSale(saleId, patch)
+    _salesStore.mutateLocal((prev) => (prev || []).map((s) =>
+      String(s.id) === String(saleId) ? { ...s, ...patch } : s
+    ))
+    _salesStore.scheduleRefresh(350)
+    emitInvalidate('sales')
+    return { id: saleId, ...patch }
+  }, [])
 
-  const create = useCallback(
-    async (sale) => {
-      const row = await db.createSale({
-        ...sale,
-        buyerPhoneNormalized: normalizePhone(sale.buyerPhoneNormalized || sale.buyerPhone || ''),
-      })
-      // UX: show the new sale immediately without requiring manual refresh.
-      // The row returned from insert may miss joined fields, so we also trigger a background refresh.
-      if (row?.id && !creatingIds.current.has(String(row.id))) {
-        creatingIds.current.add(String(row.id))
-        setSales((prev) => [row, ...(prev || [])])
-        window.setTimeout(() => {
-          creatingIds.current.delete(String(row.id))
-        }, 5_000)
-      }
-      if (refreshTimer.current) window.clearTimeout(refreshTimer.current)
-      refreshTimer.current = window.setTimeout(() => refresh(), 350)
-      emitInvalidate('sales')
-      return row
-    },
-    [refresh],
-  )
+  const remove = useCallback(async (saleId) => {
+    await db.deleteSale(saleId)
+    _salesStore.mutateLocal((prev) => (prev || []).filter((s) => String(s.id) !== String(saleId)))
+    _salesStore.scheduleRefresh(350)
+    emitInvalidate('sales')
+  }, [])
 
-  const update = useCallback(
-    async (saleId, patch = {}) => {
-      await db.updateSale(saleId, patch)
-      // Optimistic local patch, then background refresh to keep joins consistent.
-      setSales((prev) => (prev || []).map((s) => (String(s.id) === String(saleId) ? { ...s, ...patch } : s)))
-      if (refreshTimer.current) window.clearTimeout(refreshTimer.current)
-      refreshTimer.current = window.setTimeout(() => refresh(), 350)
-      emitInvalidate('sales')
-      return { id: saleId, ...patch }
-    },
-    [refresh],
-  )
-
-  const remove = useCallback(
-    async (saleId) => {
-      await db.deleteSale(saleId)
-      setSales((prev) => (prev || []).filter((s) => String(s.id) !== String(saleId)))
-      if (refreshTimer.current) window.clearTimeout(refreshTimer.current)
-      refreshTimer.current = window.setTimeout(() => refresh(), 350)
-      emitInvalidate('sales')
-    },
-    [refresh],
-  )
-
-  return { sales, loading, refresh, create, update, remove }
+  return { sales, loading, error: error || null, refresh, create, update, remove }
 }
 
 function applySaleFilters(list, filters = {}) {
@@ -505,8 +516,8 @@ export function useSalesScoped(filters = {}) {
     try {
       const rows =
         clientId != null && clientId !== ''
-          ? await withTimeout(db.fetchSalesScoped({ clientId }), DEFAULT_FETCH_TIMEOUT_MS, 'fetchSalesScoped')
-          : await withTimeout(db.fetchSales(), DEFAULT_FETCH_TIMEOUT_MS, 'fetchSales')
+          ? await withTimeout(() => db.fetchSalesScoped({ clientId }), DEFAULT_FETCH_TIMEOUT_MS, 'fetchSalesScoped')
+          : await withTimeout(() => db.fetchSales(), DEFAULT_FETCH_TIMEOUT_MS, 'fetchSales')
       setLiveSales(rows)
     } catch (e) {
       console.error('fetchSalesScoped', e)
@@ -523,8 +534,8 @@ export function useSalesScoped(filters = {}) {
       try {
         const rows =
           clientId != null && clientId !== ''
-            ? await withTimeout(db.fetchSalesScoped({ clientId }), DEFAULT_FETCH_TIMEOUT_MS, 'fetchSalesScoped')
-            : await withTimeout(db.fetchSales(), DEFAULT_FETCH_TIMEOUT_MS, 'fetchSales')
+            ? await withTimeout(() => db.fetchSalesScoped({ clientId }), DEFAULT_FETCH_TIMEOUT_MS, 'fetchSalesScoped')
+            : await withTimeout(() => db.fetchSales(), DEFAULT_FETCH_TIMEOUT_MS, 'fetchSales')
         if (!cancelled) setLiveSales(rows)
       } catch (e) {
         console.error('fetchSalesScoped', e)
@@ -563,7 +574,7 @@ export function useSalesBySellerClientId(sellerClientId) {
     setLoading(!loadedOnceRef.current)
     try {
       const rows = await withTimeout(
-        db.fetchSalesBySellerClientId(sellerClientId),
+        () => db.fetchSalesBySellerClientId(sellerClientId),
         DEFAULT_FETCH_TIMEOUT_MS,
         'fetchSalesBySellerClientId',
       )
@@ -583,7 +594,7 @@ export function useSalesBySellerClientId(sellerClientId) {
       setLoading(!loadedOnceRef.current)
       try {
         const rows = await withTimeout(
-          db.fetchSalesBySellerClientId(sellerClientId),
+          () => db.fetchSalesBySellerClientId(sellerClientId),
           DEFAULT_FETCH_TIMEOUT_MS,
           'fetchSalesBySellerClientId',
         )
@@ -609,57 +620,14 @@ export function useSalesBySellerClientId(sellerClientId) {
 }
 
 export function useInstallments() {
-  const [plans, setPlans] = useState([])
-  const [loading, setLoading] = useState(true)
-
-  const refresh = useCallback(async () => {
-    setLoading(true)
-    try {
-      const rows = await db.fetchInstallments()
-      setPlans(rows)
-    } catch (e) {
-      console.error('fetchInstallments', e)
-    } finally {
-      setLoading(false)
-    }
+  const { data: plans, loading } = useCachedStore(_installmentsStore)
+  const refresh = useCallback(() => _installmentsStore.refresh({ force: true }), [])
+  const createPlan = useCallback(async (plan) => {
+    const id = await db.createInstallmentPlan(plan)
+    _installmentsStore.scheduleRefresh(250)
+    emitInvalidate('installmentPlans')
+    return id
   }, [])
-
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      setLoading(true)
-      try {
-        const rows = await db.fetchInstallments()
-        if (!cancelled) setPlans(rows)
-      } catch (e) {
-        console.error('fetchInstallments', e)
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
-    const channel = supabase
-      .channel('realtime-installments')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'installment_plans' }, () => refresh())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'installment_payments' }, () => refresh())
-      .subscribe()
-    const unsubBus = onInvalidate('installmentPlans', () => refresh())
-    return () => {
-      cancelled = true
-      supabase.removeChannel(channel)
-      unsubBus()
-    }
-  }, [refresh])
-
-  const createPlan = useCallback(
-    async (plan) => {
-      const id = await db.createInstallmentPlan(plan)
-      await refresh()
-      emitInvalidate('installmentPlans')
-      return id
-    },
-    [refresh],
-  )
-
   return { plans, loading, refresh, createPlan, updatePlan: async () => {} }
 }
 
@@ -676,7 +644,7 @@ export function useInstallmentsScoped(filters = {}) {
     setLoading(true)
     try {
       const rows = await withTimeout(
-        db.fetchInstallmentsScoped({ clientId }),
+        () => db.fetchInstallmentsScoped({ clientId }),
         DEFAULT_FETCH_TIMEOUT_MS,
         'fetchInstallmentsScoped',
       )
@@ -698,7 +666,7 @@ export function useInstallmentsScoped(filters = {}) {
       setLoading(true)
       try {
         const rows = await withTimeout(
-          db.fetchInstallmentsScoped({ clientId }),
+          () => db.fetchInstallmentsScoped({ clientId }),
           DEFAULT_FETCH_TIMEOUT_MS,
           'fetchInstallmentsScoped',
         )
@@ -724,62 +692,19 @@ export function useInstallmentsScoped(filters = {}) {
 }
 
 export function useAdminUsers() {
-  const [adminUsers, setAdminUsers] = useState([])
-  const [loading, setLoading] = useState(true)
-
-  const refresh = useCallback(async () => {
-    setLoading(true)
-    try {
-      const rows = await db.fetchAdminUsers()
-      setAdminUsers(rows)
-    } catch (e) {
-      console.error('fetchAdminUsers', e)
-    } finally {
-      setLoading(false)
-    }
+  const { data: adminUsers, loading, error } = useCachedStore(_adminUsersStore)
+  const refresh = useCallback(() => _adminUsersStore.refresh({ force: true }), [])
+  const upsert = useCallback(async (user) => {
+    const saved = await db.upsertAdminUser(user)
+    _adminUsersStore.scheduleRefresh(250)
+    return saved
   }, [])
-
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      setLoading(true)
-      try {
-        const rows = await db.fetchAdminUsers()
-        if (!cancelled) setAdminUsers(rows)
-      } catch (e) {
-        console.error('fetchAdminUsers', e)
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
-    const channel = supabase
-      .channel('realtime-admin-users')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'admin_users' }, () => refresh())
-      .subscribe()
-    return () => {
-      cancelled = true
-      supabase.removeChannel(channel)
-    }
-  }, [refresh])
-
-  const upsert = useCallback(
-    async (user) => {
-      const saved = await db.upsertAdminUser(user)
-      await refresh()
-      return saved
-    },
-    [refresh],
-  )
-
-  const remove = useCallback(
-    async (userId) => {
-      await db.deleteAdminUser(userId)
-      await refresh()
-    },
-    [refresh],
-  )
-
-  return { adminUsers, loading, error: null, refresh, upsert, remove }
+  const remove = useCallback(async (userId) => {
+    await db.deleteAdminUser(userId)
+    _adminUsersStore.mutateLocal((prev) => (prev || []).filter((u) => String(u.id) !== String(userId)))
+    _adminUsersStore.scheduleRefresh(250)
+  }, [])
+  return { adminUsers, loading, error: error || null, refresh, upsert, remove }
 }
 
 export function useProjectWorkflow(projectId) {
@@ -1187,7 +1112,7 @@ export function useAmbassadorReferralSummary(enabled = true) {
     setLoading(true)
     try {
       const next = await withTimeout(
-        db.fetchAmbassadorReferralSummary(),
+        () => db.fetchAmbassadorReferralSummary(),
         DEFAULT_FETCH_TIMEOUT_MS,
         'fetchAmbassadorReferralSummary',
       )
@@ -1212,7 +1137,7 @@ export function useAmbassadorReferralSummary(enabled = true) {
     ;(async () => {
       try {
         const next = await withTimeout(
-          db.fetchAmbassadorReferralSummary(),
+          () => db.fetchAmbassadorReferralSummary(),
           DEFAULT_FETCH_TIMEOUT_MS,
           'fetchAmbassadorReferralSummary',
         )
@@ -1261,7 +1186,7 @@ export function useMyCommissionLedger(clientIdOrEnabled = null) {
     setLoading(true)
     setError(null)
     try {
-      const rows = await withTimeout(db.fetchMyCommissionLedger(explicitId), DEFAULT_FETCH_TIMEOUT_MS, 'fetchMyCommissionLedger')
+      const rows = await withTimeout(() => db.fetchMyCommissionLedger(explicitId), DEFAULT_FETCH_TIMEOUT_MS, 'fetchMyCommissionLedger')
       setEvents(rows || [])
     } catch (e) {
       console.warn('[useMyCommissionLedger]', e?.message || e)
@@ -1277,7 +1202,7 @@ export function useMyCommissionLedger(clientIdOrEnabled = null) {
     ;(async () => {
       setLoading(true)
       try {
-        const rows = await withTimeout(db.fetchMyCommissionLedger(explicitId), DEFAULT_FETCH_TIMEOUT_MS, 'fetchMyCommissionLedger')
+        const rows = await withTimeout(() => db.fetchMyCommissionLedger(explicitId), DEFAULT_FETCH_TIMEOUT_MS, 'fetchMyCommissionLedger')
         if (!cancelled) setEvents(rows || [])
       } catch (e) {
         if (!cancelled) setError(String(e?.message || e))

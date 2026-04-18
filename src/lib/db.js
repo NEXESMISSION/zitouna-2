@@ -508,9 +508,11 @@ export async function upsertParcelForProject(projectId, plot) {
   const pricePerTree = trees > 0
     ? Math.round(totalPrice / trees)
     : (Number(plot.pricePerTree) || 0)
-  const parcelNumber = Number(plot.id)
+  // Accept both `id` (legacy) and `plotNumber` (current UI) — the UI evolved
+  // but the schema column is still `parcel_number`. Either key works.
+  const parcelNumber = Number(plot.plotNumber ?? plot.id)
   if (!Number.isFinite(parcelNumber) || parcelNumber <= 0) {
-    throw new Error('رقم القطعة غير صالح')
+    throw new Error('Numéro de parcelle invalide')
   }
   const row = {
     project_id: projectId,

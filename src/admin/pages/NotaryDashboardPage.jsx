@@ -3,9 +3,13 @@ import { useNavigate } from 'react-router-dom'
 import { useClients, useSales } from '../../lib/useSupabase.js'
 import { useAuth } from '../../lib/AuthContext.jsx'
 import * as db from '../../lib/db.js'
+import AdminModal from '../components/AdminModal.jsx'
 import SaleSnapshotTracePanel from '../components/SaleSnapshotTracePanel.jsx'
+import { getPagerPages } from './pager-util.js'
+import './sell-field.css'
 import './notary-dashboard.css'
-import './zitouna-admin-page.css'
+
+const DOSSIERS_PER_PAGE = 15
 
 const DOC_KEY_FROM_WF = {
   contract: 'contract',
@@ -43,11 +47,10 @@ function initials(name) {
 
 const DOC_ITEMS = [
   { key: 'contract', title: 'Contrat', desc: 'Contrat de vente principal' },
-  { key: 'cahier', title: 'Cahier des charges', desc: 'Document des conditions legales' },
+  { key: 'cahier', title: 'Cahier des charges', desc: 'Document des conditions légales' },
   { key: 'sellerContract', title: 'Contrat vendeur', desc: 'Contrat du vendeur/mandat (optionnel)' },
 ]
 
-/** Lignes checklist pour l’UI notaire : snapshot vente si présent, sinon workflow projet. */
 function checklistRowsForNotary(sale, projectWorkflows = {}) {
   const raw =
     sale?.checklistSnapshot?.items?.length
@@ -74,9 +77,10 @@ function requiredDocKeysFromRows(rows) {
 export default function NotaryDashboardPage() {
   const navigate = useNavigate()
   const { adminUser } = useAuth()
-  const { sales, update: updateSale } = useSales()
+  const { sales, loading: salesLoading, update: updateSale } = useSales()
   const { clients } = useClients()
   const [query, setQuery] = useState('')
+  const [page, setPage] = useState(1)
   const [selectedSale, setSelectedSale] = useState(null)
   const [docsBySale, setDocsBySale] = useState({})
   const [saving, setSaving] = useState(false)
@@ -88,7 +92,6 @@ export default function NotaryDashboardPage() {
   const pendingProjectIds = useMemo(() => {
     const ids = new Set()
     for (const s of sales || []) {
-      // Dossiers appear here as soon as a sale exists (coordination) and later stay here (pending_legal).
       const st = String(s.status || '')
       if ((st === 'pending_coordination' || st === 'pending_finance' || st === 'pending_legal') && s.projectId) {
         ids.add(String(s.projectId))
@@ -177,15 +180,22 @@ export default function NotaryDashboardPage() {
       },
     }).catch((e) => console.warn('notaryChecklistDraft save:', e?.message || e))
   }, [adminUser?.id])
+
   const readyCount = useMemo(
     () =>
       dossiers.filter((d) => {
         const rows = checklistRowsForNotary(d, projectWorkflows)
         const req = requiredDocKeysFromRows(rows)
         const docMap = docsBySale[d.id] || {}
-        return req.every((k) => docMap[k])
+        const financeOk = Boolean(d.financeValidatedAt || d.financeConfirmedAt)
+        return financeOk && req.every((k) => docMap[k])
       }).length,
-    [dossiers, docsBySale],
+    [dossiers, docsBySale, projectWorkflows],
+  )
+
+  const lockedCount = useMemo(
+    () => dossiers.filter((d) => !d.financeValidatedAt && !d.financeConfirmedAt).length,
+    [dossiers],
   )
 
   const toggleDoc = (docKey) => {
@@ -218,10 +228,8 @@ export default function NotaryDashboardPage() {
 
   const completeSale = async () => {
     if (!selectedSale || !selectedAllDocsChecked) return
-    // Must not complete notary step unless finance is paid/validated.
-    // Coordination may send dossiers early, but completion is gated by finance.
     if (!selectedSale.financeValidatedAt && !selectedSale.financeConfirmedAt) {
-      setWarningNotice('Paiement finance non valide. La confirmation de reglement est obligatoire avant la finalisation notariale.')
+      setWarningNotice('Paiement finance non validé. La confirmation de règlement est obligatoire avant la finalisation notariale.')
       return
     }
     setSaving(true)
@@ -251,8 +259,6 @@ export default function NotaryDashboardPage() {
         },
       }
       const saved = await updateSale(selectedSale.id, patch)
-      // useSales.update returns only { id, ...patch }. Merge with the displayed
-      // selectedSale (full row) so downstream logic sees paymentType / snapshots / price.
       const saleRow = { ...selectedSale, ...patch, ...(saved || {}) }
       await db.insertCommissionEventsForCompletedSale(saleRow, actorId, adminUser?.email || '')
 
@@ -266,16 +272,11 @@ export default function NotaryDashboardPage() {
             } else {
               console.warn('[notary] installment plan NOT created — missing snapshot fields', {
                 saleId: saleRow.id,
-                duration: saleRow.offerSnapshot?.duration ?? saleRow.offerDuration,
-                downPct: saleRow.offerSnapshot?.downPayment ?? saleRow.offerDownPayment,
-                agreedPrice: saleRow.pricingSnapshot?.agreedPrice ?? saleRow.agreedPrice,
               })
             }
           } catch (e) {
             console.warn('[notary] ensureInstallmentPlanFromSale failed:', e?.message || e, { saleId: saleRow.id })
           }
-        } else {
-          console.info('[notary] installment plan skipped — destination is not plans', { saleId: saleRow.id, dest })
         }
       }
 
@@ -305,10 +306,8 @@ export default function NotaryDashboardPage() {
           }
         }
       }
-      if (saleRow.sellerContractSigned && saleRow.clientId) {
-        // Parcel ownership is handled by database triggers / sale status updates
-      }
-      setNotice(`Vente ${selectedSale.code || selectedSale.id} completee avec succes.`)
+
+      setNotice(`Vente ${selectedSale.code || selectedSale.id} finalisée avec succès.`)
       setSelectedSale(null)
       setTimeout(() => setNotice(''), 2600)
     } finally {
@@ -316,326 +315,324 @@ export default function NotaryDashboardPage() {
     }
   }
 
-  // Count dossiers blocked by finance so users understand why some cards are locked.
-  const lockedCount = useMemo(
-    () => dossiers.filter((d) => !d.financeValidatedAt && !d.financeConfirmedAt).length,
-    [dossiers],
+  const openCard = (sale) => {
+    if (!sale.financeValidatedAt && !sale.financeConfirmedAt) {
+      setWarningNotice("Paiement non validé. Ouvrez la page Finance et confirmez le règlement avant d'ouvrir ce dossier.")
+      return
+    }
+    setSelectedSale(sale)
+  }
+
+  const pageCount = Math.max(1, Math.ceil(dossiers.length / DOSSIERS_PER_PAGE))
+  const safePage = Math.min(Math.max(1, page), pageCount)
+  const pagedDossiers = useMemo(
+    () => dossiers.slice((safePage - 1) * DOSSIERS_PER_PAGE, safePage * DOSSIERS_PER_PAGE),
+    [dossiers, safePage],
   )
+  const onQueryChange = (e) => { setQuery(e.target.value); setPage(1) }
+
+  const showSkeletons = salesLoading && dossiers.length === 0
 
   return (
-    <div className="nd nd--v2">
-      <button type="button" className="ds-back-btn nd-v2__back" onClick={() => navigate(-1)}>
-        <span className="ds-back-btn__icon" aria-hidden>←</span>
-        <span className="ds-back-btn__label">Retour</span>
+    <div className="sell-field" dir="ltr">
+      <button type="button" className="sp-back-btn" onClick={() => navigate(-1)}>
+        <span className="sp-back-btn__icon-wrap" aria-hidden>←</span>
+        <span>Retour</span>
       </button>
 
-      <section className="nd__hero nd-v2__hero">
-        <div className="nd__hero-top">
-          <div className="nd__hero-icon" aria-hidden>🖋️</div>
-          <div>
-            <h1 className="nd__hero-title nd-v2__hero-title">Bureau du notaire</h1>
-            <p className="nd__hero-subtitle nd-v2__hero-subtitle">Finaliser la vente après paiement et signatures</p>
-          </div>
+      <header className="sp-hero">
+        <div className="sp-hero__avatar nd-hero__icon" aria-hidden>
+          <span>🖋️</span>
         </div>
-        <div className="nd__hero-kpi nd-v2__hero-kpi">
-          <div className="nd__kpi-block">
-            <span className="nd__kpi-value nd-v2__kpi-value">{dossiers.length}</span>
-            <span className="nd__kpi-label nd-v2__kpi-label">Dossiers en cours</span>
-          </div>
-          <span className="nd__kpi-sep" />
-          <div className="nd__kpi-block">
-            <span className="nd__kpi-value nd-v2__kpi-value">{readyCount}</span>
-            <span className="nd__kpi-label nd-v2__kpi-label">Prêts à finaliser</span>
-          </div>
-          <span className="nd__kpi-sep" />
-          <div className="nd__kpi-block">
-            <span className="nd__kpi-value nd-v2__kpi-value">{lockedCount}</span>
-            <span className="nd__kpi-label nd-v2__kpi-label">En attente paiement</span>
-          </div>
+        <div className="sp-hero__info">
+          <h1 className="sp-hero__name">Bureau du notaire</h1>
+          <p className="sp-hero__role">Finaliser les ventes signées</p>
         </div>
-      </section>
+        <div className="sp-hero__kpis">
+          <span className="sp-hero__kpi-num">
+            {showSkeletons ? <span className="sp-sk-num sp-sk-num--wide" /> : dossiers.length}
+          </span>
+          <span className="sp-hero__kpi-label">dossier{dossiers.length > 1 ? 's' : ''}</span>
+        </div>
+      </header>
 
-      {/* Inline guidance: explains the single job on this page in plain French. */}
-      <div className="nd-v2__guide" role="note">
-        <span className="nd-v2__guide-icon" aria-hidden>💡</span>
-        <div>
-          <div className="nd-v2__guide-title">Comment procéder</div>
-          <div className="nd-v2__guide-text">
-            1. Choisissez un dossier dans la liste. 2. Vérifiez les informations. 3. Cochez chaque document signé. 4. Cliquez sur <strong>Finaliser la vente</strong>.
-          </div>
+      <div className="sp-cat-bar">
+        <div className="sp-cat-stats">
+          <strong>{showSkeletons ? <span className="sp-sk-num" /> : dossiers.length}</strong> total
+          <span className="sp-cat-stat-dot" />
+          <strong>{showSkeletons ? <span className="sp-sk-num" /> : readyCount}</strong> prêt{readyCount > 1 ? 's' : ''}
+          <span className="sp-cat-stat-dot" />
+          <strong>{showSkeletons ? <span className="sp-sk-num" /> : lockedCount}</strong> bloqué{lockedCount > 1 ? 's' : ''}
         </div>
-      </div>
-
-      <div className="nd-v2__toolbar">
-        <label className="nd-v2__search-wrap">
-          <span className="nd__search-icon" aria-hidden>🔎</span>
+        <div className="sp-cat-filters">
           <input
-            className="nd__search nd-v2__search"
+            className="sp-cat-search"
+            placeholder="Rechercher un client, projet, référence…"
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Rechercher un client, un projet ou une référence"
+            onChange={onQueryChange}
             aria-label="Rechercher un dossier"
           />
-        </label>
-      </div>
-
-      <div className="nd-v2__section-head">
-        <h2 className="nd-v2__section-title">Dossiers à traiter</h2>
-        <span className="nd-v2__section-hint" title="Un dossier est « prêt » lorsque tous les documents requis sont cochés et que le paiement finance est validé.">
-          {readyCount} prêt{readyCount > 1 ? 's' : ''} sur {dossiers.length}
-        </span>
-      </div>
-
-      {dossiers.length === 0 ? (
-        <div className="nd__empty nd-v2__empty">
-          <div className="nd-v2__empty-icon" aria-hidden>📭</div>
-          <strong className="nd-v2__empty-title">Aucun dossier à traiter</strong>
-          <p className="nd-v2__empty-text">
-            Les nouveaux dossiers apparaissent ici dès que l'équipe <strong>Coordination</strong> crée une vente.
-          </p>
-          <button type="button" className="nd-v2__empty-btn" onClick={() => navigate('/admin/coordination')}>
-            Aller à la Coordination
-          </button>
         </div>
-      ) : (
-        <section className="nd__card-list nd-v2__card-list" aria-label="Liste des dossiers">
-          {dossiers.map((sale) => {
-            const checks = docsBySale[sale.id] || {}
-            const rows = checklistRowsForNotary(sale, projectWorkflows)
-            const reqKeys = requiredDocKeysFromRows(rows)
-            const reqChecked = reqKeys.filter((k) => checks[k]).length
-            const reqTotal = reqKeys.length
-            const financeOk = Boolean(sale.financeValidatedAt || sale.financeConfirmedAt)
-            const isReady = financeOk && reqChecked === reqTotal && reqTotal > 0
-            const statusLabel = !financeOk
-              ? 'Paiement non validé'
-              : isReady
-                ? 'Prêt à finaliser'
-                : 'Documents incomplets'
-            const statusTone = !financeOk ? 'warn' : isReady ? 'ok' : 'info'
-            return (
+      </div>
+
+      <div className="sp-cards">
+        {showSkeletons ? (
+          Array.from({ length: 6 }).map((_, i) => (
+            <div key={`sk-${i}`} className="sp-card sp-card--skeleton" aria-hidden>
+              <div className="sp-card__head">
+                <div className="sp-card__user">
+                  <span className="sp-card__initials sp-sk-box" />
+                  <div style={{ flex: 1 }}>
+                    <p className="sp-sk-line sp-sk-line--title" />
+                    <p className="sp-sk-line sp-sk-line--sub" />
+                  </div>
+                </div>
+                <span className="sp-sk-line sp-sk-line--badge" />
+              </div>
+              <div className="sp-card__body">
+                <span className="sp-sk-line sp-sk-line--price" />
+                <span className="sp-sk-line sp-sk-line--info" />
+              </div>
+            </div>
+          ))
+        ) : dossiers.length === 0 ? (
+          <div className="sp-empty">
+            <span className="sp-empty__emoji" aria-hidden>📭</span>
+            <div className="sp-empty__title">
+              {query ? 'Aucun résultat.' : 'Aucun dossier à traiter.'}
+            </div>
+            {!query && (
+              <p className="nd-empty__text">
+                Les nouveaux dossiers apparaissent dès qu'une vente est créée par la Coordination.
+              </p>
+            )}
+          </div>
+        ) : pagedDossiers.map((sale) => {
+          const checks = docsBySale[sale.id] || {}
+          const rows = checklistRowsForNotary(sale, projectWorkflows)
+          const reqKeys = requiredDocKeysFromRows(rows)
+          const reqChecked = reqKeys.filter((k) => checks[k]).length
+          const reqTotal = reqKeys.length
+          const financeOk = Boolean(sale.financeValidatedAt || sale.financeConfirmedAt)
+          const isReady = financeOk && reqChecked === reqTotal && reqTotal > 0
+          const tone = !financeOk ? 'orange' : isReady ? 'green' : 'blue'
+          const badgeLabel = !financeOk ? 'Paiement en attente' : isReady ? 'Prêt à finaliser' : 'Documents requis'
+          const pct = reqTotal ? (reqChecked / reqTotal) * 100 : 0
+          return (
+            <button
+              key={sale.id}
+              type="button"
+              className={`sp-card sp-card--${tone}`}
+              onClick={() => openCard(sale)}
+              aria-label={`Ouvrir le dossier de ${sale.clientName || 'client'}`}
+            >
+              <div className="sp-card__head">
+                <div className="sp-card__user">
+                  <span className="sp-card__initials">{initials(sale.clientName)}</span>
+                  <div style={{ minWidth: 0 }}>
+                    <p className="sp-card__name">{sale.clientName || 'Client'}</p>
+                    <p className="sp-card__sub">
+                      {sale.projectTitle || '—'}
+                      {sale.plotIds.length ? ` · ${sale.plotIds.map((id) => `#${id}`).join(', ')}` : ''}
+                    </p>
+                  </div>
+                </div>
+                <span className={`sp-badge sp-badge--${tone}`}>{badgeLabel}</span>
+              </div>
+
+              <div className="sp-card__body">
+                <div className="sp-card__price">
+                  <span className="sp-card__amount">{(sale.total || 0).toLocaleString('fr-FR')}</span>
+                  <span className="sp-card__currency">TND</span>
+                </div>
+                <div className="sp-card__info">
+                  <span>{reqChecked}/{reqTotal} docs</span>
+                </div>
+              </div>
+
+              <div className="nd-progress" aria-hidden>
+                <span className="nd-progress__fill" style={{ width: `${pct}%` }} />
+              </div>
+            </button>
+          )
+        })}
+      </div>
+
+      {!showSkeletons && dossiers.length > DOSSIERS_PER_PAGE && (
+        <div className="sp-pager" role="navigation" aria-label="Pagination">
+          <button
+            type="button"
+            className="sp-pager__btn sp-pager__btn--nav"
+            disabled={safePage <= 1}
+            onClick={() => setPage(Math.max(1, safePage - 1))}
+            aria-label="Page précédente"
+          >
+            ‹
+          </button>
+          {getPagerPages(safePage, pageCount).map((p, i) =>
+            p === '…' ? (
+              <span key={`dots-${i}`} className="sp-pager__ellipsis" aria-hidden>…</span>
+            ) : (
               <button
-                key={sale.id}
+                key={p}
                 type="button"
-                className={`nd__card nd-v2__card nd-v2__card--${statusTone}`}
-                aria-label={`Ouvrir le dossier de ${sale.clientName || 'client'}`}
-                onClick={() => {
-                  // Do not open the notary dossier until finance is paid/validated.
-                  if (!sale.financeValidatedAt && !sale.financeConfirmedAt) {
-                    setWarningNotice("Paiement non validé. Ouvrez la page Finance et confirmez le règlement avant d'ouvrir ce dossier notaire.")
-                    return
-                  }
-                  setSelectedSale(sale)
-                }}
+                className={`sp-pager__btn${p === safePage ? ' sp-pager__btn--active' : ''}`}
+                onClick={() => setPage(p)}
+                aria-current={p === safePage ? 'page' : undefined}
               >
-                <div className="nd__card-head">
-                  <div className="nd__card-user">
-                    <span className="nd__card-initials nd-v2__card-initials">{initials(sale.clientName)}</span>
-                    <div style={{ minWidth: 0 }}>
-                      <p className="nd__card-name nd-v2__card-name">{sale.clientName || 'Client'}</p>
-                      <div className="nd__card-ref nd-v2__card-ref">Réf. {sale.code || sale.id}</div>
-                    </div>
-                  </div>
-                  <span className={`nd-v2__status nd-v2__status--${statusTone}`}>{statusLabel}</span>
-                </div>
-
-                <div className="nd-v2__card-meta">
-                  <span className="nd-v2__meta-label">Projet</span>
-                  <span className="nd-v2__meta-value">
-                    {sale.projectTitle || '—'}
-                    {sale.plotIds.length ? ` • Parcelle${sale.plotIds.length > 1 ? 's' : ''} ${sale.plotIds.map((id) => `#${id}`).join(', ')}` : ''}
-                  </span>
-                </div>
-
-                <div className="nd-v2__card-amounts">
-                  <div>
-                    <div className="nd-v2__amount-label">Montant de la vente</div>
-                    <div className="nd-v2__amount-value">{fmtMoney(sale.total)}</div>
-                  </div>
-                  <div className="nd-v2__amount-sep" aria-hidden />
-                  <div>
-                    <div className="nd-v2__amount-label">Reste à encaisser</div>
-                    <div className="nd-v2__amount-value nd-v2__amount-value--accent">{fmtMoney(sale.remaining)}</div>
-                  </div>
-                </div>
-
-                <div className="nd-v2__card-foot">
-                  <span className="nd-v2__progress" aria-label={`${reqChecked} documents cochés sur ${reqTotal}`}>
-                    <span className="nd-v2__progress-bar">
-                      <span className="nd-v2__progress-fill" style={{ width: `${reqTotal ? (reqChecked / reqTotal) * 100 : 0}%` }} />
-                    </span>
-                    <span className="nd-v2__progress-text">{reqChecked}/{reqTotal || 0} documents requis</span>
-                  </span>
-                  <span className="nd-v2__card-cta" aria-hidden>Ouvrir →</span>
-                </div>
+                {p}
               </button>
-            )
-          })}
-        </section>
+            ),
+          )}
+          <button
+            type="button"
+            className="sp-pager__btn sp-pager__btn--nav"
+            disabled={safePage >= pageCount}
+            onClick={() => setPage(Math.min(pageCount, safePage + 1))}
+            aria-label="Page suivante"
+          >
+            ›
+          </button>
+          <span className="sp-pager__info">
+            {(safePage - 1) * DOSSIERS_PER_PAGE + 1}–{Math.min(safePage * DOSSIERS_PER_PAGE, dossiers.length)} / {dossiers.length}
+          </span>
+        </div>
       )}
 
       {selectedSale && (
-        <div className="nd__overlay" role="presentation" onClick={() => setSelectedSale(null)}>
-          <div className="nd__stamp-modal nd-v2__modal" role="dialog" aria-modal="true" aria-labelledby="nd-v2-modal-title" onClick={(e) => e.stopPropagation()}>
-            <div className="nd__stamp-modal-head nd-v2__modal-head">
-              <div>
-                <h3 id="nd-v2-modal-title" className="nd-v2__modal-title">Finalisation du dossier</h3>
-                <div className="nd-v2__modal-sub">
-                  {selectedSale.clientName || 'Client'} · Réf. {selectedSale.code || selectedSale.id}
-                </div>
+        <AdminModal open onClose={() => setSelectedSale(null)} title="">
+          <div className="sp-detail nd-detail">
+            <div className="sp-detail__banner">
+              <div className="sp-detail__banner-top">
+                <span className="sp-badge sp-badge--blue">Finalisation</span>
+                <span className="sp-detail__date">{fmtDate(selectedSale.createdAt)}</span>
               </div>
-              <button type="button" className="nd__stamp-modal-x" aria-label="Fermer" onClick={() => setSelectedSale(null)}>✕</button>
+              <div className="sp-detail__price">
+                <span className="sp-detail__price-num">{(selectedSale.total || 0).toLocaleString('fr-FR')}</span>
+                <span className="sp-detail__price-cur">TND</span>
+              </div>
+              <p className="sp-detail__banner-sub">
+                {selectedSale.clientName || 'Client'} · Réf. {selectedSale.code || selectedSale.id}
+              </p>
             </div>
-            <div className="nd__stamp-modal-body nd-v2__modal-body">
 
-              <div className="nd-v2__stepper" aria-hidden>
-                <span className="nd-v2__step nd-v2__step--done">1. Vérifier</span>
-                <span className="nd-v2__step-sep" />
-                <span className="nd-v2__step nd-v2__step--current">2. Cocher les documents</span>
-                <span className="nd-v2__step-sep" />
-                <span className="nd-v2__step">3. Finaliser</span>
+            <div className="sp-detail__section">
+              <div className="sp-detail__section-title">Client</div>
+              <div className="sp-detail__row"><span>Nom</span><strong>{selectedSale.clientName || '—'}</strong></div>
+              <div className="sp-detail__row"><span>CIN</span><strong style={{ direction: 'ltr' }}>{selectedSale.client?.cin || '—'}</strong></div>
+              <div className="sp-detail__row"><span>Téléphone</span><strong style={{ direction: 'ltr' }}>{selectedSale.client?.phone || '—'}</strong></div>
+              {selectedSale.client?.email && (
+                <div className="sp-detail__row"><span>Email</span><strong style={{ wordBreak: 'break-all' }}>{selectedSale.client.email}</strong></div>
+              )}
+            </div>
+
+            <div className="sp-detail__section">
+              <div className="sp-detail__section-title">Vente</div>
+              <div className="sp-detail__row"><span>Projet</span><strong>{selectedSale.projectTitle || '—'}</strong></div>
+              <div className="sp-detail__row"><span>Parcelles</span><strong>{selectedSale.plotIds.map((id) => `#${id}`).join(', ') || '—'}</strong></div>
+              <div className="sp-detail__row"><span>Mode</span><strong>{selectedSale.paymentType === 'installments' ? 'Échelonné' : 'Comptant'}</strong></div>
+            </div>
+
+            <div className="sp-detail__section">
+              <div className="sp-detail__section-title">Finance</div>
+              <div className="sp-detail__row">
+                <span>Paiement validé</span>
+                <strong style={{ color: (selectedSale.financeValidatedAt || selectedSale.financeConfirmedAt) ? '#059669' : '#d97706' }}>
+                  {(selectedSale.financeValidatedAt || selectedSale.financeConfirmedAt)
+                    ? fmtDate(selectedSale.financeValidatedAt || selectedSale.financeConfirmedAt)
+                    : 'En attente'}
+                </strong>
               </div>
-
-              <div style={{ marginBottom: 14 }}>
-                <SaleSnapshotTracePanel sale={selectedSale} />
+              <div className="sp-detail__row"><span>Avance reçue</span><strong>{fmtMoney(selectedSale.deposit)}</strong></div>
+              <div className="sp-detail__row"><span>Frais société</span><strong>{fmtMoney(selectedSale.companyFee)}</strong></div>
+              <div className="sp-detail__row"><span>Frais notaire</span><strong>{fmtMoney(selectedSale.notaryFee)}</strong></div>
+              <div className="sp-detail__row sp-detail__row--highlight">
+                <span>Reste à encaisser</span><strong>{fmtMoney(selectedSale.remaining)}</strong>
               </div>
+            </div>
 
-              <section className="nd__stamp-section nd-v2__section">
-                <header className="nd-v2__section-head-row">
-                  <div className="nd-v2__section-head-title">Identité du client</div>
-                  <div className="nd-v2__section-head-hint">Informations figées à la création de la vente</div>
-                </header>
-                <div className="nd__stamp-row"><span>Nom complet</span><strong>{selectedSale.clientName || '—'}</strong></div>
-                <div className="nd__stamp-row"><span>CIN</span><strong>{selectedSale.client?.cin || '—'}</strong></div>
-                <div className="nd__stamp-row"><span>Téléphone</span><strong>{selectedSale.client?.phone || '—'}</strong></div>
-                <div className="nd__stamp-row"><span>Email</span><strong>{selectedSale.client?.email || '—'}</strong></div>
-              </section>
-
-              <section className="nd__stamp-section nd-v2__section">
-                <header className="nd-v2__section-head-row">
-                  <div className="nd-v2__section-head-title">Vente et parcelles</div>
-                  <div className="nd-v2__section-head-hint">Objet exact du contrat</div>
-                </header>
-                <div className="nd__stamp-row"><span>Référence</span><strong>{selectedSale.code || selectedSale.id}</strong></div>
-                <div className="nd__stamp-row"><span>Projet</span><strong>{selectedSale.projectTitle || '—'}</strong></div>
-                <div className="nd__stamp-row"><span>Parcelles</span><strong>{selectedSale.plotIds.map((id) => `#${id}`).join(', ') || '—'}</strong></div>
-                <div className="nd__stamp-row"><span>Mode de paiement</span><strong>{selectedSale.paymentType === 'installments' ? 'Échelonné' : 'Comptant'}</strong></div>
-                <div className="nd__stamp-row"><span>Date de création</span><strong>{fmtDate(selectedSale.createdAt)}</strong></div>
-              </section>
-
-              <section className="nd__stamp-section nd-v2__section">
-                <header className="nd-v2__section-head-row">
-                  <div className="nd-v2__section-head-title">Validations internes</div>
-                  <div className="nd-v2__section-head-hint">Étapes déjà franchies par les autres équipes</div>
-                </header>
-                <div className="nd__stamp-row">
-                  <span>Finance validée</span>
-                  <strong style={{ color: (selectedSale.financeValidatedAt || selectedSale.financeConfirmedAt) ? '#059669' : '#b45309' }}>
-                    {(selectedSale.financeValidatedAt || selectedSale.financeConfirmedAt) ? fmtDate(selectedSale.financeValidatedAt || selectedSale.financeConfirmedAt) : 'En attente'}
-                  </strong>
-                </div>
-                <div className="nd__stamp-row">
-                  <span>Juridique validé</span>
-                  <strong>{fmtDate(selectedSale.juridiqueValidatedAt)}</strong>
-                </div>
-              </section>
-
-              <section className="nd__stamp-section nd-v2__section">
-                <header className="nd-v2__section-head-row">
-                  <div className="nd-v2__section-head-title">Récapitulatif financier</div>
-                  <div className="nd-v2__section-head-hint">Montants issus du snapshot de la vente</div>
-                </header>
-                <div className="nd__stamp-row"><span>Montant de la vente</span><strong>{fmtMoney(selectedSale.total)}</strong></div>
-                <div className="nd__stamp-row"><span>Avance reçue</span><strong>{fmtMoney(selectedSale.deposit)}</strong></div>
-                <div className="nd__stamp-row"><span>Frais société</span><strong>{fmtMoney(selectedSale.companyFee)}</strong></div>
-                <div className="nd__stamp-row"><span>Frais notaire</span><strong>{fmtMoney(selectedSale.notaryFee)}</strong></div>
-                <div className="nd__stamp-row nd__stamp-row--total"><span>Reste à encaisser</span><strong>{fmtMoney(selectedSale.remaining)}</strong></div>
-              </section>
-
-              <section className="nd__stamp-section nd-v2__section nd-v2__section--checklist">
-                <header className="nd-v2__section-head-row">
-                  <div className="nd-v2__section-head-title">Documents à signer</div>
-                  <div className="nd-v2__section-head-hint">Cochez chaque document une fois signé par les parties</div>
-                </header>
-                <div className="nd__doc-checklist nd-v2__doc-checklist">
-                  {notaryChecklistRows.map((item) => {
-                    const checked = Boolean(selectedDocs[item.docKey])
-                    return (
-                      <label
-                        key={item.docKey}
-                        className={`nd__doc-item nd-v2__doc-item ${checked ? 'nd-v2__doc-item--checked' : ''} ${item.required ? 'nd-v2__doc-item--required' : 'nd-v2__doc-item--optional'}`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => toggleDoc(item.docKey)}
-                          aria-label={`${item.title} ${item.required ? '(requis)' : '(optionnel)'}`}
-                        />
-                        <span className="nd__doc-item-body nd-v2__doc-item-body">
-                          <span className="nd-v2__doc-title-row">
-                            <strong>{item.title}</strong>
-                            {item.required
-                              ? <span className="nd-v2__doc-tag nd-v2__doc-tag--required">Requis</span>
-                              : <span className="nd-v2__doc-tag nd-v2__doc-tag--optional">Optionnel</span>}
+            <div className="sp-detail__section">
+              <div className="sp-detail__section-title">Documents à signer</div>
+              <div className="nd-checklist">
+                {notaryChecklistRows.map((item) => {
+                  const checked = Boolean(selectedDocs[item.docKey])
+                  return (
+                    <label
+                      key={item.docKey}
+                      className={`nd-check ${checked ? 'nd-check--on' : ''} ${item.required ? '' : 'nd-check--optional'}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleDoc(item.docKey)}
+                        aria-label={`${item.title} ${item.required ? '(requis)' : '(optionnel)'}`}
+                      />
+                      <span className="nd-check__body">
+                        <span className="nd-check__title">
+                          {item.title}
+                          <span className={`nd-check__tag ${item.required ? 'nd-check__tag--req' : 'nd-check__tag--opt'}`}>
+                            {item.required ? 'Requis' : 'Optionnel'}
                           </span>
-                          {item.desc ? <small>{item.desc}</small> : null}
                         </span>
-                      </label>
-                    )
-                  })}
-                </div>
-                {!selectedAllDocsChecked ? (
-                  <div className="nd-v2__inline-hint" role="status">
-                    Cochez tous les documents <strong>requis</strong> pour activer la finalisation.
-                  </div>
-                ) : null}
-              </section>
-
-              <div className="nd-v2__modal-footer">
-                <button
-                  type="button"
-                  className="nd-v2__btn-secondary"
-                  onClick={() => setSelectedSale(null)}
-                  disabled={saving}
-                >
-                  Annuler
-                </button>
-                <button
-                  type="button"
-                  className="nd__btn-stamp nd-v2__btn-primary"
-                  onClick={completeSale}
-                  disabled={!selectedAllDocsChecked || saving}
-                  title={selectedAllDocsChecked ? 'Clôturer définitivement cette vente' : 'Cochez tous les documents requis'}
-                >
-                  {saving ? 'Validation en cours…' : 'Finaliser la vente'}
-                </button>
+                        {item.desc && <span className="nd-check__desc">{item.desc}</span>}
+                      </span>
+                    </label>
+                  )
+                })}
               </div>
+              {!selectedAllDocsChecked && (
+                <div className="nd-hint">Cochez tous les documents <strong>requis</strong> pour activer la finalisation.</div>
+              )}
             </div>
+
+            <div className="sp-detail__section">
+              <SaleSnapshotTracePanel sale={selectedSale} />
+            </div>
+
+            <div className="sp-detail__actions">
+              <button
+                type="button"
+                className="sp-detail__btn"
+                onClick={() => setSelectedSale(null)}
+                disabled={saving}
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                className="sp-detail__btn sp-detail__btn--edit"
+                onClick={completeSale}
+                disabled={!selectedAllDocsChecked || saving}
+                title={selectedAllDocsChecked ? 'Clôturer définitivement cette vente' : 'Cochez tous les documents requis'}
+              >
+                {saving ? 'Validation…' : 'Finaliser la vente'}
+              </button>
+            </div>
+          </div>
+        </AdminModal>
+      )}
+
+      {notice && (
+        <div className="nd-toast-wrap" onClick={() => setNotice('')}>
+          <div className="nd-toast nd-toast--ok" onClick={(e) => e.stopPropagation()} role="alertdialog">
+            <div className="nd-toast__icon">✓</div>
+            <div className="nd-toast__title">Vente finalisée</div>
+            <div className="nd-toast__text">{notice}</div>
+            <button type="button" onClick={() => setNotice('')} className="nd-toast__btn">OK</button>
           </div>
         </div>
       )}
 
-      {notice ? (
-        <div className="nd-v2__toast-overlay" onClick={() => setNotice('')}>
-          <div className="nd-v2__toast nd-v2__toast--ok" onClick={(e) => e.stopPropagation()} role="alertdialog">
-            <div className="nd-v2__toast-icon">✓</div>
-            <div className="nd-v2__toast-title">Vente finalisée</div>
-            <div className="nd-v2__toast-text">{notice}</div>
-            <button type="button" onClick={() => setNotice('')} className="nd-v2__toast-btn">OK</button>
+      {warningNotice && (
+        <div className="nd-toast-wrap" onClick={() => setWarningNotice('')}>
+          <div className="nd-toast nd-toast--warn" onClick={(e) => e.stopPropagation()} role="alertdialog">
+            <div className="nd-toast__icon">!</div>
+            <div className="nd-toast__title">Action bloquée</div>
+            <div className="nd-toast__text">{warningNotice}</div>
+            <button type="button" onClick={() => setWarningNotice('')} className="nd-toast__btn">J'ai compris</button>
           </div>
         </div>
-      ) : null}
-
-      {warningNotice ? (
-        <div className="nd-v2__toast-overlay" onClick={() => setWarningNotice('')}>
-          <div className="nd-v2__toast nd-v2__toast--warn" onClick={(e) => e.stopPropagation()} role="alertdialog">
-            <div className="nd-v2__toast-icon">!</div>
-            <div className="nd-v2__toast-title">Paiement requis</div>
-            <div className="nd-v2__toast-text">{warningNotice}</div>
-            <button type="button" onClick={() => setWarningNotice('')} className="nd-v2__toast-btn">J'ai compris</button>
-          </div>
-        </div>
-      ) : null}
+      )}
     </div>
   )
 }

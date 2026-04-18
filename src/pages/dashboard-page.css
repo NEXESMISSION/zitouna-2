@@ -6,11 +6,16 @@
 
 .inv-dash {
   width: 100%;
-  max-width: 540px;
+  max-width: 1300px;
   margin: 0 auto;
   font-family: Georgia, 'Times New Roman', serif;
   color: #d7e5d8;
   padding: 0 0 3rem;
+}
+.inv-dash__col {
+  width: 100%;
+  max-width: 540px;
+  margin: 0 auto;
 }
 
 /* ══════════════════════════════════════
@@ -259,6 +264,32 @@
 .inv-link-btn:hover { color: #c8e670; }
 
 /* ══════════════════════════════════════
+   SKELETON LOADING (shimmer)
+   ══════════════════════════════════════ */
+.inv-sk {
+  display: block;
+  background: linear-gradient(90deg,
+    rgba(168,204,80,0.06) 0%,
+    rgba(168,204,80,0.18) 50%,
+    rgba(168,204,80,0.06) 100%);
+  background-size: 200% 100%;
+  animation: inv-sk-shimmer 1.3s ease-in-out infinite;
+  border-radius: 6px;
+}
+.inv-sk--num   { display: inline-block; height: 0.9em; width: 48px; vertical-align: middle; }
+.inv-sk--label { display: inline-block; height: 0.7em; width: 58px; vertical-align: middle; }
+.inv-sk--title { height: 12px; width: 60%; margin: 2px 0 6px; }
+.inv-sk--line  { height: 10px; width: 80%; margin: 4px 0; }
+.inv-sk--pill  { height: 20px; width: 72px; border-radius: 999px; }
+.inv-sk--map   { width: 100px; min-width: 100px; min-height: 90px; border-radius: 8px; margin: 6px 0 6px 6px; }
+.inv-parcel-card--sk { pointer-events: none; cursor: default; }
+.inv-parcel-card--sk .inv-parcel-card__body { padding: 10px 12px; }
+@keyframes inv-sk-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ══════════════════════════════════════
    EMPTY / PROGRESS STATES
    ══════════════════════════════════════ */
 .inv-empty {
@@ -377,8 +408,8 @@
   .inv-wallet__phases { grid-template-columns: 1fr; }
 }
 
-@media (min-width: 640px) {
-  .inv-dash { max-width: 600px; }
+@media (min-width: 1200px) {
+  .inv-parcels { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -386,45 +417,93 @@
    ══════════════════════════════════════════════════════════════ */
 .inv-ledger { margin-top: 16px; }
 .inv-ledger__head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
-.inv-ledger__title { margin: 0; font-size: 14px; font-weight: 700; letter-spacing: 0.3px; color: var(--inv-text, #1f2d1e); text-transform: uppercase; }
-.inv-ledger__count { font-size: 12px; color: var(--inv-text-dim, #5b6a58); }
-.inv-ledger__empty { padding: 16px; font-size: 13px; color: var(--inv-text-dim, #5b6a58); background: rgba(0,0,0,0.02); border: 1px dashed rgba(0,0,0,0.1); border-radius: 10px; line-height: 1.5; }
+.inv-ledger__title { margin: 0; font-size: 14px; font-weight: 700; letter-spacing: 0.3px; color: #d7e5d8; text-transform: uppercase; }
+.inv-ledger__count { font-size: 12px; color: #8da68e; }
+.inv-ledger__empty { padding: 16px; font-size: 13px; color: #8da68e; background: rgba(168, 204, 80, 0.04); border: 1px dashed rgba(168, 204, 80, 0.18); border-radius: 12px; line-height: 1.5; }
 .inv-ledger__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-.inv-ledger__row { display: flex; gap: 10px; padding: 10px 12px; border: 1px solid rgba(0,0,0,0.08); border-radius: 10px; background: white; }
-.inv-ledger__lvl { flex-shrink: 0; width: 38px; height: 38px; border-radius: 999px; display: flex; align-items: center; justify-content: center; color: white; font-weight: 700; font-size: 13px; letter-spacing: 0.5px; }
+.inv-ledger__row {
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(42, 75, 44, 0.85);
+  border-radius: 12px;
+  background: rgba(22, 41, 23, 0.92);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.24);
+}
+.inv-ledger__lvl {
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.5px;
+  /* Default (neutral/L0+): muted slate */
+  background: rgba(100, 116, 139, 0.22);
+  color: #cbd5e1;
+  border: 1px solid rgba(168, 204, 80, 0.10);
+}
+.inv-ledger__lvl--l1 { background: rgba(168, 204, 80, 0.18); color: #a8cc50; border-color: rgba(168, 204, 80, 0.35); }
+.inv-ledger__lvl--l2 { background: rgba(125, 211, 252, 0.16); color: #7dd3fc; border-color: rgba(125, 211, 252, 0.32); }
+.inv-ledger__lvl--l3 { background: rgba(196, 181, 253, 0.16); color: #c4b5fd; border-color: rgba(196, 181, 253, 0.32); }
+.inv-ledger__lvl--l4 { background: rgba(148, 163, 184, 0.18); color: #cbd5e1; border-color: rgba(148, 163, 184, 0.32); }
 .inv-ledger__body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .inv-ledger__top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-.inv-ledger__amount { font-weight: 700; font-size: 15px; color: var(--inv-text, #1f2d1e); }
-.inv-ledger__amount small { font-weight: 500; color: var(--inv-text-dim, #5b6a58); margin-left: 3px; }
+.inv-ledger__amount { font-weight: 700; font-size: 15px; color: #d7e5d8; }
+.inv-ledger__amount small { font-weight: 500; color: #8da68e; margin-left: 3px; }
 .inv-ledger__status { font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.4px; }
-.inv-ledger__status--good { background: #dcfce7; color: #166534; }
-.inv-ledger__status--info { background: #dbeafe; color: #1e40af; }
-.inv-ledger__status--warn { background: #fef3c7; color: #92400e; }
-.inv-ledger__status--bad { background: #fee2e2; color: #991b1b; }
-.inv-ledger__meta { font-size: 12px; color: var(--inv-text, #1f2d1e); line-height: 1.4; }
+.inv-ledger__status--good { background: rgba(34, 197, 94, 0.14); color: #86efac; }
+.inv-ledger__status--info { background: rgba(56, 189, 248, 0.14); color: #7dd3fc; }
+.inv-ledger__status--warn { background: rgba(251, 191, 36, 0.14); color: #fcd34d; }
+.inv-ledger__status--bad { background: rgba(248, 113, 113, 0.16); color: #fca5a5; }
+.inv-ledger__meta { font-size: 12px; color: #d7e5d8; line-height: 1.4; }
 .inv-ledger__meta strong { font-weight: 600; }
-.inv-ledger__meta--dim { color: var(--inv-text-dim, #5b6a58); font-size: 11px; }
+.inv-ledger__meta--dim { color: #8da68e; font-size: 11px; }
 
 /* Top explainer: "what does direct vs indirect mean?" */
-.inv-ledger__explainer { background: rgba(0,0,0,0.03); border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; display: flex; flex-direction: column; gap: 6px; font-size: 12px; line-height: 1.4; }
-.inv-ledger__explainer-row { display: flex; align-items: center; gap: 8px; color: var(--inv-text, #1f2d1e); }
+.inv-ledger__explainer {
+  background: rgba(22, 41, 23, 0.92);
+  border: 1px solid rgba(42, 75, 44, 0.85);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.24);
+}
+.inv-ledger__explainer-row { display: flex; align-items: center; gap: 8px; color: #d7e5d8; }
 .inv-ledger__explainer-dot { display: inline-block; width: 10px; height: 10px; border-radius: 999px; flex-shrink: 0; }
-.inv-ledger__explainer strong { font-weight: 700; }
+.inv-ledger__explainer strong { font-weight: 700; color: #d7e5d8; }
 
 /* Section heading: groups cards by "direct sales" vs "indirect/parrainage" */
 .inv-ledger__section { margin-bottom: 16px; }
 .inv-ledger__section:last-child { margin-bottom: 0; }
-.inv-ledger__section-title { font-size: 11px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase; color: var(--inv-text-dim, #5b6a58); padding: 0 4px 8px; border-bottom: 1px solid rgba(0,0,0,0.08); margin-bottom: 10px; }
+.inv-ledger__section-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: #8da68e;
+  padding: 0 4px 8px;
+  border-bottom: 1px solid rgba(168, 204, 80, 0.10);
+  margin-bottom: 10px;
+}
 
 /* Plain-French story sentence on each row */
-.inv-ledger__story { font-size: 13px; line-height: 1.45; color: var(--inv-text, #1f2d1e); }
-.inv-ledger__story strong { font-weight: 700; color: var(--inv-text, #1f2d1e); }
+.inv-ledger__story { font-size: 13px; line-height: 1.45; color: #d7e5d8; }
+.inv-ledger__story strong { font-weight: 700; color: #d7e5d8; }
 
 /* Raw fact grid on ledger rows */
 .inv-ledger__grid { display: grid; grid-template-columns: 80px 1fr; row-gap: 3px; column-gap: 10px; font-size: 12px; margin-top: 4px; }
-.inv-ledger__lbl { color: var(--inv-text-dim, #5b6a58); }
-.inv-ledger__val { color: var(--inv-text, #1f2d1e); font-weight: 600; word-break: break-word; }
-.inv-ledger__amount--neg { color: #b91c1c; }
+.inv-ledger__lbl { color: #8da68e; }
+.inv-ledger__val { color: #d7e5d8; font-weight: 600; word-break: break-word; }
+.inv-ledger__amount--neg { color: #fca5a5; }
 
 /* ══════════════════════════════════════════════════════════════
    Retirer les gains — confirmation modal

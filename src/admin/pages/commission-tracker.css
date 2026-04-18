@@ -149,8 +149,62 @@
 .ct-graph-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 8px; }
 .ct-selected-chip { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid #bfdbfe; background: #eff6ff; color: #1e40af; border-radius: 999px; font-size: 12px; font-weight: 600; }
 .ct-selected-chip__clear { border: 0; background: transparent; color: inherit; cursor: pointer; padding: 0 2px; font-size: 14px; line-height: 1; }
-.ct-graph-box--tracker { border: 1px solid #e2e8f0; border-radius: 14px; background: #fff; height: calc(100vh - 360px); min-height: 520px; overflow: hidden; position: relative; margin: 4px 0 14px; }
-@media (max-width: 600px) { .ct-graph-box--tracker { height: 420px; min-height: 0; } }
+.ct-graph-box--tracker { border: 1px solid #e2e8f0; border-radius: 14px; background: #fff; height: calc(100vh - 110px); min-height: 520px; overflow: hidden; position: relative; margin: 4px 0 14px; }
+.ct-compact:has(.ct-compactbar) .ct-graph-box--tracker { height: calc(100vh - 92px); }
+@media (max-width: 600px) { .ct-graph-box--tracker { height: calc(100vh - 110px); min-height: 0; } }
+
+/* ══════════════════════════════════════════════════════════════
+   COMPACT TOP BAR — the page's default skin. Graph is the hero.
+   ══════════════════════════════════════════════════════════════ */
+.ct-compactbar {
+  position: sticky; top: 0; z-index: 5;
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; margin: 0 0 8px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.04);
+}
+.ct-compactbar__back {
+  width: 34px; height: 34px; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;
+  font-size: 17px; color: #475569; cursor: pointer; line-height: 1;
+  transition: border-color .15s, color .15s;
+}
+.ct-compactbar__back:hover { border-color: #cbd5e1; color: #0f172a; }
+.ct-compactbar__title { margin: 0; font-size: 15px; font-weight: 700; color: #0f172a; letter-spacing: -0.01em; white-space: nowrap; }
+.ct-compactbar__kpis { display: flex; gap: 6px; overflow-x: auto; flex: 1; scrollbar-width: thin; }
+.ct-compactbar__kpis::-webkit-scrollbar { height: 4px; }
+.ct-compactbar__tools {
+  flex-shrink: 0;
+  padding: 7px 12px;
+  background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 8px;
+  font-size: 12px; font-weight: 600; color: #475569;
+  cursor: pointer; white-space: nowrap;
+  transition: border-color .15s, background .15s, color .15s;
+}
+.ct-compactbar__tools:hover { background: #e2e8f0; color: #0f172a; }
+.ct-compactbar__tools--on { background: #dbeafe; border-color: #bfdbfe; color: #1d4ed8; }
+
+/* Tiny inline KPI chips used in the compact bar. */
+.ct-chip-kpi {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 9px; border-radius: 999px;
+  background: #f8fafc; border: 1px solid #e2e8f0;
+  font-size: 11px; color: #64748b; font-weight: 500;
+  white-space: nowrap;
+}
+.ct-chip-kpi strong { color: #0f172a; font-weight: 800; font-size: 12px; }
+.ct-chip-kpi--l1   strong { color: #1d4ed8; }
+.ct-chip-kpi--l2   strong { color: #5b21b6; }
+.ct-chip-kpi--info strong { color: #1d4ed8; }
+.ct-chip-kpi--good strong { color: #166534; }
+@media (max-width: 640px) {
+  .ct-compactbar__title { display: none; }
+  .ct-compactbar__kpis { gap: 4px; }
+  .ct-chip-kpi { padding: 3px 7px; font-size: 10px; }
+}
 
 /* Events table */
 .ct-events-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; }
@@ -322,4 +376,195 @@
 /* Hover affordance on top-people actions column (ghost button peeks in). */
 .ct-top-people__row .ct-action-btn--ghost { color: #1d4ed8; font-weight: 600; opacity: 0.75; }
 .ct-top-people__row:hover .ct-action-btn--ghost { opacity: 1; }
+
+/* ══════════════════════════════════════════════════════════════
+   FULLSCREEN COMMISSIONS PAGE — just the graph, nothing else.
+   ══════════════════════════════════════════════════════════════ */
+.ct-fullscreen {
+  position: fixed;
+  inset: 0;
+  background: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  z-index: 1;
+}
+.ct-fs-back {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  z-index: 10;
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 18px;
+  color: #475569;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
+  transition: border-color 0.15s, color 0.15s;
+}
+.ct-fs-back:hover {
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+.ct-fs-error {
+  position: absolute;
+  top: 14px;
+  left: 60px;
+  right: 14px;
+  z-index: 10;
+  padding: 10px 14px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+  color: #991b1b;
+  font-size: 13px;
+}
+.ct-fullscreen .cg-canvas,
+.ct-fullscreen .cg-stage {
+  height: 100vh !important;
+  max-height: 100vh !important;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   COMMISSIONS TOP BAR — sticky thin bar over the graph.
+   Replaces the old ct-compactbar + ct-fs-back/error absolute hack.
+   ══════════════════════════════════════════════════════════════ */
+.ct-topbar {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px 8px 8px;
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
+}
+.ct-topbar__back,
+.ct-topbar__refresh {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  color: #475569;
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.ct-topbar__back:hover,
+.ct-topbar__refresh:hover {
+  border-color: #cbd5e1;
+  color: #0f172a;
+  background: #fff;
+}
+.ct-topbar__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.ct-topbar__stats {
+  flex: 1;
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  min-width: 0;
+}
+.ct-topbar__stats::-webkit-scrollbar { display: none; }
+.ct-topbar__stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  font-size: 11px;
+  color: #64748b;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.ct-topbar__stat strong {
+  color: #0f172a;
+  font-weight: 800;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.ct-topbar__stat-lbl {
+  font-weight: 500;
+  color: #94a3b8;
+  text-transform: lowercase;
+}
+.ct-topbar__stat-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.ct-topbar__stat--warn .ct-topbar__stat-dot { background: #f59e0b; }
+.ct-topbar__stat--warn strong { color: #b45309; }
+.ct-topbar__stat--good .ct-topbar__stat-dot { background: #16a34a; }
+.ct-topbar__stat--good strong { color: #166534; }
+.ct-topbar__stat--muted { background: #f1f5f9; }
+
+.ct-topbar__error {
+  position: absolute;
+  top: 64px;
+  left: 12px;
+  right: 12px;
+  z-index: 14;
+  padding: 10px 14px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+  color: #991b1b;
+  font-size: 13px;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.05);
+}
+
+/* Graph host — takes the whole page; when panel is open we dim slightly
+   so the focus shifts toward the panel content. */
+.ct-graph-host {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+}
+.ct-graph-host--with-panel::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  right: 400px;
+  background: transparent;
+  pointer-events: none;
+}
+
+@media (max-width: 640px) {
+  .ct-topbar { flex-wrap: wrap; padding: 6px; gap: 6px; }
+  .ct-topbar__title { font-size: 13px; }
+  .ct-topbar__stats { order: 10; flex-basis: 100%; }
+  .ct-graph-host--with-panel::after { right: 0; }
+}
 

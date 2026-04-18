@@ -24,11 +24,20 @@ export default function ProjectPage() {
   if (loading && !proj) {
     return (
       <main className="screen screen--app">
-        <section className="dashboard-page">
+        <section className="dashboard-page" aria-busy="true" aria-live="polite">
           <TopBar />
-          <div className="empty-state" style={{ padding: '3rem 1rem' }}>
-            <div className="app-loader-spinner" style={{ margin: '0 auto 12px' }} />
-            <p>Chargement du projet…</p>
+          <div className="pub-sk pub-sk--title" style={{ width: '40%' }} />
+          <div className="pub-sk pub-sk--map" style={{ margin: '12px 0 20px' }} />
+          <div className="pub-sk pub-sk--title" style={{ width: '30%' }} />
+          <div className="pub-sk-grid">
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="pub-sk-card">
+                <div className="pub-sk pub-sk--line" style={{ width: '50%' }} />
+                <div className="pub-sk pub-sk--line" style={{ width: '80%' }} />
+                <div className="pub-sk pub-sk--line" style={{ width: '60%' }} />
+                <div className="pub-sk pub-sk--pill" />
+              </div>
+            ))}
           </div>
         </section>
       </main>

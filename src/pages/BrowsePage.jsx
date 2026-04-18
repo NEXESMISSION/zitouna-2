@@ -48,9 +48,16 @@ export default function BrowsePage() {
         </div>
 
         {catalogLoading && catalogProjects.length === 0 ? (
-          <div className="empty-state" style={{ padding: '2.5rem 1rem' }}>
-            <div className="app-loader-spinner" style={{ margin: '0 auto 12px' }} />
-            <p>Chargement des projets…</p>
+          <div className="pub-sk-grid" aria-busy="true" aria-live="polite">
+            {[0, 1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="pub-sk-card">
+                <div className="pub-sk pub-sk--title" />
+                <div className="pub-sk pub-sk--map" />
+                <div className="pub-sk pub-sk--line" style={{ width: '70%' }} />
+                <div className="pub-sk pub-sk--line" style={{ width: '45%' }} />
+                <div className="pub-sk pub-sk--pill" />
+              </div>
+            ))}
           </div>
         ) : filtered.length === 0 ? (
           <div className="empty-state">

@@ -1,0 +1,567 @@
+/* ============================================================================
+   CommissionDetailPanel — slide-in right panel shown when a graph node is
+   selected. NOT a modal: no backdrop, does not block the graph, can coexist
+   with zoom/pan.
+   ============================================================================ */
+
+.cdp {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 400px;
+  max-width: 94vw;
+  background: #fff;
+  border-left: 1px solid #e2e8f0;
+  box-shadow: -12px 0 32px rgba(15, 23, 42, 0.08);
+  display: flex;
+  flex-direction: column;
+  z-index: 20;
+  animation: cdp-in 0.18s ease-out;
+}
+
+@keyframes cdp-in {
+  from { transform: translateX(100%); opacity: 0; }
+  to   { transform: translateX(0);     opacity: 1; }
+}
+
+.cdp__header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #e2e8f0;
+  background: linear-gradient(180deg, #f8fafc, #fff);
+  flex-shrink: 0;
+}
+
+.cdp__avatar {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 14px;
+  letter-spacing: 0.3px;
+}
+
+.cdp__head-text { flex: 1; min-width: 0; }
+
+.cdp__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cdp__subtitle {
+  margin-top: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.cdp__gen {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+.cdp__gen--root { background: #eef2ff; color: #1e40af; }
+.cdp__gen--l1 { background: #eff6ff; color: #1d4ed8; }
+.cdp__gen--l2 { background: #fef3c7; color: #b45309; }
+.cdp__gen--l3 { background: #ecfdf5; color: #047857; }
+.cdp__gen--l4 { background: #f5f3ff; color: #6d28d9; }
+
+.cdp__code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: #64748b;
+  padding: 2px 6px;
+  background: #f1f5f9;
+  border-radius: 4px;
+}
+
+.cdp__close {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border: 0;
+  background: transparent;
+  color: #64748b;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: background 0.12s, color 0.12s;
+}
+.cdp__close:hover { background: #f1f5f9; color: #0f172a; }
+
+.cdp__body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ---- KPIs ------------------------------------------------------- */
+.cdp__kpis {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.cdp__kpi {
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cdp__kpi-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+.cdp__kpi-value {
+  font-size: 18px;
+  font-weight: 800;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+}
+.cdp__kpi--info .cdp__kpi-value { color: #1d4ed8; }
+.cdp__kpi--good .cdp__kpi-value { color: #166534; }
+.cdp__kpi--warn .cdp__kpi-value { color: #b45309; }
+.cdp__kpi--muted .cdp__kpi-value { color: #475569; }
+
+/* ---- Sections --------------------------------------------------- */
+.cdp__section {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: #fff;
+}
+.cdp__section-title {
+  margin: 0 0 10px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #475569;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.cdp__section-sub {
+  font-size: 11px;
+  font-weight: 600;
+  color: #94a3b8;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.cdp__empty {
+  margin: 0;
+  font-size: 13px;
+  color: #94a3b8;
+  font-style: italic;
+}
+
+/* ---- Level pills ------------------------------------------------ */
+.cdp__levels {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+}
+.cdp__level {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+.cdp__level-tag { font-weight: 800; letter-spacing: 0.3px; }
+.cdp__level-amt { font-variant-numeric: tabular-nums; }
+.cdp__level--l1 { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
+.cdp__level--l2 { background: #fef3c7; color: #b45309; border-color: #fde68a; }
+.cdp__level--l3 { background: #ecfdf5; color: #047857; border-color: #a7f3d0; }
+.cdp__level--l4 { background: #f5f3ff; color: #6d28d9; border-color: #ddd6fe; }
+
+/* ---- Chain ------------------------------------------------------ */
+.cdp__chain {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cdp__chain-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: #f8fafc;
+  font-size: 13px;
+}
+.cdp__chain-step {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: #1d4ed8;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.cdp__chain-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #0f172a;
+  font-weight: 600;
+}
+.cdp__chain-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: #64748b;
+}
+
+/* ---- Children list --------------------------------------------- */
+.cdp__children {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cdp__child {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+.cdp__child:hover { background: #f8fafc; }
+.cdp__child-avatar {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: #f1f5f9;
+  color: #475569;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+}
+.cdp__child-name {
+  flex: 1;
+  min-width: 0;
+  color: #0f172a;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- Events list ----------------------------------------------- */
+.cdp__events {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cdp__event {
+  padding: 8px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cdp__event-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cdp__event-level {
+  font-size: 10px;
+  font-weight: 800;
+  padding: 2px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.3px;
+}
+.cdp__event-level--l1 { background: #eff6ff; color: #1d4ed8; }
+.cdp__event-level--l2 { background: #fef3c7; color: #b45309; }
+.cdp__event-level--l3 { background: #ecfdf5; color: #047857; }
+.cdp__event-level--l4 { background: #f5f3ff; color: #6d28d9; }
+
+.cdp__event-amount {
+  flex: 1;
+  font-size: 14px;
+  font-weight: 800;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+}
+.cdp__event-status {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+  letter-spacing: 0.2px;
+  text-transform: uppercase;
+}
+.cdp__event-status--paid { background: #dcfce7; color: #166534; }
+.cdp__event-status--payable { background: #fef3c7; color: #b45309; }
+.cdp__event-status--pending { background: #f1f5f9; color: #475569; }
+.cdp__event-status--cancelled { background: #fee2e2; color: #991b1b; }
+
+.cdp__event-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 11px;
+  color: #64748b;
+}
+.cdp__event-sale {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #475569;
+}
+
+.cdp__event-more {
+  margin: 8px 0 0;
+  text-align: center;
+  font-size: 11px;
+  color: #94a3b8;
+  font-style: italic;
+}
+
+/* ---- Grouped sections (new) ------------------------------------ */
+.cdp__group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.cdp__group-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: 0.2px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 6px;
+  border-bottom: 2px solid #e2e8f0;
+}
+.cdp__group-sub {
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.cdp__subsection {
+  padding: 8px 0;
+}
+.cdp__subsection-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #475569;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.cdp__subsection + .cdp__subsection {
+  border-top: 1px dashed #e2e8f0;
+  padding-top: 10px;
+}
+
+/* ---- Sales list (as seller / as buyer) ------------------------- */
+.cdp__sales {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cdp__sale {
+  padding: 8px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.cdp__sale-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cdp__sale-role {
+  font-size: 10px;
+  font-weight: 800;
+  padding: 2px 6px;
+  border-radius: 4px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+.cdp__sale-role--seller { background: #eff6ff; color: #1d4ed8; }
+.cdp__sale-role--buyer  { background: #f5f3ff; color: #6d28d9; }
+.cdp__sale-counterpart {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cdp__sale-amount {
+  font-size: 13px;
+  font-weight: 800;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.cdp__sale-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 11px;
+  color: #64748b;
+  align-items: center;
+}
+.cdp__sale-status {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+  letter-spacing: 0.2px;
+  text-transform: uppercase;
+}
+.cdp__sale-status--completed { background: #dcfce7; color: #166534; }
+.cdp__sale-status--active    { background: #dbeafe; color: #1d4ed8; }
+.cdp__sale-status--pending   { background: #fef3c7; color: #b45309; }
+.cdp__sale-status--cancelled { background: #fee2e2; color: #991b1b; }
+.cdp__sale-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #94a3b8;
+}
+
+.cdp__list-more {
+  text-align: center;
+  font-size: 11px;
+  color: #94a3b8;
+  font-style: italic;
+  padding: 4px 0;
+}
+
+/* ---- Show more / collapse button ------------------------------ */
+.cdp__more-wrap {
+  display: flex;
+  justify-content: center;
+  margin-top: 8px;
+}
+.cdp__more-btn {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 14px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, transform 0.1s;
+}
+.cdp__more-btn:hover {
+  background: #dbeafe;
+  border-color: #93c5fd;
+}
+.cdp__more-btn:active { transform: translateY(1px); }
+.cdp__more-btn--collapse {
+  background: #f1f5f9;
+  color: #475569;
+  border-color: #e2e8f0;
+}
+.cdp__more-btn--collapse:hover {
+  background: #e2e8f0;
+  border-color: #cbd5e1;
+}
+.cdp__more-count {
+  font-size: 10px;
+  font-weight: 600;
+  color: #64748b;
+  letter-spacing: 0.2px;
+  text-transform: lowercase;
+}
+
+/* ---- Filleul meta (sales count beside name) -------------------- */
+.cdp__child-meta {
+  font-size: 10px;
+  font-weight: 700;
+  color: #1d4ed8;
+  padding: 2px 7px;
+  background: #eff6ff;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+/* ---- Body spacing tweak for new groups ------------------------- */
+.cdp__body { gap: 22px; }
+
+/* ---- Responsive ------------------------------------------------ */
+@media (max-width: 640px) {
+  .cdp { width: 100%; max-width: 100%; box-shadow: none; }
+  .cdp__kpis { grid-template-columns: 1fr 1fr; }
+  .cdp__levels { grid-template-columns: 1fr; }
+}

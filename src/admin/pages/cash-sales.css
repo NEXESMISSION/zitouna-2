@@ -1,0 +1,56 @@
+/* ══════════════════════════════════════════════════════════════
+   cash-sales.css — small green-tinted overlay on sell-field.css
+   ══════════════════════════════════════════════════════════════ */
+
+/* Hero: switch the blue gradient to a subtle green one to signal
+   "encaissé / comptant" while keeping the same geometry as Sell. */
+.sell-field .sp-hero.cs-hero {
+  background: linear-gradient(135deg, #059669 0%, #047857 60%, #065f46 100%);
+  box-shadow: 0 4px 20px rgba(5, 150, 105, 0.25);
+}
+.cs-hero__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.16);
+  font-size: 26px;
+  line-height: 1;
+}
+
+/* Stats pill matches the green hero */
+.sell-field .sp-cat-stats.cs-cat-stats {
+  background: linear-gradient(135deg, #059669 0%, #047857 100%);
+  box-shadow: 0 2px 8px rgba(5, 150, 105, 0.20);
+}
+
+/* Initials chip — green tint to match the Cash theme */
+.cs-card__initials {
+  background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%) !important;
+  color: #059669 !important;
+}
+
+/* Empty state helper text */
+.cs-empty__text {
+  margin: 6px auto 0;
+  max-width: 320px;
+  font-size: 12px;
+  color: var(--sp-500);
+  line-height: 1.5;
+}
+
+/* Detail modal — green banner instead of the default blue sp-detail banner */
+.sell-field .sp-detail.cs-detail .sp-detail__banner {
+  background: linear-gradient(135deg, #059669 0%, #047857 100%);
+}
+
+.cs-detail__notes {
+  margin: 0;
+  padding: 10px 12px;
+  font-size: 13px;
+  color: #334155;
+  background: #f8fafc;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}

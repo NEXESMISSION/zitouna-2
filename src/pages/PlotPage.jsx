@@ -36,11 +36,18 @@ export default function PlotPage() {
   if (loading && !proj) {
     return (
       <main className="screen screen--app">
-        <section className="dashboard-page">
+        <section className="dashboard-page" aria-busy="true" aria-live="polite">
           <TopBar />
-          <div className="empty-state" style={{ padding: '3rem 1rem' }}>
-            <div className="app-loader-spinner" style={{ margin: '0 auto 12px' }} />
-            <p>Chargement…</p>
+          <div className="pub-sk pub-sk--title" style={{ width: '35%' }} />
+          <div className="pub-sk pub-sk--map" style={{ margin: '12px 0 20px' }} />
+          <div className="pub-sk-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))' }}>
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="pub-sk-card">
+                <div className="pub-sk pub-sk--line" style={{ width: '55%' }} />
+                <div className="pub-sk pub-sk--line" style={{ width: '70%' }} />
+                <div className="pub-sk pub-sk--line" style={{ width: '45%' }} />
+              </div>
+            ))}
           </div>
         </section>
       </main>

@@ -1,0 +1,331 @@
+/* Commission rules editor — compact, responsive, shared across admin pages. */
+
+.cre {
+  --cre-accent: #2563eb;
+  --cre-accent-dark: #1d4ed8;
+  --cre-good: #059669;
+  --cre-ok-bg: #ecfdf5;
+  --cre-warn: #b45309;
+  --cre-warn-bg: #fffbeb;
+  --cre-warn-border: #fde68a;
+  --cre-err: #dc2626;
+  --cre-border: #e2e8f0;
+  --cre-border-strong: #cbd5e1;
+  --cre-surface: #ffffff;
+  --cre-surface-alt: #f8fafc;
+  --cre-text: #0f172a;
+  --cre-text-dim: #64748b;
+  --cre-text-muted: #94a3b8;
+
+  margin-top: 4px;
+}
+
+.cre__empty-state {
+  font-size: 12px;
+  color: var(--cre-text-muted);
+  padding: 8px;
+}
+
+.cre__intro {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--cre-warn);
+  background: var(--cre-warn-bg);
+  border: 1px solid var(--cre-warn-border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  line-height: 1.4;
+}
+.cre__intro-icon { flex: none; font-size: 13px; }
+
+/* ── Rule rows ────────────────────────────────────────────── */
+
+.cre__rules {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cre__empty {
+  text-align: center;
+  padding: 18px 12px;
+  font-size: 12px;
+  color: var(--cre-text-muted);
+  background: var(--cre-surface-alt);
+  border: 1px dashed var(--cre-border);
+  border-radius: 10px;
+}
+
+.cre__row {
+  display: grid;
+  grid-template-columns: 64px 1fr 120px 36px;
+  align-items: end;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--cre-surface);
+  border: 1px solid var(--cre-border);
+  border-radius: 10px;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+.cre__row:hover { border-color: var(--cre-border-strong); box-shadow: 0 1px 4px rgba(15, 23, 42, 0.05); }
+
+.cre__field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.cre__field-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--cre-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cre__input,
+.cre__select {
+  width: 100%;
+  min-width: 0;
+  padding: 7px 9px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--cre-text);
+  background: var(--cre-surface);
+  border: 1px solid var(--cre-border);
+  border-radius: 7px;
+  outline: none;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+.cre__input:focus,
+.cre__select:focus {
+  border-color: var(--cre-accent);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+.cre__remove {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--cre-text-muted);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  align-self: end;
+  margin-bottom: 1px;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.cre__remove:hover {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: var(--cre-err);
+}
+
+/* Narrow screens — level + type on row 1, value full-width on row 2 */
+@media (max-width: 560px) {
+  .cre__row {
+    grid-template-columns: 64px 1fr 36px;
+    grid-template-areas:
+      "lvl  type remove"
+      "val  val  val";
+    gap: 8px;
+    row-gap: 8px;
+  }
+  .cre__row > .cre__field:nth-child(1) { grid-area: lvl; }
+  .cre__row > .cre__field:nth-child(2) { grid-area: type; }
+  .cre__row > .cre__field:nth-child(3) { grid-area: val; }
+  .cre__row > .cre__remove { grid-area: remove; }
+}
+
+/* ── Action row ───────────────────────────────────────────── */
+
+.cre__actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #f1f5f9;
+}
+.cre__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  font-family: inherit;
+  background: var(--cre-surface);
+  border: 1px solid var(--cre-border);
+  border-radius: 8px;
+  color: var(--cre-text);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+.cre__btn:hover:not(:disabled) { background: var(--cre-surface-alt); border-color: var(--cre-border-strong); }
+.cre__btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.cre__btn--primary {
+  background: linear-gradient(135deg, var(--cre-accent) 0%, var(--cre-accent-dark) 100%);
+  border-color: var(--cre-accent-dark);
+  color: #ffffff;
+  box-shadow: 0 1px 2px rgba(37, 99, 235, 0.22);
+}
+.cre__btn--primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, var(--cre-accent-dark) 0%, #1e40af 100%);
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.28);
+}
+
+.cre__status {
+  font-size: 12px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.cre__status--ok { color: var(--cre-good); }
+.cre__status--err { color: var(--cre-err); }
+
+/* ── Preview simulator ───────────────────────────────────── */
+
+.cre__preview {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--cre-border);
+}
+.cre__preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.cre__preview-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--cre-text);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0;
+}
+.cre__preview-input-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.cre__preview-input-lbl {
+  font-size: 11px;
+  color: var(--cre-text-dim);
+  white-space: nowrap;
+}
+.cre__preview-input {
+  width: 120px;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+  color: var(--cre-text);
+  background: var(--cre-surface);
+  border: 1px solid var(--cre-border);
+  border-radius: 7px;
+}
+.cre__preview-input:focus {
+  outline: none;
+  border-color: var(--cre-accent);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+}
+
+.cre__preview-empty {
+  font-size: 12px;
+  color: var(--cre-text-muted);
+  padding: 12px;
+  text-align: center;
+  background: var(--cre-surface-alt);
+  border: 1px dashed var(--cre-border);
+  border-radius: 10px;
+}
+
+.cre__preview-table {
+  border: 1px solid var(--cre-border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--cre-surface);
+}
+.cre__preview-thead,
+.cre__preview-trow,
+.cre__preview-total {
+  display: grid;
+  grid-template-columns: 60px 1fr 140px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  font-variant-numeric: tabular-nums;
+}
+.cre__preview-thead {
+  background: var(--cre-surface-alt);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--cre-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.cre__preview-thead span:last-child,
+.cre__preview-trow span:last-child {
+  text-align: right;
+}
+.cre__preview-trow {
+  font-size: 13px;
+  border-top: 1px solid var(--cre-border);
+}
+.cre__preview-level {
+  font-weight: 800;
+  color: var(--cre-text);
+}
+.cre__preview-rule { color: var(--cre-text); }
+.cre__preview-cap { color: var(--cre-text-dim); font-size: 12px; }
+.cre__preview-amount {
+  font-weight: 800;
+  color: var(--cre-good);
+}
+.cre__preview-total {
+  background: #f1f5f9;
+  border-top: 1px solid var(--cre-border);
+  grid-template-columns: 1fr 140px;
+}
+.cre__preview-total-lbl {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--cre-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.cre__preview-total-val {
+  text-align: right;
+  font-size: 14px;
+  font-weight: 800;
+  color: #1e40af;
+}
+
+/* Preview table — narrow screens */
+@media (max-width: 480px) {
+  .cre__preview-thead { display: none; }
+  .cre__preview-trow {
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "lvl  amt"
+      "rule amt";
+    row-gap: 2px;
+    padding: 10px 12px;
+  }
+  .cre__preview-trow > :nth-child(1) { grid-area: lvl; }
+  .cre__preview-trow > :nth-child(2) { grid-area: rule; color: var(--cre-text-dim); font-size: 12px; }
+  .cre__preview-trow > :nth-child(3) { grid-area: amt; align-self: center; }
+  .cre__preview-total { padding: 8px 12px; }
+}

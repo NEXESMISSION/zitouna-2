@@ -402,6 +402,24 @@
 @keyframes sp-ttl-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 
 /* ══════════════════════════════════════════════════════════════
+   ERROR BANNER (visible when the sales fetch fails)
+   ══════════════════════════════════════════════════════════════ */
+.sp-error-banner {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 12px 14px; border-radius: 12px; margin-bottom: 12px;
+  background: #fef2f2; border: 1px solid #fecaca; color: #991b1b;
+  font-size: 13px;
+}
+.sp-error-banner__body { display: flex; flex-direction: column; gap: 2px; flex: 1 1 220px; min-width: 0; }
+.sp-error-banner__body strong { font-size: 13.5px; }
+.sp-error-banner__body span { color: #b91c1c; font-size: 12px; overflow: hidden; text-overflow: ellipsis; }
+.sp-error-banner__retry {
+  padding: 6px 12px; border-radius: 8px; border: 1px solid #dc2626;
+  background: #fff; color: #dc2626; font-weight: 600; font-size: 12px; cursor: pointer;
+}
+.sp-error-banner__retry:hover { background: #dc2626; color: #fff; }
+
+/* ══════════════════════════════════════════════════════════════
    EMPTY STATE
    ══════════════════════════════════════════════════════════════ */
 .sp-empty {
@@ -436,6 +454,26 @@
 @keyframes sp-sk-shimmer {
   0%   { background-position: 200% 0; }
   100% { background-position: -200% 0; }
+}
+
+/* Inline number/text shimmer — replaces a "0" or "—" placeholder
+   while data is loading. Use .sp-sk-num inside a hero/stat pill
+   (dark tinted gradient) and .sp-sk-num--light inside white cards. */
+.sp-sk-num {
+  display: inline-block;
+  vertical-align: middle;
+  height: 0.9em;
+  width: 36px;
+  border-radius: 5px;
+  background: linear-gradient(90deg, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0.38) 50%, rgba(255,255,255,0.16) 100%);
+  background-size: 200% 100%;
+  animation: sp-sk-shimmer 1.3s ease-in-out infinite;
+}
+.sp-sk-num--wide { width: 64px; }
+.sp-sk-num--xl   { width: 96px; height: 1em; }
+.sp-sk-num--light {
+  background: linear-gradient(90deg, #eef2f7 0%, #f8fafc 50%, #eef2f7 100%);
+  background-size: 200% 100%;
 }
 
 /* ══════════════════════════════════════════════════════════════

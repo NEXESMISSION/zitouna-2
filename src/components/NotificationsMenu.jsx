@@ -47,6 +47,17 @@ function bodyFor(n) {
   return parts.length > 0 ? parts.join(' • ') : null
 }
 
+// Map a notification `type` enum to a coarse severity bucket used purely for
+// presentation (colored dot in the dropdown). Keeps payload shape unchanged.
+function severityFor(type) {
+  const t = String(type || '')
+  if (t.startsWith('commission_')) return 'commission'
+  if (t.startsWith('payout_')) return 'payout'
+  if (t.startsWith('installment_')) return 'installment'
+  if (t.startsWith('sale_')) return 'sale'
+  return 'info'
+}
+
 function formatTime(iso) {
   if (!iso) return ''
   const d = new Date(iso)
@@ -162,7 +173,20 @@ export default function NotificationsMenu() {
         aria-label="Notifications"
         aria-expanded={open}
       >
-        <span aria-hidden="true">🔔</span>
+        <svg
+          width="20"
+          height="20"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M12 2a6 6 0 0 0-6 6v3.586l-1.707 1.707A1 1 0 0 0 5 15h14a1 1 0 0 0 .707-1.707L18 11.586V8a6 6 0 0 0-6-6z" />
+          <path d="M10 19a2 2 0 1 0 4 0" />
+        </svg>
         {unread > 0 && (
           <span className="notif-menu__badge" aria-label={`${unread} non lues`}>
             {unread > 99 ? '99+' : unread}
@@ -186,10 +210,18 @@ export default function NotificationsMenu() {
               {notifs.map((n) => {
                 const body = bodyFor(n)
                 const isUnread = !n.read_at
+                const severity = severityFor(n.type)
+                const rowClass = [
+                  'notif-menu__row',
+                  `notif-menu__row--${severity}`,
+                  isUnread ? 'notif-menu__row--unread' : '',
+                ]
+                  .filter(Boolean)
+                  .join(' ')
                 return (
                   <li
                     key={n.id}
-                    className={`notif-menu__row${isUnread ? ' notif-menu__row--unread' : ''}`}
+                    className={rowClass}
                   >
                     <button
                       type="button"

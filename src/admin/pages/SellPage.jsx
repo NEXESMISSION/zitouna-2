@@ -14,6 +14,7 @@ import { SALE_STATUS, getSaleStatusMeta } from '../../domain/workflowModel.js'
 import * as db from '../../lib/db.js'
 import { emitInvalidate } from '../../lib/dataEvents.js'
 import { normalizePhone } from '../../lib/phone.js'
+import { getPagerPages } from './pager-util.js'
 import '../admin.css'
 import './sell-field.css'
 
@@ -50,19 +51,6 @@ function plotSelectionMatchesSale(sale, formPlotIds) {
   const a = [...normalizePlotIds(sale)].map(Number).filter(n => !Number.isNaN(n)).sort((x, y) => x - y)
   const b = [...formPlotIds].map(Number).filter(n => !Number.isNaN(n)).sort((x, y) => x - y)
   return a.length === b.length && a.every((v, i) => v === b[i])
-}
-
-// Compact pager: 1 2 3 4 5 … 12, or 1 … 5 6 7 … 12 depending on where we are.
-function getPagerPages(current, total) {
-  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1)
-  const out = [1]
-  const left = Math.max(2, current - 1)
-  const right = Math.min(total - 1, current + 1)
-  if (left > 2) out.push('…')
-  for (let i = left; i <= right; i++) out.push(i)
-  if (right < total - 1) out.push('…')
-  out.push(total)
-  return out
 }
 
 function fmtFrDateTime(iso) {
@@ -329,7 +317,7 @@ export default function SellPage() {
     return match?.id || null
   }, [clientProfile?.id, user?.id, clients])
   const { offersByProject } = useOffers()
-  const { sales, loading: salesLoading, create: salesCreate, update: salesUpdate, refresh: refreshSales } = useSales()
+  const { sales, loading: salesLoading, error: salesError, create: salesCreate, update: salesUpdate, refresh: refreshSales } = useSales()
   // Bypass useInstallments() here — it eagerly fetches all plans+payments+receipts, none of which SellPage reads.
   const installmentsCreatePlan = useCallback(async (plan) => {
     const id = await db.createInstallmentPlan(plan)
@@ -1212,6 +1200,17 @@ export default function SellPage() {
           </select>
         </div>
       </div>
+      {salesError && !salesLoading ? (
+        <div className="sp-error-banner" role="alert">
+          <div className="sp-error-banner__body">
+            <strong>Impossible de charger les ventes.</strong>
+            <span>{String(salesError?.message || salesError)}</span>
+          </div>
+          <button type="button" className="sp-error-banner__retry" onClick={() => refreshSales()}>
+            Réessayer
+          </button>
+        </div>
+      ) : null}
       <div className="sp-cards">
         {salesLoading && salesForList.length === 0 ? (
           Array.from({ length: 6 }).map((_, i) => (

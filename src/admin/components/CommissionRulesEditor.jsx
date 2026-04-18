@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useProjectWorkflow } from '../../lib/useSupabase.js'
+import './commission-rules-editor.css'
 
 function normalizeRules(arr) {
   if (!Array.isArray(arr)) return []
@@ -31,8 +32,7 @@ function computePreviewRow(rule, salePrice) {
 /**
  * Commission rules editor + live preview for a single project.
  *
- * Used standalone on /admin/referral-settings (with its own project picker)
- * and embedded in ProjectDetailPage so admins can configure L1/L2/… in the
+ * Embedded in ProjectDetailPage so admins can configure L1/L2/… in the
  * same screen where they set fees and payout threshold.
  *
  * Props:
@@ -43,7 +43,6 @@ function computePreviewRow(rule, salePrice) {
  */
 export default function CommissionRulesEditor({
   projectId,
-  title = 'Règles de commission par niveau',
   defaultPreviewPrice = 100000,
   showSnapshotReminder = true,
 }) {
@@ -113,192 +112,140 @@ export default function CommissionRulesEditor({
 
   if (!projectId) {
     return (
-      <div style={{ fontSize: 12, color: '#94a3b8', padding: 8 }}>
+      <div className="cre__empty-state">
         Sélectionnez un projet pour configurer ses règles de commission.
       </div>
     )
   }
 
+  const totalPreview = rules.reduce((acc, r) => acc + computePreviewRow(r, previewPrice), 0)
+
   return (
-    <div className="zitu-page__section" style={{ marginTop: 8 }}>
-      <div className="zitu-page__section-title">{title}</div>
-      <p style={{ fontSize: 12, color: '#64748b', margin: '0 0 10px' }}>
-        Niveau 1 = vendeur direct, puis chaîne parrain. Plafond optionnel par ligne (TND ou borne % selon le type).
-      </p>
+    <div className="cre">
       {showSnapshotReminder && (
-        <div
-          style={{
-            fontSize: 11,
-            color: '#92400e',
-            background: '#fef3c7',
-            border: '1px solid #fde68a',
-            borderRadius: 8,
-            padding: '6px 10px',
-            marginBottom: 10,
-          }}
-        >
-          ⓘ S&apos;applique aux <strong>nouvelles ventes</strong>. Les ventes déjà enregistrées conservent leur
-          snapshot commission à la création (pas de recalcul rétroactif).
+        <div className="cre__intro" role="note">
+          <span className="cre__intro-icon" aria-hidden>ⓘ</span>
+          <span>
+            S'applique aux <strong>nouvelles ventes</strong>. Niveau 1 = vendeur direct, puis chaîne parrain.
+            À ne pas confondre avec le <strong>seuil payout</strong> (onglet Workflow) qui contrôle les retraits.
+          </span>
         </div>
       )}
-      <div
-        style={{
-          fontSize: 11,
-          color: '#075985',
-          background: '#e0f2fe',
-          border: '1px solid #bae6fd',
-          borderRadius: 8,
-          padding: '6px 10px',
-          marginBottom: 10,
-        }}
-      >
-        ⓘ <strong>À ne pas confondre</strong> avec le « Seuil payout min. » plus haut dans le workflow :
-        ce seuil est le plancher de retrait du portefeuille parrainage ; les règles ci-dessous définissent les
-        montants L1 / L2… créés par vente.
-      </div>
-      {rules.length === 0 ? (
-        <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 8 }}>Aucune règle — ajoutez une ligne.</div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {rules.map((r, idx) => (
-            <div
-              key={`${idx}-${r.level}`}
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '72px 1fr 1fr 1fr auto',
-                gap: 8,
-                alignItems: 'end',
-                padding: 10,
-                border: '1px solid #e2e8f0',
-                borderRadius: 10,
-                background: '#fafafa',
-              }}
-            >
-              <div className="zitu-page__field" style={{ margin: 0 }}>
-                <label className="zitu-page__field-label">Niveau</label>
-                <input
-                  className="zitu-page__input"
-                  type="number"
-                  min={1}
-                  value={r.level}
-                  onChange={(e) => patchRowAt(idx, { level: Math.max(1, Number(e.target.value) || 1) })}
-                />
-              </div>
-              <div className="zitu-page__field" style={{ margin: 0 }}>
-                <label className="zitu-page__field-label">Type</label>
-                <select
-                  className="zitu-page__select"
-                  value={r.ruleType}
-                  onChange={(e) => patchRowAt(idx, { ruleType: e.target.value })}
-                >
-                  <option value="fixed">Fixe (TND)</option>
-                  <option value="percent">Pourcentage (%)</option>
-                </select>
-              </div>
-              <div className="zitu-page__field" style={{ margin: 0 }}>
-                <label className="zitu-page__field-label">{r.ruleType === 'percent' ? 'Valeur %' : 'Montant TND'}</label>
-                <input
-                  className="zitu-page__input"
-                  type="number"
-                  step="0.01"
-                  value={r.value}
-                  onChange={(e) => patchRowAt(idx, { value: e.target.value })}
-                />
-              </div>
-              <div className="zitu-page__field" style={{ margin: 0 }}>
-                <label className="zitu-page__field-label">Plafond (opt.)</label>
-                <input
-                  className="zitu-page__input"
-                  type="number"
-                  step="0.01"
-                  placeholder="—"
-                  value={r.maxCapAmount ?? ''}
-                  onChange={(e) =>
-                    patchRowAt(idx, {
-                      maxCapAmount: e.target.value === '' ? null : Number(e.target.value),
-                    })
-                  }
-                />
-              </div>
-              <button type="button" className="zitu-page__btn" style={{ padding: '8px 10px' }} onClick={() => removeRowAt(idx)}>
-                Retirer
-              </button>
+
+      {/* Rule rows */}
+      <div className="cre__rules">
+        {rules.length === 0 ? (
+          <div className="cre__empty">Aucune règle — cliquez « + Niveau » pour en ajouter.</div>
+        ) : rules.map((r, idx) => (
+          <div key={`${idx}-${r.level}`} className="cre__row">
+            <div className="cre__field">
+              <label className="cre__field-label">Niveau</label>
+              <input
+                className="cre__input"
+                type="number"
+                min={1}
+                value={r.level}
+                onChange={(e) => patchRowAt(idx, { level: Math.max(1, Number(e.target.value) || 1) })}
+              />
             </div>
-          ))}
-        </div>
-      )}
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10, alignItems: 'center' }}>
-        <button type="button" className="zitu-page__btn" onClick={addRow}>
-          + Niveau
-        </button>
+            <div className="cre__field">
+              <label className="cre__field-label">Type</label>
+              <select
+                className="cre__select"
+                value={r.ruleType}
+                onChange={(e) => patchRowAt(idx, { ruleType: e.target.value })}
+              >
+                <option value="fixed">Fixe (TND)</option>
+                <option value="percent">Pourcentage (%)</option>
+              </select>
+            </div>
+            <div className="cre__field">
+              <label className="cre__field-label">{r.ruleType === 'percent' ? 'Valeur %' : 'Montant TND'}</label>
+              <input
+                className="cre__input"
+                type="number"
+                step="0.01"
+                value={r.value}
+                onChange={(e) => patchRowAt(idx, { value: e.target.value })}
+              />
+            </div>
+            <button
+              type="button"
+              className="cre__remove"
+              onClick={() => removeRowAt(idx)}
+              aria-label={`Retirer le niveau ${r.level}`}
+              title="Retirer"
+            >
+              <svg aria-hidden width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 6h18" /><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+              </svg>
+            </button>
+          </div>
+        ))}
+      </div>
+
+      {/* Actions */}
+      <div className="cre__actions">
+        <button type="button" className="cre__btn" onClick={addRow}>+ Niveau</button>
         <button
           type="button"
-          className="zitu-page__btn zitu-page__btn--primary"
+          className="cre__btn cre__btn--primary"
           disabled={workflowLoading || saving}
           onClick={() => void save()}
         >
           {saving ? 'Enregistrement…' : 'Enregistrer les règles'}
         </button>
         {savedAt && !error && (
-          <span style={{ fontSize: 12, color: '#059669' }}>
-            ✓ Enregistré {savedAt.toLocaleTimeString('fr-FR')}
-          </span>
+          <span className="cre__status cre__status--ok">✓ Enregistré {savedAt.toLocaleTimeString('fr-FR')}</span>
         )}
-        {error && <span style={{ fontSize: 12, color: '#dc2626' }}>{error}</span>}
+        {error && <span className="cre__status cre__status--err">⚠ {error}</span>}
       </div>
 
-      <div style={{ marginTop: 16 }}>
-        <div className="zitu-page__section-title" style={{ fontSize: 13 }}>Aperçu de la commission</div>
-        <p style={{ fontSize: 12, color: '#64748b', margin: '0 0 10px' }}>
-          Simulation pour un prix de vente donné.
-        </p>
-        <div className="zitu-page__field" style={{ margin: 0, marginBottom: 10, maxWidth: 260 }}>
-          <label className="zitu-page__field-label">Prix convenu simulé (TND)</label>
-          <input
-            className="zitu-page__input"
-            type="number"
-            min={0}
-            step="1000"
-            value={previewPrice}
-            onChange={(e) => setPreviewPrice(Number(e.target.value) || 0)}
-          />
+      {/* Preview */}
+      <div className="cre__preview">
+        <div className="cre__preview-head">
+          <h4 className="cre__preview-title">Aperçu de la commission</h4>
+          <div className="cre__preview-input-wrap">
+            <label className="cre__preview-input-lbl" htmlFor="cre-preview-price">Prix simulé (TND)</label>
+            <input
+              id="cre-preview-price"
+              className="cre__preview-input"
+              type="number"
+              min={0}
+              step="1000"
+              value={previewPrice}
+              onChange={(e) => setPreviewPrice(Number(e.target.value) || 0)}
+            />
+          </div>
         </div>
         {rules.length === 0 ? (
-          <div style={{ fontSize: 12, color: '#94a3b8' }}>Ajoutez des niveaux pour voir l&apos;aperçu.</div>
+          <div className="cre__preview-empty">Ajoutez des niveaux pour voir l'aperçu.</div>
         ) : (
-          <div style={{ border: '1px solid #e2e8f0', borderRadius: 10, overflow: 'hidden' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '72px 1fr 1fr 120px', background: '#f8fafc', padding: '8px 10px', fontSize: 11, fontWeight: 700, color: '#475569', textTransform: 'uppercase', letterSpacing: '.03em' }}>
+          <div className="cre__preview-table">
+            <div className="cre__preview-thead">
               <span>Niveau</span>
               <span>Règle</span>
-              <span>Plafond</span>
-              <span style={{ textAlign: 'right' }}>Commission</span>
+              <span>Commission</span>
             </div>
             {rules.slice().sort((a, b) => a.level - b.level).map((r) => {
               const amt = computePreviewRow(r, previewPrice)
               const ruleDesc = r.ruleType === 'percent'
                 ? `${Number(r.value || 0).toLocaleString('fr-FR')} %`
                 : `${Number(r.value || 0).toLocaleString('fr-FR')} TND fixe`
-              const capDesc = r.maxCapAmount != null && r.maxCapAmount !== ''
-                ? `${Number(r.maxCapAmount).toLocaleString('fr-FR')} TND`
-                : '—'
               return (
-                <div
-                  key={`preview-${r.level}`}
-                  style={{ display: 'grid', gridTemplateColumns: '72px 1fr 1fr 120px', padding: '8px 10px', fontSize: 12, borderTop: '1px solid #e2e8f0', alignItems: 'center' }}
-                >
-                  <span style={{ fontWeight: 700, color: '#0f172a' }}>L{r.level}</span>
-                  <span style={{ color: '#334155' }}>{ruleDesc}</span>
-                  <span style={{ color: '#64748b' }}>{capDesc}</span>
-                  <span style={{ textAlign: 'right', fontWeight: 800, color: '#059669' }}>
+                <div key={`preview-${r.level}`} className="cre__preview-trow">
+                  <span className="cre__preview-level">L{r.level}</span>
+                  <span className="cre__preview-rule">{ruleDesc}</span>
+                  <span className="cre__preview-amount">
                     {amt.toLocaleString('fr-FR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} TND
                   </span>
                 </div>
               )
             })}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 120px', padding: '8px 10px', background: '#f1f5f9', borderTop: '1px solid #e2e8f0' }}>
-              <span style={{ fontSize: 11, fontWeight: 800, color: '#475569' }}>Total cumulé (si chaîne complète)</span>
-              <span style={{ textAlign: 'right', fontSize: 12, fontWeight: 800, color: '#1e40af' }}>
-                {rules.reduce((acc, r) => acc + computePreviewRow(r, previewPrice), 0).toLocaleString('fr-FR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} TND
+            <div className="cre__preview-total">
+              <span className="cre__preview-total-lbl">Total cumulé (chaîne complète)</span>
+              <span className="cre__preview-total-val">
+                {totalPreview.toLocaleString('fr-FR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} TND
               </span>
             </div>
           </div>

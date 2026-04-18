@@ -232,30 +232,33 @@ export default function CommissionNodeGraph({
   mode = 'global',
   onNodeClick,
   colorMode: colorModeProp,
+  // eslint-disable-next-line no-unused-vars
   onColorModeChange,
   onSelectionChange,
 }) {
   // --------- local UI state -------------------------------------------------
-  const [colorModeLocal, setColorModeLocal] = useState('depth') // 'depth' | 'gain' | 'status'
+  // The color-mode selector UI has been removed; `colorMode` defaults to
+  // "depth" but can still be overridden via the `colorMode` prop if a parent
+  // ever wants to drive it. `onColorModeChange` stays in the signature for
+  // future reuse but is currently unused internally.
+  const [colorModeLocal] = useState('depth') // 'depth' | 'gain' | 'status'
   const colorMode = colorModeProp || colorModeLocal
-  const setColorMode = useCallback(
-    (m) => {
-      if (typeof onColorModeChange === 'function') onColorModeChange(m)
-      setColorModeLocal(m)
-    },
-    [onColorModeChange],
-  )
 
   const [hoverId, setHoverId] = useState(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [showSearchResults, setShowSearchResults] = useState(false)
-  const [panelCollapsed, setPanelCollapsed] = useState(false)
   const [tooltipPos, setTooltipPos] = useState(null) // {x,y} in screen space
+  const [copiedNodeId, setCopiedNodeId] = useState(null) // last node id whose JSON was copied
 
   // Zoom + pan state (pure React — transforms applied on outer <g>).
   const [zoom, setZoom] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })
-  const dragRef = useRef(null) // { startX, startY, originX, originY }
+  const dragRef = useRef(null) // canvas pan: { startX, startY, originX, originY }
+  const nodeDragRef = useRef(null) // node drag: { id, startX, startY, baseDx, baseDy, moved }
+  // Per-node offsets (dx, dy) applied on top of the layout-computed position.
+  // Lets the user rearrange the tree by drag + drop without changing the
+  // underlying data. Offsets survive as long as the page stays mounted.
+  const [nodeOffsets, setNodeOffsets] = useState(() => new Map())
   const containerRef = useRef(null)
   const [tooltipContainer, setTooltipContainer] = useState(null)
 
@@ -266,20 +269,11 @@ export default function CommissionNodeGraph({
     const sellerRelations = Array.isArray(data?.sellerRelations) ? data.sellerRelations : []
     const sales = Array.isArray(data?.sales) ? data.sales : []
 
-    const parentMap = tree.buildParentMap(sellerRelations)
-    const childrenMap = tree.buildChildrenMap(sellerRelations)
-
-    const clientIndex = new Map()
-    for (const c of clients) {
-      const id = asId(c?.id)
-      if (id) clientIndex.set(id, c)
-    }
-
     // De-duplicate client records that describe the same person — the tree
     // used to render doubles when the DB stored two rows for one human (e.g.
     // an old stub client + their later full profile). We pick a canonical id
-    // per (normalised name, trimmed phone) bucket and rewrite every reference
-    // below (parent/child maps, events, sales seller) to use it.
+    // per (normalised name, trimmed phone) bucket and rewrite every downstream
+    // reference (parent/child maps, events, sales seller) to use it.
     const canonicalIdByKey = new Map()
     const idAlias = new Map() // duplicateId -> canonicalId
     const normaliseKey = (c) => {
@@ -306,28 +300,63 @@ export default function CommissionNodeGraph({
       return idAlias.get(id) || id
     }
 
-    // Sale → seller index (used to compute per-edge flow amounts).
+    // Client index holds canonical clients only (duplicates are hidden).
+    const clientIndex = new Map()
+    for (const c of clients) {
+      const id = asId(c?.id)
+      if (!id || idAlias.has(id)) continue
+      clientIndex.set(id, c)
+    }
+
+    // Rewrite sellerRelations with canonical ids, drop cycles and self-loops
+    // introduced by the merge, then build the parent/children maps as before.
+    const canonicalRelations = []
+    const seenRel = new Set()
+    for (const r of sellerRelations) {
+      const child = canonicalise(r?.child_client_id)
+      const parent = canonicalise(r?.parent_client_id)
+      if (!child || !parent || child === parent) continue
+      const key = `${parent}>${child}`
+      if (seenRel.has(key)) continue
+      seenRel.add(key)
+      canonicalRelations.push({ child_client_id: child, parent_client_id: parent })
+    }
+    const parentMap = tree.buildParentMap(canonicalRelations)
+    const childrenMap = tree.buildChildrenMap(canonicalRelations)
+
+    // Sale → seller index with canonical seller ids.
     const saleSellerById = new Map()
     for (const s of sales) {
       const id = asId(s?.id)
       if (!id) continue
-      const seller = asId(s?.seller_client_id ?? s?.sellerClientId ?? s?.seller_id)
+      const seller = canonicalise(s?.seller_client_id ?? s?.sellerClientId ?? s?.seller_id)
       if (seller) saleSellerById.set(id, seller)
     }
 
-    // Gather every id that may appear anywhere in data.
+    // Collect everything that deserves a spot in the tree.
+    // Activity sets serve both as seed for the orphan safety-net and as a
+    // quality gate: a node without a client record can still render if it is
+    // clearly "active" (event beneficiary or seller of a sale).
+    const eventBeneficiaries = new Set()
+    for (const ev of commissionEvents) {
+      const b = canonicalise(ev?.beneficiary_client_id ?? ev?.beneficiaryClientId ?? ev?.client_id)
+      if (b) eventBeneficiaries.add(b)
+    }
+    const sellerIds = new Set()
+    for (const seller of saleSellerById.values()) {
+      if (seller) sellerIds.add(seller)
+    }
+
     const allIds = new Set()
     for (const id of clientIndex.keys()) allIds.add(id)
     for (const [child, parent] of parentMap) {
       allIds.add(child)
       allIds.add(parent)
     }
-    for (const ev of commissionEvents) {
-      const b = asId(ev?.beneficiary_client_id ?? ev?.beneficiaryClientId ?? ev?.client_id)
-      if (b) allIds.add(b)
-    }
+    for (const id of eventBeneficiaries) allIds.add(id)
+    for (const id of sellerIds) allIds.add(id)
 
-    // Roots = any id without a parent in the map.
+    // Roots = any id that has no parent in the relation map.
     const roots = []
     for (const id of allIds) {
       if (!parentMap.has(id)) roots.push(id)
@@ -336,7 +365,7 @@ export default function CommissionNodeGraph({
       clientName(clientIndex.get(a)).localeCompare(clientName(clientIndex.get(b))),
     )
 
-    // Run layout per root.
+    // Run layout per root (standard children map is fine now).
     const positions = new Map()
     const seen = new Set()
     let cursor = 0
@@ -344,12 +373,27 @@ export default function CommissionNodeGraph({
       const rows = layoutSubtree(root, childrenMap, seen, positions, cursor)
       if (rows > 0) cursor += rows + 1
     }
-    // Orphan safety net.
+    // Orphan safety-net — only for ids that are genuinely ACTIVE
+    // (event beneficiary or seller). Idle passive clients with no activity
+    // and no relation are dropped so they don't form a decorative straight
+    // line on the side of the tree. Arrange orphans in a horizontal grid
+    // (5 per row) below the main tree so they don't produce a long column.
+    const orphanCols = 5
+    const orphanIds = []
     for (const id of allIds) {
-      if (!positions.has(id)) {
-        positions.set(id, { x: 0, y: cursor, depth: 0 })
-        cursor += 1
-      }
+      if (positions.has(id)) continue
+      if (!eventBeneficiaries.has(id) && !sellerIds.has(id)) continue
+      orphanIds.push(id)
+    }
+    if (orphanIds.length > 0) {
+      // Leave a blank row between the main tree and the orphan grid.
+      const orphanStart = cursor + 1
+      orphanIds.forEach((id, i) => {
+        const col = i % orphanCols
+        const row = Math.floor(i / orphanCols) * 2
+        positions.set(id, { x: col, y: orphanStart + row, depth: 0 })
+      })
+      cursor = orphanStart + Math.ceil(orphanIds.length / orphanCols) * 2
     }
 
     // --------- ancestors + descendants sets (for hover path highlight) -----
@@ -380,7 +424,7 @@ export default function CommissionNodeGraph({
     // cheap. Also builds an auxiliary "events-grouped-by-beneficiary" index.
     const eventsByBeneficiary = new Map()
     for (const ev of commissionEvents) {
-      const b = asId(ev?.beneficiary_client_id ?? ev?.beneficiaryClientId ?? ev?.client_id)
+      const b = canonicalise(ev?.beneficiary_client_id ?? ev?.beneficiaryClientId ?? ev?.client_id)
       if (!b) continue
       const bucket = eventsByBeneficiary.get(b) || []
       bucket.push(ev)
@@ -433,7 +477,7 @@ export default function CommissionNodeGraph({
     // --------- sales count per node ---------------------------------------
     const salesCountById = new Map()
     for (const s of sales) {
-      const seller = asId(s?.seller_client_id ?? s?.sellerClientId ?? s?.seller_id)
+      const seller = canonicalise(s?.seller_client_id ?? s?.sellerClientId ?? s?.seller_id)
       if (!seller) continue
       salesCountById.set(seller, (salesCountById.get(seller) || 0) + 1)
     }
@@ -493,6 +537,9 @@ export default function CommissionNodeGraph({
       if (focusIds && !focusIds.has(id)) continue
       const client = clientIndex.get(id)
       const totals = totalsById.get(id) || { l1: 0, l2: 0, total: 0, paid: 0, payable: 0, pending: 0, events: 0 }
+      // Hide pure ghost ids: no client record AND no activity. Prevents the
+      // "weird letters and numbers" (UUID fallback) nodes from rendering.
+      if (!client && !eventBeneficiaries.has(id) && !sellerIds.has(id)) continue
       const salesCount = salesCountById.get(id) || 0
       const directCount = (childrenMap.get(id) || []).length
       const descCount = (descendants.get(id) || new Set()).size
@@ -504,7 +551,9 @@ export default function CommissionNodeGraph({
         y: MARGIN_Y + pos.y * ROW_STEP,
         depth: pos.depth,
         client,
-        label: clientName(client) || id,
+        // Fall back to a short "Client #abcd1" tag when no client record is
+        // available, rather than dumping the full UUID onto the tree.
+        label: clientName(client) || `Client #${String(id).slice(0, 6)}`,
         code: clientCode(client),
         phone: clientPhone(client),
         totals,
@@ -607,13 +656,10 @@ export default function CommissionNodeGraph({
     width,
     height,
     parentMap,
-    childrenMap,
     descendants,
     maxEdgeAmount,
     selectedExists,
     isEmpty,
-    global: globalStats,
-    topNodes,
   } = computed
 
   // --------- hover chain sets (upline + downline) for the currently hovered
@@ -680,8 +726,34 @@ export default function CommissionNodeGraph({
       originY: pan.y,
     }
   }
+  const startNodeDrag = useCallback((ev, id) => {
+    if (ev.button !== 0) return
+    ev.stopPropagation() // don't trigger canvas pan
+    const base = nodeOffsets.get(id) || { dx: 0, dy: 0 }
+    nodeDragRef.current = {
+      id,
+      startX: ev.clientX,
+      startY: ev.clientY,
+      baseDx: base.dx,
+      baseDy: base.dy,
+      moved: false,
+    }
+  }, [nodeOffsets])
   const onMouseMove = (ev) => {
     setTooltipPos({ x: ev.clientX, y: ev.clientY })
+    // Node drag wins over canvas pan when both could apply.
+    const nd = nodeDragRef.current
+    if (nd) {
+      const rawDx = (ev.clientX - nd.startX) / zoom
+      const rawDy = (ev.clientY - nd.startY) / zoom
+      if (Math.abs(rawDx) > 2 || Math.abs(rawDy) > 2) nd.moved = true
+      setNodeOffsets((prev) => {
+        const next = new Map(prev)
+        next.set(nd.id, { dx: nd.baseDx + rawDx, dy: nd.baseDy + rawDy })
+        return next
+      })
+      return
+    }
     const d = dragRef.current
     if (!d) return
     const dx = ev.clientX - d.startX
@@ -690,9 +762,11 @@ export default function CommissionNodeGraph({
   }
   const onMouseUp = () => {
     dragRef.current = null
+    nodeDragRef.current = null
   }
   const onMouseLeave = () => {
     dragRef.current = null
+    nodeDragRef.current = null
     setHoverId(null)
     setTooltipPos(null)
   }
@@ -700,6 +774,7 @@ export default function CommissionNodeGraph({
   const resetView = useCallback(() => {
     setZoom(1)
     setPan({ x: 0, y: 0 })
+    setNodeOffsets(new Map())
   }, [])
 
   // Center on a node: translate so its position sits in container middle.
@@ -724,6 +799,12 @@ export default function CommissionNodeGraph({
   const handleNodeClick = useCallback(
     (ev, id) => {
       ev.stopPropagation()
+      // Suppress the click that fires after a drag-release so users can
+      // reposition a node without accidentally "selecting" it.
+      if (nodeDragRef.current?.moved) {
+        nodeDragRef.current = null
+        return
+      }
       if (typeof onNodeClick === 'function') onNodeClick(id)
       if (typeof onSelectionChange === 'function') onSelectionChange(id)
     },
@@ -740,69 +821,6 @@ export default function CommissionNodeGraph({
     },
     [colorMode],
   )
-
-  // --------- subtree rollup for the right-side panel -----------------------
-  const panelData = useMemo(() => {
-    const id = hoverId || (selectedExists ? asId(selectedClientId) : null)
-    if (!id) return null
-    const node = nodes.find((n) => n.id === id)
-    if (!node) return null
-    // Rollup: sum across node + descendants.
-    const subtreeIds = new Set([id, ...(descendants.get(id) || [])])
-    let rollTotal = 0
-    let rollPaid = 0
-    let rollPayable = 0
-    let rollPending = 0
-    let rollEvents = 0
-    let rollSales = 0
-    const childTotals = [] // [{id,label,total}]
-    for (const sid of subtreeIds) {
-      const t = computed.totalsById.get(sid) || {
-        total: 0, paid: 0, payable: 0, pending: 0, events: 0,
-      }
-      rollTotal += t.total
-      rollPaid += t.paid
-      rollPayable += t.payable
-      rollPending += t.pending
-      rollEvents += t.events
-      rollSales += computed.salesCountById.get(sid) || 0
-    }
-    // Direct filleuls' totals (one-hop children only).
-    const directKids = childrenMap.get(id) || []
-    for (const kRaw of directKids) {
-      const k = asId(kRaw)
-      if (!k) continue
-      const kNode = nodes.find((n) => n.id === k)
-      const kTotal = (computed.totalsById.get(k) || { total: 0 }).total
-      childTotals.push({ id: k, label: kNode ? kNode.label : k, total: kTotal })
-    }
-    childTotals.sort((a, b) => b.total - a.total)
-    const uplineDepth = tree.resolveUplineChain(id, parentMap).length - 1
-    return {
-      node,
-      rollup: {
-        total: rollTotal,
-        paid: rollPaid,
-        payable: rollPayable,
-        pending: rollPending,
-        events: rollEvents,
-        sales: rollSales,
-        members: subtreeIds.size,
-      },
-      topChildren: childTotals.slice(0, 3),
-      uplineDepth,
-    }
-  }, [
-    hoverId,
-    selectedClientId,
-    selectedExists,
-    nodes,
-    descendants,
-    childrenMap,
-    parentMap,
-    computed.totalsById,
-    computed.salesCountById,
-  ])
 
   // --------- render: empty state -------------------------------------------
   if (!data || isEmpty) {
@@ -862,26 +880,121 @@ export default function CommissionNodeGraph({
     >
       <InlineStyles />
 
-      {/* ------- TOP TOOLBAR -------------------------------------------- */}
-      <div className="cg-toolbar">
-        <div className="cg-toolbar__left">
-          <div className="cg-pillbar" role="group" aria-label="Mode de couleur">
-            {[
-              { key: 'depth', label: 'Par niveau' },
-              { key: 'gain', label: 'Par gains' },
-              { key: 'status', label: 'Par statut' },
-            ].map((m) => (
-              <button
-                key={m.key}
-                type="button"
-                className={`cg-pillbar__btn ${colorMode === m.key ? 'cg-pillbar__btn--on' : ''}`}
-                onClick={() => setColorMode(m.key)}
-                aria-pressed={colorMode === m.key}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
+      {/* ------- MAIN CANVAS (fills parent) ----------------------------- */}
+      <div className="cg-canvas">
+        <div
+          className="cg-stage"
+          onMouseDown={onMouseDown}
+        >
+          <svg
+            className="cg-svg"
+            viewBox={`0 0 ${width} ${height}`}
+            width={width}
+            height={height}
+            role="img"
+            aria-label="Arbre des commissions"
+            style={{
+              transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+              transformOrigin: '0 0',
+            }}
+          >
+            {/* EDGES */}
+            <g>
+              {edges.map((edge) => {
+                const highlighted =
+                  highlightSet && highlightSet.has(edge.parentId) && highlightSet.has(edge.childId)
+                const faded = highlightSet && !highlightSet.has(edge.childId)
+                const stroke = highlighted ? COLOR_EDGE_ACTIVE : edge.color
+                const sw = edgeStrokeWidth(edge.amount)
+                // Dash an edge when it has no paid/payable flow: either pure
+                // pending activity or no flow at all (structural-only link).
+                const dash = !edge.hasActive ? '4 4' : undefined
+                // Apply live offsets so the edge follows its endpoints when
+                // the user drags a node.
+                const pOff = nodeOffsets.get(edge.parentId) || { dx: 0, dy: 0 }
+                const cOff = nodeOffsets.get(edge.childId) || { dx: 0, dy: 0 }
+                return (
+                  <g key={edge.id} opacity={faded ? 0.25 : 1}>
+                    <path
+                      d={edgePath(edge.x1 + pOff.dx, edge.y1 + pOff.dy, edge.x2 + cOff.dx, edge.y2 + cOff.dy)}
+                      fill="none"
+                      stroke={stroke}
+                      strokeWidth={highlighted ? sw + 1.2 : sw}
+                      strokeOpacity={highlighted ? 1 : 0.75}
+                      strokeDasharray={dash}
+                      strokeLinecap="round"
+                    />
+                  </g>
+                )
+              })}
+            </g>
+
+            {/* NODES */}
+            <g>
+              {nodes.map((node) => {
+                const isSelected = asId(selectedClientId) === node.id
+                const faded = highlightSet && !highlightSet.has(node.id)
+                const r = node.radius
+                const fill = fillForNode(node)
+                const stroke = isSelected ? '#0f172a' : '#ffffff'
+                const strokeWidth = isSelected ? 2.2 : 1.6
+                const off = nodeOffsets.get(node.id) || { dx: 0, dy: 0 }
+                return (
+                  <g
+                    key={node.id}
+                    transform={`translate(${node.x + off.dx},${node.y + off.dy})`}
+                    style={{ cursor: 'grab' }}
+                    opacity={faded ? 0.35 : 1}
+                    onMouseEnter={() => setHoverId(node.id)}
+                    onMouseLeave={() => setHoverId((cur) => (cur === node.id ? null : cur))}
+                    onMouseDown={(ev) => startNodeDrag(ev, node.id)}
+                    onClick={(ev) => handleNodeClick(ev, node.id)}
+                  >
+                    {/* big circle */}
+                    <circle r={r} fill={fill} stroke={stroke} strokeWidth={strokeWidth} />
+                    {/* status dot (tiny, top-left) — paid/payable/pending at a glance */}
+                    <circle r={3.6} cx={-r + 5} cy={-r + 5} fill={STATUS_COLOR[node.status]} stroke="#fff" strokeWidth={1} />
+                    {/* Filleuls count — small counter top-right, only when > 0.
+                        Small & unobtrusive so it reads like an org-chart. */}
+                    {node.directCount > 0 ? (
+                      <g transform={`translate(${r - 2},${-r + 4})`}>
+                        <circle r={8} fill="#fff" stroke="#166534" strokeWidth={1.3} />
+                        <text textAnchor="middle" y={3} fontSize={9} fontWeight={700} fill="#166534">
+                          {node.directCount > 99 ? '99+' : node.directCount}
+                        </text>
+                      </g>
+                    ) : null}
+                    {/* Name + commission amount below circle. Amount only when
+                        non-zero to avoid noise on structural nodes. */}
+                    <text
+                      y={r + 16}
+                      textAnchor="middle"
+                      fontSize={12}
+                      fontWeight={600}
+                      fill={COLOR_TEXT}
+                    >
+                      {node.label.length > 22 ? `${node.label.slice(0, 20)}…` : node.label}
+                    </text>
+                    {node.totals.total > 0 ? (
+                      <text
+                        y={r + 31}
+                        textAnchor="middle"
+                        fontSize={11}
+                        fontWeight={700}
+                        fill="#1d4ed8"
+                      >
+                        {fmtMoney(node.totals.total)}
+                      </text>
+                    ) : null}
+                  </g>
+                )
+              })}
+            </g>
+          </svg>
+        </div>
+
+        {/* ------- FLOATING TOOLBAR (search + zoom) ------------------------ */}
+        <div className="cg-floatbar" role="toolbar" aria-label="Contrôles du graphe">
           <div className="cg-search">
             <input
               type="search"
@@ -921,9 +1034,6 @@ export default function CommissionNodeGraph({
               </ul>
             ) : null}
           </div>
-        </div>
-        <div className="cg-toolbar__right">
-          <span className="cg-zoom-label" aria-live="polite">{zoomPct}%</span>
           <button
             type="button"
             className="cg-icon-btn"
@@ -933,6 +1043,7 @@ export default function CommissionNodeGraph({
           >
             −
           </button>
+          <span className="cg-zoom-label" aria-live="polite">{zoomPct}%</span>
           <button
             type="button"
             className="cg-icon-btn"
@@ -947,121 +1058,11 @@ export default function CommissionNodeGraph({
             className="cg-icon-btn cg-icon-btn--primary"
             onClick={resetView}
             aria-label="Ajuster"
-            title="Ajuster"
+            title="Réinitialiser la vue"
           >
-            ⌂ Ajuster
-          </button>
-          <button
-            type="button"
-            className="cg-icon-btn"
-            onClick={() => setPanelCollapsed((v) => !v)}
-            aria-label="Basculer le panneau"
-            title={panelCollapsed ? 'Afficher le panneau' : 'Masquer le panneau'}
-          >
-            {panelCollapsed ? '«' : '»'}
+            ⌂
           </button>
         </div>
-      </div>
-
-      {/* ------- MAIN CANVAS -------------------------------------------- */}
-      <div className="cg-canvas">
-        <div
-          className={`cg-stage ${panelCollapsed ? 'cg-stage--wide' : ''}`}
-          onMouseDown={onMouseDown}
-        >
-          <svg
-            className="cg-svg"
-            viewBox={`0 0 ${width} ${height}`}
-            width={width}
-            height={height}
-            role="img"
-            aria-label="Arbre des commissions"
-            style={{
-              transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
-              transformOrigin: '0 0',
-            }}
-          >
-            {/* EDGES */}
-            <g>
-              {edges.map((edge) => {
-                const highlighted =
-                  highlightSet && highlightSet.has(edge.parentId) && highlightSet.has(edge.childId)
-                const faded = highlightSet && !highlightSet.has(edge.childId)
-                const stroke = highlighted ? COLOR_EDGE_ACTIVE : edge.color
-                const sw = edgeStrokeWidth(edge.amount)
-                // Dash an edge when it has no paid/payable flow: either pure
-                // pending activity or no flow at all (structural-only link).
-                const dash = !edge.hasActive ? '4 4' : undefined
-                return (
-                  <g key={edge.id} opacity={faded ? 0.25 : 1}>
-                    <path
-                      d={edgePath(edge.x1, edge.y1, edge.x2, edge.y2)}
-                      fill="none"
-                      stroke={stroke}
-                      strokeWidth={highlighted ? sw + 1.2 : sw}
-                      strokeOpacity={highlighted ? 1 : 0.75}
-                      strokeDasharray={dash}
-                      strokeLinecap="round"
-                    />
-                    {/* Edge amount labels removed — they added visual noise.
-                        Per-flow amounts are still available in the hover tooltip. */}
-                  </g>
-                )
-              })}
-            </g>
-
-            {/* NODES */}
-            <g>
-              {nodes.map((node) => {
-                const isSelected = asId(selectedClientId) === node.id
-                const faded = highlightSet && !highlightSet.has(node.id)
-                const r = node.radius
-                const fill = fillForNode(node)
-                const stroke = isSelected ? '#0f172a' : '#ffffff'
-                const strokeWidth = isSelected ? 2.2 : 1.6
-                return (
-                  <g
-                    key={node.id}
-                    transform={`translate(${node.x},${node.y})`}
-                    style={{ cursor: 'pointer' }}
-                    opacity={faded ? 0.35 : 1}
-                    onMouseEnter={() => setHoverId(node.id)}
-                    onMouseLeave={() => setHoverId((cur) => (cur === node.id ? null : cur))}
-                    onClick={(ev) => handleNodeClick(ev, node.id)}
-                  >
-                    {/* big circle */}
-                    <circle r={r} fill={fill} stroke={stroke} strokeWidth={strokeWidth} />
-                    {/* status dot (tiny, top-left) — paid/payable/pending at a glance */}
-                    <circle r={3.6} cx={-r + 5} cy={-r + 5} fill={STATUS_COLOR[node.status]} stroke="#fff" strokeWidth={1} />
-                    {/* Name below circle — only surface we keep on the node itself.
-                        Amount + counts (sales, filleuls, descendants) live in the
-                        hover tooltip so the tree reads like a clean org-chart. */}
-                    <text
-                      y={r + 16}
-                      textAnchor="middle"
-                      fontSize={12}
-                      fontWeight={600}
-                      fill={COLOR_TEXT}
-                    >
-                      {node.label.length > 22 ? `${node.label.slice(0, 20)}…` : node.label}
-                    </text>
-                  </g>
-                )
-              })}
-            </g>
-          </svg>
-        </div>
-
-        {/* ------- STATS PANEL --------------------------------------------- */}
-        {!panelCollapsed ? (
-          <aside className="cg-panel" aria-label="Statistiques">
-            {panelData ? (
-              <NodeStatsPanel data={panelData} />
-            ) : (
-              <GlobalStatsPanel stats={globalStats} topNodes={topNodes} />
-            )}
-          </aside>
-        ) : null}
       </div>
 
       {/* ------- HOVER TOOLTIP ------------------------------------------- */}
@@ -1072,6 +1073,44 @@ export default function CommissionNodeGraph({
           uplineDepth={tree.resolveUplineChain(hoverId, parentMap).length - 1}
           pos={tooltipPos}
           container={tooltipContainer}
+          copied={copiedNodeId === hoverId}
+          onCopy={() => {
+            const node = nodes.find((n) => n.id === hoverId)
+            if (!node) return
+            const payload = {
+              id: node.id,
+              name: node.label,
+              code: node.code || null,
+              phone: node.phone || null,
+              level: tree.resolveUplineChain(node.id, parentMap).length - 1,
+              directChildren: node.directCount,
+              descendants: node.descCount,
+              sales: node.salesCount,
+              totals: node.totals,
+              exportedAt: new Date().toISOString(),
+            }
+            const text = JSON.stringify(payload, null, 2)
+            const idForCopy = node.id
+            const done = () => {
+              setCopiedNodeId(idForCopy)
+              window.setTimeout(() => {
+                setCopiedNodeId((cur) => (cur === idForCopy ? null : cur))
+              }, 1600)
+            }
+            if (navigator?.clipboard?.writeText) {
+              navigator.clipboard.writeText(text).then(done).catch(() => {
+                const ta = document.createElement('textarea')
+                ta.value = text
+                document.body.appendChild(ta)
+                ta.select()
+                try { document.execCommand('copy') } catch { /* noop */ }
+                ta.remove()
+                done()
+              })
+            } else {
+              done()
+            }
+          }}
         />
       ) : null}
     </div>
@@ -1111,7 +1150,7 @@ function EdgeAmountLabel({ x, y, amount, highlighted }) {
   )
 }
 
-function HoverTooltip({ node, descCount, uplineDepth, pos, container }) {
+function HoverTooltip({ node, descCount, uplineDepth, pos, container, copied, onCopy }) {
   if (!node || !pos || !container) return null
   const rect = container.getBoundingClientRect()
   const x = pos.x - rect.left + 14
@@ -1125,6 +1164,21 @@ function HoverTooltip({ node, descCount, uplineDepth, pos, container }) {
       style={{ left: `${Math.max(4, left)}px`, top: `${Math.max(4, top)}px` }}
       role="tooltip"
     >
+      {typeof onCopy === 'function' ? (
+        <button
+          type="button"
+          className={`cg-tooltip__copy ${copied ? 'cg-tooltip__copy--done' : ''}`}
+          onClick={(ev) => {
+            ev.stopPropagation()
+            onCopy()
+          }}
+          onMouseDown={(ev) => ev.stopPropagation()}
+          title="Copier les infos du nœud au format JSON"
+          aria-label="Copier JSON"
+        >
+          {copied ? '✓' : '⧉'}
+        </button>
+      ) : null}
       <div className="cg-tooltip__name">{node.label}</div>
       <div className="cg-tooltip__sub">
         {node.code ? `Code ${node.code}` : '—'}{node.phone ? ` · ${node.phone}` : ''}
@@ -1156,15 +1210,58 @@ function StatRow({ label, value, accent }) {
 
 function NodeStatsPanel({ data }) {
   const { node, rollup, topChildren, uplineDepth } = data
+  const [copied, setCopied] = useState(false)
+  const handleCopyJson = useCallback(() => {
+    // Snapshot everything shown in the panel so the clipboard payload is
+    // self-describing and easy to paste into a bug report / spreadsheet.
+    const payload = {
+      id: node.id,
+      name: node.label,
+      code: node.code || null,
+      phone: node.phone || null,
+      level: uplineDepth,
+      directChildren: node.directCount,
+      descendants: node.descCount,
+      sales: node.salesCount,
+      totals: node.totals,
+      subtreeRollup: rollup,
+      topChildren: topChildren.map((c) => ({ id: c.id, name: c.label, total: c.total })),
+      exportedAt: new Date().toISOString(),
+    }
+    const text = JSON.stringify(payload, null, 2)
+    const done = () => { setCopied(true); window.setTimeout(() => setCopied(false), 1600) }
+    if (navigator?.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(() => {
+        // Fallback for clipboard-blocked environments.
+        const ta = document.createElement('textarea')
+        ta.value = text; document.body.appendChild(ta); ta.select()
+        try { document.execCommand('copy') } catch { /* noop */ }
+        ta.remove(); done()
+      })
+    }
+  }, [node, rollup, topChildren, uplineDepth])
   return (
-    <div className="cg-panel__body">
+    <div className="cg-panel__body" style={{ userSelect: 'text' }}>
       <header className="cg-panel__header">
-        <div>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div className="cg-panel__title">{node.label}</div>
           <div className="cg-panel__sub">
             {node.code ? `Code ${node.code}` : '—'} · L{uplineDepth} · {node.directCount} filleul(s) directs
           </div>
         </div>
+        <button
+          type="button"
+          onClick={handleCopyJson}
+          title="Copier toutes les infos du nœud au presse-papier au format JSON"
+          style={{
+            flexShrink: 0, padding: '6px 10px', borderRadius: 8,
+            border: '1px solid #e2e8f0', background: copied ? '#dcfce7' : '#fff',
+            color: copied ? '#166534' : '#475569', fontSize: 11, fontWeight: 600,
+            cursor: 'pointer', whiteSpace: 'nowrap',
+          }}
+        >
+          {copied ? '✓ Copié' : '⧉ JSON'}
+        </button>
       </header>
       <section className="cg-panel__section">
         <h4>Ce nœud</h4>
@@ -1242,43 +1339,35 @@ function GlobalStatsPanel({ stats, topNodes }) {
 function InlineStyles() {
   return (
     <style>{`
-      .cg-root { position: relative; width: 100%; height: 100%; display: flex; flex-direction: column; background: #f8fafc; border-radius: 12px; overflow: hidden; user-select: none; }
-      .cg-root--empty { align-items: center; justify-content: center; gap: 12px; padding: 24px; }
+      .cg-root { position: relative; width: 100%; height: 100%; background: #f8fafc; overflow: hidden; user-select: none; }
+      .cg-root--empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px; }
       .cg-empty__art { width: 280px; max-width: 80%; height: auto; }
       .cg-empty__msg { text-align: center; color: #475569; font-size: 13px; display: flex; flex-direction: column; gap: 4px; }
       .cg-empty__msg strong { color: #0f172a; font-size: 14px; font-weight: 700; }
 
-      .cg-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px; background: #ffffff; border-bottom: 1px solid #e2e8f0; flex-wrap: wrap; z-index: 2; }
-      .cg-toolbar__left, .cg-toolbar__right { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+      .cg-canvas { position: relative; width: 100%; height: 100%; overflow: hidden; }
+      .cg-stage { position: relative; width: 100%; height: 100%; overflow: hidden; cursor: grab; background: radial-gradient(ellipse at top left, #f1f5f9, #e2e8f0 70%); }
+      .cg-stage:active { cursor: grabbing; }
+      .cg-svg { display: block; transition: none; }
 
-      .cg-pillbar { display: inline-flex; background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 999px; padding: 3px; }
-      .cg-pillbar__btn { border: 0; background: transparent; padding: 5px 12px; border-radius: 999px; font-size: 12px; font-weight: 600; color: #475569; cursor: pointer; }
-      .cg-pillbar__btn--on { background: #fff; color: #0f172a; box-shadow: 0 1px 2px rgba(15,23,42,.08); }
-      .cg-pillbar__btn:focus-visible { outline: 2px solid #1d4ed8; outline-offset: 2px; }
+      .cg-floatbar { position: absolute; top: 12px; left: 12px; z-index: 5; display: inline-flex; align-items: center; gap: 8px; padding: 6px 8px; background: rgba(255,255,255,0.96); backdrop-filter: blur(6px); border: 1px solid #e2e8f0; border-radius: 999px; box-shadow: 0 4px 18px rgba(15,23,42,0.08); flex-wrap: wrap; max-width: calc(100% - 24px); }
 
       .cg-search { position: relative; }
-      .cg-search__input { width: 260px; max-width: 52vw; padding: 6px 10px; border: 1px solid #cbd5e1; border-radius: 999px; background: #fff; font-size: 12px; color: #0f172a; }
-      .cg-search__input:focus { outline: none; border-color: #1d4ed8; box-shadow: 0 0 0 3px rgba(29,78,216,0.12); }
-      .cg-search__menu { position: absolute; top: calc(100% + 4px); left: 0; right: 0; background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; box-shadow: 0 10px 30px rgba(15,23,42,0.12); list-style: none; padding: 4px; margin: 0; z-index: 10; max-height: 260px; overflow: auto; }
+      .cg-search__input { width: 240px; max-width: 48vw; padding: 6px 12px; border: 1px solid transparent; border-radius: 999px; background: #f1f5f9; font-size: 12px; color: #0f172a; }
+      .cg-search__input:focus { outline: none; background: #fff; border-color: #1d4ed8; box-shadow: 0 0 0 3px rgba(29,78,216,0.12); }
+      .cg-search__menu { position: absolute; top: calc(100% + 6px); left: 0; right: 0; background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; box-shadow: 0 10px 30px rgba(15,23,42,0.12); list-style: none; padding: 4px; margin: 0; z-index: 10; max-height: 260px; overflow: auto; }
       .cg-search__item { width: 100%; text-align: left; background: transparent; border: 0; padding: 6px 10px; border-radius: 6px; cursor: pointer; display: flex; justify-content: space-between; gap: 8px; font-size: 12px; }
       .cg-search__item:hover { background: #eff6ff; }
       .cg-search__item-name { font-weight: 600; color: #0f172a; }
       .cg-search__item-meta { color: #64748b; font-size: 11px; }
 
-      .cg-zoom-label { font-size: 12px; color: #475569; font-weight: 600; min-width: 40px; text-align: right; font-variant-numeric: tabular-nums; }
-      .cg-icon-btn { border: 1px solid #cbd5e1; background: #fff; color: #0f172a; padding: 5px 10px; border-radius: 8px; font-size: 12px; font-weight: 600; cursor: pointer; line-height: 1; }
+      .cg-zoom-label { font-size: 12px; color: #475569; font-weight: 600; min-width: 40px; text-align: center; font-variant-numeric: tabular-nums; }
+      .cg-icon-btn { border: 1px solid #cbd5e1; background: #fff; color: #0f172a; padding: 5px 10px; border-radius: 999px; font-size: 13px; font-weight: 600; cursor: pointer; line-height: 1; min-width: 30px; }
       .cg-icon-btn:hover { background: #f1f5f9; }
       .cg-icon-btn--primary { color: #1d4ed8; border-color: #bfdbfe; background: #eff6ff; }
       .cg-icon-btn--primary:hover { background: #dbeafe; }
       .cg-icon-btn:focus-visible { outline: 2px solid #1d4ed8; outline-offset: 2px; }
 
-      .cg-canvas { position: relative; flex: 1; display: flex; min-height: 0; }
-      .cg-stage { flex: 1; position: relative; overflow: hidden; cursor: grab; background: radial-gradient(ellipse at top left, #f1f5f9, #e2e8f0 70%); }
-      .cg-stage:active { cursor: grabbing; }
-      .cg-stage--wide { /* nothing extra — flex:1 already fills */ }
-      .cg-svg { display: block; transition: none; }
-
-      .cg-panel { width: 300px; max-width: 40%; background: #ffffff; border-left: 1px solid #e2e8f0; overflow: auto; font-size: 13px; color: #0f172a; }
       .cg-panel__body { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
       .cg-panel__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; padding-bottom: 6px; border-bottom: 1px solid #f1f5f9; }
       .cg-panel__title { font-size: 14px; font-weight: 700; color: #0f172a; }
@@ -1299,17 +1388,19 @@ function InlineStyles() {
       .cg-stat__value--warn { color: #b45309; }
       .cg-stat__value--muted { color: #64748b; }
 
-      .cg-tooltip { position: absolute; z-index: 20; background: #0f172a; color: #f8fafc; border-radius: 10px; padding: 10px 12px; width: 240px; box-shadow: 0 10px 30px rgba(15,23,42,0.35); font-size: 11px; line-height: 1.5; pointer-events: none; }
-      .cg-tooltip__name { font-size: 13px; font-weight: 700; color: #ffffff; }
+      .cg-tooltip { position: absolute; z-index: 20; background: #0f172a; color: #f8fafc; border-radius: 10px; padding: 10px 12px; width: 240px; box-shadow: 0 10px 30px rgba(15,23,42,0.35); font-size: 11px; line-height: 1.5; pointer-events: auto; }
+      .cg-tooltip__name { font-size: 13px; font-weight: 700; color: #ffffff; padding-right: 28px; }
       .cg-tooltip__sub { font-size: 11px; color: #94a3b8; margin-top: 2px; }
       .cg-tooltip__sep { border: 0; border-top: 1px solid #1e293b; margin: 6px 0; }
       .cg-tooltip__grid { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; margin: 0; }
       .cg-tooltip__grid dt { color: #94a3b8; }
       .cg-tooltip__grid dd { margin: 0; color: #f8fafc; font-weight: 600; font-variant-numeric: tabular-nums; }
+      .cg-tooltip__copy { position: absolute; top: 8px; right: 8px; background: rgba(255,255,255,0.08); color: #f8fafc; border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; padding: 2px 8px; font-size: 12px; font-weight: 700; cursor: pointer; line-height: 1.2; }
+      .cg-tooltip__copy:hover { background: rgba(255,255,255,0.18); }
+      .cg-tooltip__copy--done { background: #16a34a; border-color: #16a34a; color: #fff; }
 
       @media (max-width: 700px) {
-        .cg-panel { display: none; }
-        .cg-search__input { width: 180px; }
+        .cg-search__input { width: 160px; }
       }
     `}</style>
   )

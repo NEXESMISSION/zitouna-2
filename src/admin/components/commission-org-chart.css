@@ -1,0 +1,361 @@
+/* ============================================================================
+   CommissionOrgChart — top-down org chart of the referral/commission network.
+   Replaces the cramped circular node graph with clear cards + orthogonal links.
+   ============================================================================ */
+
+.cog {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 1px 1px, rgba(15, 23, 42, 0.07) 1px, transparent 0)
+    0 0 / 24px 24px,
+    linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+  /* Default cursor; toolbar/cards override when they're hovered. */
+  cursor: default;
+  /* Remove the brief touch-action delay so drag feels native. */
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.cog--grab { cursor: grab; }
+.cog--grabbing { cursor: grabbing !important; }
+.cog--grabbing * { cursor: grabbing !important; }
+
+/* Viewport: fills the page, cards are transformed inside. No native scroll. */
+.cog-viewport {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.cog-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  /* No transition — we need 1:1 mouse follow during panning. */
+  will-change: transform;
+}
+
+.cog-edges {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+}
+.cog-edge path { pointer-events: stroke; cursor: default; transition: stroke 0.15s; }
+.cog-edge--hover path { stroke: #64748b !important; }
+.cog-edge--active path { stroke: #1d4ed8 !important; }
+
+/* ---- Cards ---- */
+.cog-card {
+  position: absolute;
+  padding: 10px 12px;
+  background: #fff;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.05);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+  font-family: inherit;
+  color: inherit;
+  overflow: hidden;
+  transition:
+    transform 0.15s,
+    border-color 0.15s,
+    box-shadow 0.15s,
+    opacity 0.15s;
+  /* A small top stripe gets colored per generation (--accent). */
+}
+
+.cog-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 4px;
+  background: var(--cog-accent, #cbd5e1);
+}
+
+.cog-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.10);
+  border-color: var(--cog-accent, #cbd5e1);
+}
+
+.cog-card--selected {
+  border-color: var(--cog-accent, #1d4ed8) !important;
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--cog-accent, #1d4ed8) 22%, transparent),
+    0 8px 20px rgba(15, 23, 42, 0.10);
+  transform: translateY(-2px);
+}
+
+.cog-card--dim {
+  opacity: 0.28;
+  filter: saturate(0.6);
+}
+
+/* Per-generation accents (also used by avatar + generation pill) */
+.cog-card--g1 { --cog-accent: #1d4ed8; }
+.cog-card--g2 { --cog-accent: #f59e0b; }
+.cog-card--g3 { --cog-accent: #10b981; }
+.cog-card--g4 { --cog-accent: #8b5cf6; }
+.cog-card--g5 { --cog-accent: #64748b; }
+
+/* ---- Card head (avatar + name + gen badge) ---- */
+.cog-card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.cog-card__avatar {
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--cog-accent, #1d4ed8) 12%, #fff);
+  color: var(--cog-accent, #1d4ed8);
+  border: 1px solid color-mix(in srgb, var(--cog-accent, #1d4ed8) 32%, #e2e8f0);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+}
+.cog-card__head-text {
+  min-width: 0;
+  flex: 1;
+}
+.cog-card__name {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.15;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cog-card__meta {
+  margin-top: 2px;
+  font-size: 10px;
+  color: #64748b;
+  display: inline-flex;
+  gap: 4px;
+}
+.cog-card__gen {
+  font-weight: 700;
+  color: var(--cog-accent, #64748b);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  font-size: 10px;
+}
+.cog-card__sales { color: #64748b; font-weight: 500; }
+
+/* ---- Total row ---- */
+.cog-card__total {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+  font-variant-numeric: tabular-nums;
+}
+.cog-card__total-value {
+  font-size: 18px;
+  font-weight: 800;
+  color: #0f172a;
+  line-height: 1;
+}
+.cog-card__total-unit {
+  font-size: 10px;
+  font-weight: 700;
+  color: #94a3b8;
+  letter-spacing: 0.3px;
+}
+
+/* ---- Per-level chips ---- */
+.cog-card__levels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.cog-card__lvl {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 2px 5px;
+  border-radius: 4px;
+  letter-spacing: 0.2px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.cog-card__lvl--l1 { background: #eff6ff; color: #1d4ed8; }
+.cog-card__lvl--l2 { background: #fef3c7; color: #b45309; }
+.cog-card__lvl--l3 { background: #ecfdf5; color: #047857; }
+.cog-card__lvl--l4 { background: #f5f3ff; color: #6d28d9; }
+.cog-card__lvl--empty { background: #f1f5f9; color: #94a3b8; font-weight: 500; font-style: italic; }
+
+/* ---- "To pay" highlight bar at bottom ---- */
+.cog-card__due {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 3px 8px;
+  background: #fef3c7;
+  color: #b45309;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-top: 1px solid #fde68a;
+}
+.cog-card__due-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #f59e0b;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.22);
+}
+
+/* ============================================================================
+   Floating toolbar (top-left) + legend (top-right)
+   ============================================================================ */
+.cog-toolbar {
+  position: absolute;
+  top: 68px; /* below the page topbar */
+  left: 24px;
+  z-index: 10;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
+}
+.cog-toolbar__search {
+  width: 180px;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  background: #f1f5f9;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #0f172a;
+  outline: none;
+}
+.cog-toolbar__search::placeholder { color: #94a3b8; }
+.cog-toolbar__search:focus {
+  background: #fff;
+  border-color: #bfdbfe;
+  box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.12);
+}
+.cog-toolbar__btn {
+  width: 30px;
+  height: 30px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  color: #475569;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.12s, color 0.12s, background 0.12s;
+}
+.cog-toolbar__btn--wide { width: auto; padding: 0 10px; font-size: 11px; letter-spacing: 0.2px; }
+.cog-toolbar__btn:hover { border-color: #cbd5e1; color: #0f172a; background: #f8fafc; }
+.cog-toolbar__zoom {
+  font-size: 11px;
+  font-weight: 700;
+  color: #475569;
+  min-width: 42px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.cog-legend {
+  position: absolute;
+  top: 68px;
+  right: 24px;
+  z-index: 10;
+  min-width: 150px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
+  font-size: 11px;
+  color: #475569;
+}
+.cog-legend__title {
+  font-weight: 800;
+  color: #0f172a;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.cog-legend__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 0;
+}
+.cog-legend__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.cog-legend__dot--g1 { background: #1d4ed8; }
+.cog-legend__dot--g2 { background: #f59e0b; }
+.cog-legend__dot--g3 { background: #10b981; }
+.cog-legend__dot--g4 { background: #8b5cf6; }
+.cog-legend__hint {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed #e2e8f0;
+  font-size: 10px;
+  color: #64748b;
+  font-style: italic;
+}
+
+/* ============================================================================
+   Empty state
+   ============================================================================ */
+.cog-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #475569;
+  text-align: center;
+  gap: 6px;
+}
+.cog-empty__icon { font-size: 36px; }
+.cog-empty__title { font-size: 16px; font-weight: 800; color: #0f172a; }
+.cog-empty__sub { font-size: 13px; color: #64748b; }
+
+/* ============================================================================
+   Responsive — at small widths, shrink toolbar + legend
+   ============================================================================ */
+@media (max-width: 700px) {
+  .cog-toolbar { top: 108px; left: 12px; right: 12px; flex-wrap: wrap; }
+  .cog-toolbar__search { width: 100%; }
+  .cog-legend { display: none; }
+}

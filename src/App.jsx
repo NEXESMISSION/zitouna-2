@@ -28,7 +28,6 @@ const ClientProfilePage = lazy(() => import('./admin/pages/ClientProfilePage.jsx
 const AuditLogPage = lazy(() => import('./admin/pages/AuditLogPage.jsx'))
 const UserManagementPage = lazy(() => import('./admin/pages/UserManagementPage.jsx'))
 const FinanceDashboardPage = lazy(() => import('./admin/pages/FinanceDashboardPage.jsx'))
-const ReferralCommissionSettingsPage = lazy(() => import('./admin/pages/ReferralCommissionSettingsPage.jsx'))
 const NotaryDashboardPage = lazy(() => import('./admin/pages/NotaryDashboardPage.jsx'))
 const RecouvrementPage = lazy(() => import('./admin/pages/RecouvrementPage.jsx'))
 const CoordinationPage = lazy(() => import('./admin/pages/CoordinationPage.jsx'))
@@ -37,7 +36,6 @@ const AdminProfilePage = lazy(() => import('./admin/pages/AdminProfilePage.jsx')
 const CallCenterPage = lazy(() => import('./admin/pages/CallCenterPage.jsx'))
 const CallCenterCalendarPage = lazy(() => import('./admin/pages/CallCenterCalendarPage.jsx'))
 const CommercialCalendarPage = lazy(() => import('./admin/pages/CommercialCalendarPage.jsx'))
-const AccessGrantsPage = lazy(() => import('./admin/pages/AccessGrantsPage.jsx'))
 const CommissionLedgerPage = lazy(() => import('./admin/pages/CommissionLedgerPage.jsx'))
 const ClientLinkRepairPage = lazy(() => import('./admin/pages/ClientLinkRepairPage.jsx'))
 const CommissionAnomaliesPage = lazy(() => import('./admin/pages/CommissionAnomaliesPage.jsx'))
@@ -96,7 +94,6 @@ export default function App() {
           <Route path="clients"              element={<ClientsPage />} />
           <Route path="clients/:clientId"    element={<ClientProfilePage />} />
           <Route path="finance"              element={<FinanceDashboardPage />} />
-          <Route path="referral-settings"    element={<ReferralCommissionSettingsPage />} />
           <Route path="commission-ledger" element={<CommissionLedgerPage />} />
           <Route path="commissions" element={<CommissionTrackerPage />} />
           <Route path="commissions/analytics" element={<CommissionAnalyticsPage />} />
@@ -108,7 +105,6 @@ export default function App() {
           <Route path="users"                element={<UserManagementPage />} />
           <Route path="client-link-repair"   element={<ClientLinkRepairPage />} />
           <Route path="audit-log"            element={<AuditLogPage />} />
-          <Route path="access-grants"       element={<AccessGrantsPage />} />
           <Route path="sell"                 element={<SellPage />} />
           <Route path="cash-sales"           element={<CashSalesPage />} />
           <Route path="call-center"          element={<CallCenterPage />} />
