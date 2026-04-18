@@ -282,6 +282,27 @@
   color: #fff;
   box-shadow: 0 2px 8px rgba(37, 99, 235, 0.22);
 }
+.rv-chip:disabled { opacity: 0.45; cursor: not-allowed; }
+.rv-chip:disabled:hover { border-color: #e2e8f0; color: #475569; }
+.rv-chip__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  margin-left: 6px;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #475569;
+}
+.rv-chip--active .rv-chip__count {
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+}
 
 /* Payment rows */
 .rv-rows { display: flex; flex-direction: column; gap: 8px; }

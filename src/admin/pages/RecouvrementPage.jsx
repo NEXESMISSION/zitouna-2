@@ -52,6 +52,7 @@ export default function RecouvrementPage() {
   const { sales, loading: salesLoading } = useSales()
   const { clients, loading: clientsLoading } = useClients()
   const [query, setQuery] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
   const [selectedId, setSelectedId] = useState(null)
   const [rejectTarget, setRejectTarget] = useState(null)
   const [rejectNote, setRejectNote] = useState('')
@@ -142,21 +143,27 @@ export default function RecouvrementPage() {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
     let list = q ? dossiers.filter((d) => d.name.toLowerCase().includes(q) || d.project.toLowerCase().includes(q)) : dossiers
+    if (statusFilter !== 'all' && statusFilter !== 'missing') {
+      list = list.filter((d) => dossierStatus(d) === statusFilter)
+    } else if (statusFilter === 'missing') {
+      list = []
+    }
     return list.sort((a, b) => {
       const sa = dossierStatus(a), sb = dossierStatus(b)
       const order = { submitted: 0, overdue: 1, ok: 2 }
       return (order[sa] ?? 2) - (order[sb] ?? 2)
     })
-  }, [dossiers, query])
+  }, [dossiers, query, statusFilter])
 
   const filteredMissingPlan = useMemo(() => {
+    if (statusFilter !== 'all' && statusFilter !== 'missing') return []
     const q = query.trim().toLowerCase()
     if (!q) return missingPlanSales
     return missingPlanSales.filter((s) => (
       String(s.clientName || '').toLowerCase().includes(q)
       || String(s.projectTitle || '').toLowerCase().includes(q)
     ))
-  }, [missingPlanSales, query])
+  }, [missingPlanSales, query, statusFilter])
 
   const totalSubmitted = dossiers.reduce((s, d) => s + d.payments.filter((p) => p.status === 'submitted').length, 0)
   const totalOverdue = dossiers.reduce((s, d) => s + d.payments.filter((p) => (p.status === 'pending' && p.dueDate < TODAY) || p.status === 'rejected').length, 0)
@@ -309,6 +316,15 @@ export default function RecouvrementPage() {
     [filtered, safePage],
   )
   const onQueryChange = (e) => { setQuery(e.target.value); setPage(1) }
+  const onStatusFilterChange = (key) => { setStatusFilter(key); setPage(1) }
+
+  const statusFilters = [
+    ['all',       'Tous',       dossiers.length + missingPlanSales.length],
+    ['submitted', 'À valider',  dossiers.filter((d) => dossierStatus(d) === 'submitted').length],
+    ['overdue',   'En retard',  dossiers.filter((d) => dossierStatus(d) === 'overdue').length],
+    ['ok',        'À jour',     dossiers.filter((d) => dossierStatus(d) === 'ok').length],
+    ['missing',   'Sans plan',  missingPlanSales.length],
+  ]
 
   return (
     <div className="sell-field" dir="ltr">
@@ -349,6 +365,22 @@ export default function RecouvrementPage() {
             value={query}
             onChange={onQueryChange}
           />
+        </div>
+        <div className="rv-chips" role="tablist" aria-label="Filtrer par statut">
+          {statusFilters.map(([key, label, count]) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={statusFilter === key}
+              disabled={key === 'missing' && count === 0}
+              className={`rv-chip${statusFilter === key ? ' rv-chip--active' : ''}`}
+              onClick={() => onStatusFilterChange(key)}
+            >
+              {label}
+              <span className="rv-chip__count">{count}</span>
+            </button>
+          ))}
         </div>
       </div>
 
