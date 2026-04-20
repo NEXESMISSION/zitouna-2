@@ -25,7 +25,12 @@ import './installments-page.css'
 const REVENUE_PER_TREE = 90
 const MAX_IMAGE_DIMENSION = 1600
 const IMAGE_QUALITY = 0.76
-const MAX_IMAGE_BYTES = 450 * 1024
+// Receipts are phone camera shots of bank slips — after webp compression at
+// 1600px/0.76 quality a typical receipt lands around 200–900 KB. The old
+// 450 KB cap rejected a lot of legitimate photos silently from the dashboard
+// submit flow, leaving users unable to send their receipts. 2 MB is a safe
+// ceiling that still protects storage while accepting real-world images.
+const MAX_IMAGE_BYTES = 2 * 1024 * 1024
 const MAX_NON_IMAGE_BYTES = 5 * 1024 * 1024
 const IMAGE_EXT_RE = /\.(png|jpe?g|webp|gif|bmp|svg)$/i
 
@@ -502,8 +507,15 @@ export default function DashboardPage() {
     setIpError('')
     let finalFile = file
     if (file.type?.startsWith('image/')) {
-      finalFile = await optimizeImageFile(file)
-      if (finalFile.size > MAX_IMAGE_BYTES) throw new Error('Image trop lourde')
+      try {
+        finalFile = await optimizeImageFile(file)
+      } catch {
+        // Compression failed (e.g. HEIC on an older browser). Fall back to
+        // the raw file so the user can still upload — the storage layer
+        // accepts any image/* and the 5 MB non-image ceiling is our net.
+        finalFile = file
+      }
+      if (finalFile.size > MAX_IMAGE_BYTES) throw new Error('Image trop lourde (max 2 Mo après compression). Essayez une photo plus nette ou un PDF.')
     } else if (file.size > MAX_NON_IMAGE_BYTES) throw new Error('Fichier trop volumineux (max 5 Mo)')
     setIpReceiptFile(finalFile)
     if (ipReceiptPreview?.startsWith('blob:')) URL.revokeObjectURL(ipReceiptPreview)
@@ -525,18 +537,27 @@ export default function DashboardPage() {
   }, [ipReceiptPreview])
 
   const ipSubmit = useCallback(async () => {
-    if (!ipPayTarget || !ipReceiptName || !ipReceiptFile || ipSubmitting) return
+    if (ipSubmitting) return
+    if (!ipPayTarget) { setIpError('Aucune mensualité sélectionnée.'); return }
+    if (!ipReceiptFile) { setIpError('Veuillez choisir un fichier reçu.'); return }
     setIpSubmitting(true); setIpError('')
     try {
       const plan = myPlans.find(p => p.id === ipPayTarget.planId)
       const payment = plan?.payments?.find(p => p.month === ipPayTarget.month)
       if (!payment?.id) throw new Error('Paiement introuvable')
       const url = await uploadInstallmentReceipt({ paymentId: payment.id, file: ipReceiptFile })
-      await addInstallmentReceiptRecord({ paymentId: payment.id, receiptUrl: url || '', fileName: ipReceiptName, note: ipNote || '' })
-      await updatePaymentStatus(payment.id, 'submitted', { receiptUrl: url || ipReceiptName })
+      await addInstallmentReceiptRecord({ paymentId: payment.id, receiptUrl: url || '', fileName: ipReceiptName || ipReceiptFile.name, note: ipNote || '' })
+      await updatePaymentStatus(payment.id, 'submitted', { receiptUrl: url || ipReceiptName || ipReceiptFile.name })
       await refreshPlans({ force: true })
       ipClosePay()
-    } catch (err) { setIpError(err.message || 'Échec envoi') }
+    } catch (err) {
+      // Surface the underlying Supabase message so the user (and support)
+      // can distinguish RLS / storage / network failures instead of the
+      // generic "Échec envoi" that was masking real issues from the dashboard.
+      const msg = err?.message || 'Échec envoi'
+      console.error('[receipt-upload]', err)
+      setIpError(msg)
+    }
     finally { setIpSubmitting(false) }
   }, [ipPayTarget, ipReceiptName, ipReceiptFile, ipSubmitting, myPlans, ipNote, ipClosePay, refreshPlans])
 
@@ -1079,7 +1100,7 @@ export default function DashboardPage() {
               </div>
               <div className="ip__modal-footer">
                 <button type="button" className="ip__modal-cancel" onClick={ipClosePay}>Annuler</button>
-                <button type="button" className="ip__modal-submit" disabled={!ipReceiptName || ipSubmitting} onClick={ipSubmit}>
+                <button type="button" className="ip__modal-submit" disabled={!ipReceiptFile || ipSubmitting} onClick={ipSubmit}>
                   {ipSubmitting ? 'Envoi…' : 'Envoyer le reçu'}
                 </button>
               </div>

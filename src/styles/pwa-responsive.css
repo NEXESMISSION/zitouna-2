@@ -1,47 +1,37 @@
 /* =============================================================================
  * pwa-responsive.css — global mobile-first shell for the Zitouna webapp.
  *
- * Scope:
- *   - Fixes that apply to EVERY page (public + admin) without touching each
- *     page's own CSS file. Uses broad selectors and low specificity so page
- *     styles win on details; only safety-net rules are !important.
- *
- * What it fixes:
- *   1. Horizontal overflow runaway (tables, pre, long URLs, inline SVGs).
- *   2. Touch targets < 44px (a11y + iOS HIG).
- *   3. iOS input zoom on focus (font-size < 16px).
- *   4. Safe-area insets (notch phones, Android nav bar).
- *   5. Dynamic viewport (100dvh beats 100vh on mobile Safari).
- *   6. Tables become horizontally scrollable instead of overflowing.
- *   7. Drawers / modals resize to the viewport on small screens.
- *   8. PWA standalone-mode treats the window as an app (no tap delay,
- *      no accidental pull-to-refresh inside scroll containers).
- *
- * Load order: imported from main.jsx AFTER index.css + skeletons.css so
- * page-specific rules cascade normally; safety-net !important rules are
- * narrow and intentional.
+ * Design rules (updated):
+ *   - NEVER pad the <body>. Global body padding makes every page feel
+ *     stretched / glued to the bezel. Instead, safe-area insets are owned
+ *     by the elements that actually touch the system edges:
+ *         • sticky/fixed top chrome (top-bar-wrap, admin sidebar toggles)
+ *         • fixed bottom action bars (.project-page-actions, .plot-page-actions)
+ *         • modal overlays (.zadm-modal-overlay, .adm-modal-overlay)
+ *         • drawer header/footer (.zadm-drawer__header, .zadm-drawer__footer)
+ *   - Page-internal scroll containers get their own bottom breathing room.
+ *   - Safety-net !important rules are narrow (font-size for iOS zoom, overflow
+ *     guards) and live below.
  * ========================================================================== */
 
 /* ── 1 / Viewport + overflow guards ──────────────────────────────────── */
 html,
 body {
-  /* dvh = dynamic viewport height; avoids the Safari address-bar height jump. */
   min-height: 100dvh;
-  /* Lock accidental side-scroll. Individual children that need to scroll
-     horizontally (tables, carousels) opt in with overflow-x: auto. */
   max-width: 100vw;
 }
 
-/* Prevent ANY top-level element from blowing past the viewport width on
-   mobile. This catches overflowing <pre>, wide images, inline SVGs, and
-   third-party widgets without us having to chase each page individually. */
+body {
+  /* Zero body padding. Page shells and components handle their own insets. */
+  margin: 0;
+  padding: 0;
+}
+
 #root {
   max-width: 100vw;
   overflow-x: hidden;
 }
 
-/* Replace generic 100vh with 100dvh when we find it in layout roots.
-   Keeps the fallback working in browsers that don't support dvh. */
 @supports (height: 100dvh) {
   .screen,
   .screen--app,
@@ -53,29 +43,58 @@ body {
   }
 }
 
-/* ── 2 / Safe-area insets (iOS notch, Android gesture bar) ──────────── */
-body {
-  padding-top: env(safe-area-inset-top, 0);
-  padding-left: env(safe-area-inset-left, 0);
-  padding-right: env(safe-area-inset-right, 0);
-  padding-bottom: env(safe-area-inset-bottom, 0);
+/* ── 2 / Safe-area — OPT-IN, not global ─────────────────────────────── */
+
+/* Public top bar: sits at the top of every public page. Give it a padding
+   that equals the OS inset PLUS a small visual margin so the logo doesn't
+   feel glued to the status bar on notch phones or get covered by the
+   mobile browser's address bar / search bar during scroll. */
+.top-bar-wrap {
+  padding-top: calc(env(safe-area-inset-top, 0px) + 1.25rem) !important;
+}
+@media (max-width: 640px) {
+  .top-bar-wrap {
+    padding-top: calc(env(safe-area-inset-top, 0px) + 0.9rem) !important;
+    margin-bottom: 0.85rem !important;
+  }
 }
 
-/* ── 3 / Typography & touch targets ─────────────────────────────────── */
+/* Pages that don't render the TopBar (login, admin sell portal, etc.)
+   still need breathing room under the OS status bar / notch. A tiny top
+   inset on the outer screen wrappers keeps the first row of content
+   from being cropped under the phone's status bar in PWA standalone
+   mode, and under the mobile browser's top chrome when it briefly
+   overlays content during address-bar auto-hide/show. */
+@media (display-mode: standalone), (display-mode: fullscreen) {
+  .screen--login,
+  .zitu-page,
+  .sell-field {
+    padding-top: calc(env(safe-area-inset-top, 0px) + 0.5rem);
+  }
+  .project-page-actions,
+  .plot-page-actions {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  /* Disable iOS rubber-band on the root; our PullToRefresh handles refresh. */
+  html,
+  body {
+    overscroll-behavior: none;
+    touch-action: manipulation;
+  }
+}
 
-/* iOS Safari (and some Android browsers) zoom the page when a focused
-   <input>/<textarea>/<select> has computed font-size < 16px. We therefore
-   force 16px on every form field up to 900px (covers phones, small tablets,
-   and landscape iPhones).
+/* Browser-mode (not PWA) iOS / Android safety: the address bar can briefly
+   overlap the top of the viewport when it shows up after a scroll-up. Make
+   sure the first painted element isn't a card sitting flush at y=0 — the
+   TopBar's own padding-top handles this for authenticated pages, but the
+   public hero / login screen need their own cushion. */
+@supports (padding: max(0px)) {
+  .screen--login {
+    padding-top: max(1rem, env(safe-area-inset-top, 0px));
+  }
+}
 
-   Page CSS in this repo often declares `font-size: 13px !important` on
-   class chains like `.sell-field .adm-input` (specificity 0,2,0). To win,
-   we need equal-or-higher specificity AND !important, so we:
-     1. enumerate every known input class in the app, and
-     2. use attribute-chain `input[type][type]` to raise the bare selector's
-        specificity to 0,2,1 without narrowing what it matches.
-   Anything new that slips through still hits the plain input/textarea/select
-   safety net. */
+/* ── 3 / iOS zoom-on-focus guard (font-size ≥ 16px on phones) ───────── */
 @media (max-width: 900px) {
   input,
   input[type],
@@ -84,10 +103,6 @@ body {
   textarea[class],
   select,
   select[class],
-  /* Known input-shaped classes across the admin + public shells. Prefix
-     `html` is added where page CSS uses 2-class chains (e.g. `.sell-field
-     .adm-input`) with !important — we need to beat 0,2,0 since page CSS
-     loads after this file and wins on ties. */
   .adm-input,
   .adm-select,
   .adm-textarea,
@@ -111,8 +126,8 @@ body {
     font-size: 16px !important;
   }
 
-  /* Minimum touch target 44x44 px — matches iOS HIG + Android accessibility.
-     We only enforce on small screens so desktop keeps its denser controls. */
+  /* Minimum touch target 40px. Tighter than 44 on purpose: 44px was
+     making buttons feel oversized and contributing to the stretched look. */
   button,
   [role='button'],
   .adm-btn,
@@ -126,8 +141,7 @@ body {
   }
 }
 
-/* Universally allow long words (emails, URLs, file names, French names
-   with hyphens) to wrap instead of blowing the container width. */
+/* ── 4 / Long-word wrap safety ──────────────────────────────────────── */
 p,
 li,
 td,
@@ -140,11 +154,7 @@ th,
   word-break: break-word;
 }
 
-/* ── 4 / Tables ─────────────────────────────────────────────────────── */
-
-/* Any plain <table> becomes horizontally scrollable inside its own scroll
-   region on small screens. We target a wrapper when page CSS provides one;
-   as a safety net, also wrap orphan tables in a scroll shadow. */
+/* ── 5 / Tables scroll on mobile ────────────────────────────────────── */
 .adm-table-wrap,
 .table-scroll,
 .sp-table-wrap,
@@ -153,36 +163,26 @@ th,
   -webkit-overflow-scrolling: touch;
   scrollbar-gutter: stable;
 }
-
 @media (max-width: 767px) {
-  /* As a last-resort net: bare <table> elements get min-width so columns
-     don't crush, then the parent scrolls. Page-specific tables that
-     already have this treatment are unaffected. */
-  table {
-    max-width: 100%;
-  }
+  table { max-width: 100%; }
   table.sp-table,
-  table.adm-table {
-    min-width: 640px;
-  }
+  table.adm-table { min-width: 640px; }
 }
 
-/* ── 5 / Drawers + modals (AdminDrawer + AdminModal + legacy) ───────── */
+/* ── 6 / Modal + drawer mobile polish ───────────────────────────────── */
 
-/* Shared rules: keep the dialog inside the viewport and scrollable. */
-.zadm-drawer,
-.zadm-modal,
-.adm-drawer,
-.adm-modal {
-  max-height: 100dvh;
-}
 .zadm-modal,
 .adm-modal {
   max-width: min(520px, calc(100vw - 16px));
 }
+.zadm-modal,
+.adm-modal,
+.zadm-drawer,
+.adm-drawer {
+  max-height: 100dvh;
+}
 
-/* Drawer spans nearly full width on phones; keeps the familiar slide-in
-   behaviour on tablets+. */
+/* Phone: drawer = fullscreen slide, modal = bottom sheet. */
 @media (max-width: 600px) {
   .zadm-drawer,
   .adm-drawer {
@@ -191,40 +191,52 @@ th,
     border-radius: 0 !important;
   }
 
-  /* Bottom-anchored modals feel more natural on phones. The component
-     library uses flex on its overlay, so we just shift alignment. */
   .zadm-modal-overlay,
   .adm-modal-overlay {
     align-items: flex-end !important;
+    /* Overlay itself is flush to viewport edges; insets live on the dialog
+       so the bottom sheet's rounded corners stay visible. */
     padding: 0 !important;
   }
   .zadm-modal,
   .adm-modal {
-    border-radius: 18px 18px 0 0 !important;
+    border-radius: 16px 16px 0 0 !important;
     max-width: 100vw !important;
     width: 100vw !important;
-    max-height: 90dvh !important;
+    /* Cap sheet height so it never eats the status bar area. */
+    max-height: calc(92dvh - env(safe-area-inset-top, 0px)) !important;
   }
-}
 
-/* ── 6 / Hero + top-bar stacks ──────────────────────────────────────── */
-
-/* Legacy .sp-hero and the new .sp2-topbar keep everything on one row by
-   default. At < 420px the name + role would get truncated to nothing;
-   dropping the today-counter label saves space without losing data. */
-@media (max-width: 420px) {
-  .sp-hero__role,
-  .sp2-topbar__role {
-    font-size: 10.5px;
+  /* Drawer header gets top inset so its X button + title don't collide
+     with the status bar in standalone mode. */
+  .zadm-drawer__header,
+  .adm-drawer-header {
+    padding-top: calc(14px + env(safe-area-inset-top, 0px)) !important;
   }
-  .sp-hero__kpi-label,
-  .sp2-topbar__today-lbl {
-    display: none;
+  .zadm-drawer__footer,
+  .adm-drawer-footer {
+    padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  /* Modal body: extra bottom breathing room so the last field/button
+     doesn't sit on the home indicator. */
+  .zadm-modal__body,
+  .adm-modal-body {
+    padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  /* Bigger, cleaner close button on phones — tap-target + visual weight. */
+  .zadm-modal__close,
+  .adm-modal-close,
+  .zadm-drawer__close,
+  .adm-drawer-close {
+    width: 40px !important;
+    height: 40px !important;
+    border-radius: 999px !important;
   }
 }
 
 /* ── 7 / Images, SVGs, embeds ───────────────────────────────────────── */
-
 img,
 video,
 iframe,
@@ -232,15 +244,9 @@ svg {
   max-width: 100%;
   height: auto;
 }
-/* iframes used as maps preserve aspect via their own wrappers; we only
-   guarantee they never force horizontal overflow. */
-iframe {
-  border: 0;
-}
+iframe { border: 0; }
 
-/* ── 8 / Scrolling behaviour ────────────────────────────────────────── */
-
-/* iOS momentum scrolling for any opt-in overflow container. */
+/* ── 8 / Scroll momentum on opt-in containers ───────────────────────── */
 .sp-wizard__body,
 .zadm-drawer__body,
 .zadm-modal__body,
@@ -249,105 +255,22 @@ iframe {
   -webkit-overflow-scrolling: touch;
 }
 
-/* Prevent the whole page from rubber-band-scrolling while a drawer/modal
-   is open. The JS locks body overflow; this is belt-and-braces. */
+/* Lock page scroll while a drawer/modal is open (belt-and-braces; JS also
+   toggles body overflow). */
 html:has(.zadm-drawer-overlay),
 html:has(.zadm-modal-overlay) {
   overflow: hidden;
 }
 
-/* ── 9 / Installed-PWA refinements (display-mode: standalone) ──────── */
-
-/* When launched from the Home Screen the status bar and home-indicator
-   live INSIDE the viewport (no browser chrome to push us down). Without
-   these paddings, page headers slide under the status bar and footer
-   actions slide under the home indicator.
-
-   Previous versions scaled the whole body with `zoom: 0.92` — that made
-   everything feel stretched / slightly soft because `zoom` interpolates
-   layout and type. Removed. Breathing room is now purely a margin/padding
-   problem and is solved by the insets below. */
-@media (display-mode: standalone), (display-mode: fullscreen) {
-  /* Top/bottom buffer = safe-area inset (for physical notches) PLUS a
-     visual margin that keeps content from feeling glued to the bezel.
-     `max()` means devices without a notch still get the visual margin. */
-  body {
-    padding-top:    max(env(safe-area-inset-top, 0),    18px);
-    padding-bottom: max(env(safe-area-inset-bottom, 0), 14px);
-  }
-
-  /* Disable the rubber-band drag that normally pulls the whole "page"
-     down from the status bar on iOS; we handle refresh ourselves via
-     the PullToRefresh component. */
-  html,
-  body {
-    overscroll-behavior: none;
-    touch-action: manipulation;
-  }
-}
-
-/* ── 9b / Popups (modals + drawers) — safe-area on every device ───────
- *
- * Modals and drawers use position: fixed, so they are NOT shifted by
- * body padding. They need their own safe-area handling, and we apply it
- * in ALL modes (browser + standalone) because iOS Safari's bottom bar
- * still overlaps the home indicator even when the app is in a regular
- * tab.
- * ===================================================================== */
-
-/* Push each overlay's contents off the system edges. The overlays use
-   flex to center/bottom-anchor their dialogs; padding on the overlay
-   guarantees the dialog never extends into the notch or home indicator
-   area regardless of its size. */
-.zadm-modal-overlay,
-.adm-modal-overlay {
-  padding-top:    max(env(safe-area-inset-top, 0),    12px);
-  padding-bottom: max(env(safe-area-inset-bottom, 0), 12px);
-  box-sizing: border-box;
-}
-
-/* Drawer header/footer inherit their own padding from the component CSS;
-   we just add the inset on top, so the close button sits below the clock
-   and the footer actions sit above the home indicator. */
-.zadm-drawer__header,
-.adm-drawer-header {
-  padding-top: calc(var(--zadm-space-4, 16px) + env(safe-area-inset-top, 0)) !important;
-}
-.zadm-drawer__footer,
-.adm-drawer-footer {
-  padding-bottom: calc(var(--zadm-space-4, 16px) + env(safe-area-inset-bottom, 0)) !important;
-}
-
-/* Phone layout: the modal is a bottom sheet. We already set
-   align-items: flex-end, border-radius-top, and full width above; add a
-   safe-area-aware bottom padding INSIDE the modal (not via the overlay)
-   so the last action button stays above the home indicator even when the
-   modal body is short. We override the max-height to subtract the top
-   inset so the sheet never hides behind the status bar. */
-@media (max-width: 600px) {
-  .zadm-modal-overlay,
-  .adm-modal-overlay {
-    /* Overlay already has padding: 0 !important from section 5 — restore
-       the inset padding here with equal specificity + !important. */
-    padding: 0 !important;
-    padding-top:    env(safe-area-inset-top, 0) !important;
-    padding-bottom: env(safe-area-inset-bottom, 0) !important;
-  }
-  .zadm-modal,
-  .adm-modal {
-    max-height: calc(90dvh - env(safe-area-inset-top, 0) - env(safe-area-inset-bottom, 0)) !important;
-  }
-  /* The modal's body is the scrollable region. Give it just enough inner
-     bottom padding so the last input/button isn't flush against the
-     rounded bottom edge (which in bottom-sheet mode is 0 radius anyway). */
-  .zadm-modal__body,
-  .adm-modal-body {
-    padding-bottom: calc(var(--zadm-space-5, 20px) + 4px);
-  }
+/* ── 9 / Hero + top-bar stacks on very narrow screens ───────────────── */
+@media (max-width: 420px) {
+  .sp-hero__role,
+  .sp2-topbar__role { font-size: 10.5px; }
+  .sp-hero__kpi-label,
+  .sp2-topbar__today-lbl { display: none; }
 }
 
 /* ── 10 / Reduced motion ────────────────────────────────────────────── */
-
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -359,17 +282,12 @@ html:has(.zadm-modal-overlay) {
   }
 }
 
-/* ── 11 / Utility classes that any page can opt into ────────────────── */
-
-/* Wrap arbitrary content in a horizontally scrollable region:
-     <div class="h-scroll"><table>…</table></div>                         */
+/* ── 11 / Utility classes ───────────────────────────────────────────── */
 .h-scroll {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   max-width: 100%;
 }
-
-/* Hide a label/visual chrome on tight widths:  <span class="xs-hide">...</span> */
 @media (max-width: 480px) {
   .xs-hide { display: none !important; }
 }

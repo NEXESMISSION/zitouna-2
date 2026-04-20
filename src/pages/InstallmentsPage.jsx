@@ -12,7 +12,9 @@ import './installments-page.css'
 
 const MAX_IMAGE_DIMENSION = 1600
 const IMAGE_QUALITY = 0.76
-const MAX_IMAGE_BYTES = 450 * 1024
+// See DashboardPage.jsx — 450 KB was too tight and silently blocked real
+// camera shots after compression. 2 MB matches the dashboard ceiling.
+const MAX_IMAGE_BYTES = 2 * 1024 * 1024
 const MAX_NON_IMAGE_BYTES = 5 * 1024 * 1024
 const IMAGE_EXT_RE = /\.(png|jpe?g|webp|gif|bmp|svg)$/i
 
