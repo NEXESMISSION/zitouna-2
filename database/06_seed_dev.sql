@@ -94,10 +94,17 @@ delete from public.data_access_requests;
 delete from public.phone_access_otp_codes;
 delete from public.phone_access_requests;
 delete from public.phone_verifications;
-delete from public.user_notifications;
+-- Notifications (see 08_notifications.sql): outbox → user_notifications; prefs are separate.
 delete from public.notification_outbox;
-delete from public.notification_preferences;
-delete from public.notification_scan_cursors;
+delete from public.user_notifications;
+delete from public.user_notification_prefs;
+-- Staff-only error log from 08 (table may be absent on older DBs)
+do $zit_notif_err$
+begin
+  delete from public.notification_errors;
+exception when undefined_table then null;
+end;
+$zit_notif_err$;
 
 delete from public.client_phone_identities;
 delete from public.clients;
