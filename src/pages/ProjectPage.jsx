@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import TopBar from '../TopBar.jsx'
 import { usePublicProjectDetail } from '../lib/useSupabase.js'
@@ -50,51 +50,6 @@ function ProjectPageBody({ project: proj }) {
   })
   const availablePlotCount = proj.plots.filter((p) => p.status === 'available').length
 
-  // "Sélection rapide" — let the client auto-pick N adjacent or random
-  // available parcels and jump straight to the visit-request screen.
-  const [quickPickOpen, setQuickPickOpen] = useState(false)
-  const [quickPickCount, setQuickPickCount] = useState(1)
-  const [quickPickMode, setQuickPickMode] = useState('adjacent')
-
-  const availablePlotsSorted = useMemo(
-    () => [...proj.plots].filter(p => p.status === 'available').sort((a, b) => Number(a.id) - Number(b.id)),
-    [proj.plots]
-  )
-  const quickPickMax = availablePlotsSorted.length
-  // Derived clamp — cheaper than a state-syncing useEffect and avoids the
-  // `react-hooks/set-state-in-effect` lint error. The input still shows the
-  // user's raw value immediately because onChange clamps at write time.
-  const clampedQuickPickCount = Math.max(1, Math.min(quickPickCount, Math.max(1, quickPickMax)))
-
-  const runQuickPick = () => {
-    const n = Math.max(1, Math.min(Number(clampedQuickPickCount) || 1, quickPickMax))
-    if (quickPickMax === 0) return
-    let chosen = []
-    if (quickPickMode === 'adjacent') {
-      const list = availablePlotsSorted
-      const windows = []
-      for (let i = 0; i + n <= list.length; i++) {
-        let ok = true
-        for (let k = 1; k < n; k++) {
-          if (Number(list[i + k].id) !== Number(list[i + k - 1].id) + 1) { ok = false; break }
-        }
-        if (ok) windows.push(list.slice(i, i + n))
-      }
-      chosen = windows.length > 0
-        ? windows[Math.floor(Math.random() * windows.length)]
-        : list.slice(0, n)
-    } else {
-      const pool = [...availablePlotsSorted]
-      for (let i = pool.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1))
-        const t = pool[i]; pool[i] = pool[j]; pool[j] = t
-      }
-      chosen = pool.slice(0, n)
-    }
-    const ids = chosen.map(pl => Number(pl.id))
-    navigate(`/project/${proj.id}/visite`, { state: { plotIds: ids } })
-  }
-
   return (
     <section className="dashboard-page project-page-skin plot-page-skin project-page-safe-pad">
       <TopBar />
@@ -121,56 +76,6 @@ function ProjectPageBody({ project: proj }) {
           <input className="plot-search-input" type="text" inputMode="text" placeholder="N° parcelle…" value={search} onChange={(e) => setSearch(e.target.value)} />
           {search && <button className="plot-search-clear" onClick={() => setSearch('')} aria-label="Effacer"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>}
         </div>
-      </div>
-
-      <div className="quickpick-wrap">
-        <button
-          type="button"
-          onClick={() => setQuickPickOpen(v => !v)}
-          disabled={quickPickMax === 0}
-          aria-expanded={quickPickOpen}
-          aria-controls="proj-quickpick-panel"
-          className={`quickpick-toggle-btn${quickPickOpen ? ' is-open' : ''}`}
-          title={quickPickMax === 0 ? 'Aucune parcelle disponible' : 'Sélection rapide'}
-        >
-          <span aria-hidden>⚡</span>
-          <span>Sélection rapide</span>
-        </button>
-        {quickPickOpen && (
-          <div
-            id="proj-quickpick-panel"
-            role="group"
-            aria-label="Sélection rapide de parcelles"
-            className="quickpick-panel"
-          >
-            <label className="quickpick-label">
-              Combien de parcelles ?
-              <input
-                type="number"
-                min={1}
-                max={quickPickMax || 1}
-                value={clampedQuickPickCount}
-                onChange={e => setQuickPickCount(Math.max(1, Math.min(quickPickMax || 1, Number(e.target.value) || 1)))}
-                className="quickpick-count-input"
-              />
-              <span className="quickpick-help-text">/ {quickPickMax} dispo.</span>
-            </label>
-            <div role="radiogroup" aria-label="Mode de sélection" className="quickpick-radio-group">
-              <label className="quickpick-radio-label">
-                <input type="radio" name="proj-quickpick-mode" value="adjacent" checked={quickPickMode === 'adjacent'} onChange={() => setQuickPickMode('adjacent')} />
-                Adjacentes (côte à côte)
-              </label>
-              <label className="quickpick-radio-label">
-                <input type="radio" name="proj-quickpick-mode" value="random" checked={quickPickMode === 'random'} onChange={() => setQuickPickMode('random')} />
-                Aléatoires
-              </label>
-            </div>
-            <div className="quickpick-actions">
-              <button type="button" onClick={() => setQuickPickOpen(false)} className="quickpick-btn quickpick-btn--ghost">Annuler</button>
-              <button type="button" onClick={runQuickPick} disabled={quickPickMax === 0} className="quickpick-btn quickpick-btn--primary">Sélectionner</button>
-            </div>
-          </div>
-        )}
       </div>
 
       {filteredPlots.length === 0 ? (
