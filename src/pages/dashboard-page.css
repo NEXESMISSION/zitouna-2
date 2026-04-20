@@ -451,25 +451,28 @@
   bottom: 0;
   height: 3px;
   border-radius: 999px;
+  background: rgba(42, 75, 44, 0.35);
+  overflow: hidden;
+}
+.inv-wallet__loading-shimmer::before {
+  content: "";
+  position: absolute;
+  inset: 0;
   background: linear-gradient(
     90deg,
-    rgba(42, 75, 44, 0.35) 0%,
-    rgba(168, 204, 80, 0.45) 45%,
+    transparent 0%,
     rgba(168, 204, 80, 0.75) 50%,
-    rgba(168, 204, 80, 0.45) 55%,
-    rgba(42, 75, 44, 0.35) 100%
+    transparent 100%
   );
-  background-size: 200% 100%;
+  transform: translate3d(-100%, 0, 0);
   animation: inv-wallet-shimmer 1.5s ease-in-out infinite;
+  will-change: transform;
+  pointer-events: none;
 }
 
 @keyframes inv-wallet-shimmer {
-  0% {
-    background-position: 100% 0;
-  }
-  100% {
-    background-position: -100% 0;
-  }
+  0%   { transform: translate3d(-100%, 0, 0); }
+  100% { transform: translate3d(100%, 0, 0); }
 }
 
 .inv-wallet__panel {

@@ -166,11 +166,54 @@ begin
 
   if v_client_id is null then
     v_code := 'CL-' || upper(substring(replace(v_uid::text, '-', '') from 1 for 10));
-    insert into public.clients (code, full_name, email, phone, auth_user_id, status)
-    values (v_code, coalesce(v_full_name, 'Client'), v_email, v_phone, v_uid, 'active')
-    on conflict (email) do update
-      set auth_user_id = excluded.auth_user_id, updated_at = now()
-    returning id into v_client_id;
+
+    -- 2026-04 fix: the original INSERT had `ON CONFLICT (email) DO UPDATE`
+    -- only. But `clients.code` is ALSO unique (constraint `clients_code_key`).
+    -- When a stub row already exists with the same deterministic code
+    -- (derived from `auth.uid()` — e.g. a previous heal that rolled back,
+    -- or an admin-created stub) and a DIFFERENT email, the INSERT raised
+    -- `unique_violation` on `clients_code_key` and the whole heal RPC
+    -- aborted. That left the UI with `clientProfile = null`, which in turn
+    -- pinned every `useSalesScoped / useInstallmentsScoped / …` on a stuck
+    -- skeleton forever.
+    --
+    -- Wrap the INSERT in a BEGIN/EXCEPTION block so a code collision
+    -- falls through to a claim-the-orphan UPDATE. If the orphan belongs
+    -- to a different auth user, fall back to a suffixed code so we still
+    -- create a fresh row instead of blowing up the whole login.
+    begin
+      insert into public.clients (code, full_name, email, phone, auth_user_id, status)
+      values (v_code, coalesce(v_full_name, 'Client'), v_email, v_phone, v_uid, 'active')
+      on conflict (email) do update
+        set auth_user_id = excluded.auth_user_id, updated_at = now()
+      returning id into v_client_id;
+    exception when unique_violation then
+      -- Most likely: clients_code_key collided. Try to claim the orphan
+      -- (row with the same generated code that has no auth_user_id yet,
+      -- or whose auth_user_id is already us).
+      update public.clients c
+      set auth_user_id = coalesce(c.auth_user_id, v_uid),
+          email        = coalesce(c.email, v_email),
+          full_name    = coalesce(nullif(c.full_name, ''), v_full_name, 'Client'),
+          phone        = coalesce(nullif(c.phone, ''), v_phone),
+          updated_at   = now()
+      where c.code = v_code
+        and (c.auth_user_id is null or c.auth_user_id = v_uid)
+      returning c.id into v_client_id;
+
+      -- The code belongs to a different authenticated user → regenerate
+      -- with a short random suffix so we can still provision a profile
+      -- for the current user. This is an exceptional path; normal sign-ups
+      -- keep the clean CL-XXXXXXXXXX shape.
+      if v_client_id is null then
+        v_code := v_code || '-' || substring(md5(random()::text || clock_timestamp()::text) from 1 for 6);
+        insert into public.clients (code, full_name, email, phone, auth_user_id, status)
+        values (v_code, coalesce(v_full_name, 'Client'), v_email, v_phone, v_uid, 'active')
+        on conflict (email) do update
+          set auth_user_id = excluded.auth_user_id, updated_at = now()
+        returning id into v_client_id;
+      end if;
+    end;
   end if;
 
   -- Register the phone identity for future phone-based linking.

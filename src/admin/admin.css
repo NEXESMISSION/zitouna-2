@@ -39,6 +39,7 @@ body:has(.adm-shell) {
 
 .adm-shell {
   min-height: 100vh;
+  min-height: 100dvh;
   background: #f8fafc;
   font-family: var(--adm-font);
   color: var(--adm-text);
@@ -833,7 +834,7 @@ body:has(.adm-shell) {
   text-decoration: none;
   font-size: 13px;
   font-weight: 600;
-  transition: all var(--adm-transition);
+  transition: background-color var(--adm-transition), border-color var(--adm-transition), color var(--adm-transition), box-shadow var(--adm-transition), transform var(--adm-transition), opacity var(--adm-transition);
   cursor: pointer;
   border: 1px solid transparent;
   background: none;
@@ -1040,7 +1041,7 @@ body:has(.adm-shell) {
   border-radius: 6px;
   color: var(--adm-blue);
   background: var(--adm-blue-dim);
-  transition: all var(--adm-transition);
+  transition: background-color var(--adm-transition), border-color var(--adm-transition), color var(--adm-transition), box-shadow var(--adm-transition), transform var(--adm-transition), opacity var(--adm-transition);
   text-decoration: none;
 }
 .adm-map-link:hover { background: var(--adm-blue); color: #fff; }
@@ -1056,7 +1057,7 @@ body:has(.adm-shell) {
   font-weight: 600;
   border: 1px solid transparent;
   cursor: pointer;
-  transition: all var(--adm-transition);
+  transition: background-color var(--adm-transition), border-color var(--adm-transition), color var(--adm-transition), box-shadow var(--adm-transition), transform var(--adm-transition), opacity var(--adm-transition);
   font-family: inherit;
   line-height: 1;
   white-space: nowrap;
@@ -1177,7 +1178,7 @@ body:has(.adm-shell) {
   background: none;
   border-bottom: 2px solid transparent;
   margin-bottom: -1px;
-  transition: all var(--adm-transition);
+  transition: background-color var(--adm-transition), border-color var(--adm-transition), color var(--adm-transition), box-shadow var(--adm-transition), transform var(--adm-transition), opacity var(--adm-transition);
   font-family: inherit;
 }
 .adm-tab:hover { color: var(--adm-text-dim); }
@@ -1414,7 +1415,7 @@ body:has(.adm-shell) {
   border: 1.5px solid var(--adm-border);
   background: transparent;
   cursor: pointer;
-  transition: all var(--adm-transition);
+  transition: background-color var(--adm-transition), border-color var(--adm-transition), color var(--adm-transition), box-shadow var(--adm-transition), transform var(--adm-transition), opacity var(--adm-transition);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1692,7 +1693,7 @@ body:has(.adm-shell) {
   padding: 14px 12px;
   text-align: center;
   cursor: pointer;
-  transition: all var(--adm-transition);
+  transition: background-color var(--adm-transition), border-color var(--adm-transition), color var(--adm-transition), box-shadow var(--adm-transition), transform var(--adm-transition), opacity var(--adm-transition);
   font-family: inherit;
   color: var(--adm-text);
 }
@@ -1769,7 +1770,7 @@ body:has(.adm-shell) {
   font-weight: 500;
   border-radius: 8px;
   cursor: pointer;
-  transition: all var(--adm-transition);
+  transition: background-color var(--adm-transition), border-color var(--adm-transition), color var(--adm-transition), box-shadow var(--adm-transition), transform var(--adm-transition), opacity var(--adm-transition);
   white-space: nowrap;
 }
 .adm-fin-tab:hover { color: var(--adm-text); background: var(--adm-surface-2); }
@@ -2034,7 +2035,7 @@ body:has(.adm-shell) {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  transition: all var(--adm-transition);
+  transition: background-color var(--adm-transition), border-color var(--adm-transition), color var(--adm-transition), box-shadow var(--adm-transition), transform var(--adm-transition), opacity var(--adm-transition);
 }
 .adm-legal-card:hover { border-color: var(--adm-border-focus); }
 .adm-legal-card--ready {
@@ -2151,7 +2152,7 @@ body:has(.adm-shell) {
   border-radius: 12px;
   padding: 16px;
   cursor: pointer;
-  transition: all var(--adm-transition);
+  transition: background-color var(--adm-transition), border-color var(--adm-transition), color var(--adm-transition), box-shadow var(--adm-transition), transform var(--adm-transition), opacity var(--adm-transition);
   display: flex;
   flex-direction: column;
   gap: 12px;

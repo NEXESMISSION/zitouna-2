@@ -219,28 +219,62 @@ export async function fetchPublicVisitSlotOptions() {
 }
 
 /**
- * Single project for public detail / plot / visite flows. Uses the
- * `public_parcels` view, which exposes only parcels with status='available'
- * per the 07_hardening.sql tightening. Non-public parcels (reserved / sold)
- * are hidden from the anon marketing surface by design.
+ * Single project for detail / plot / visite flows.
+ *
+ * For anonymous visitors we read from `public_parcels`, which exposes only
+ * parcels with status='available' per the 07_hardening.sql tightening
+ * (reserved / sold parcels are hidden from the marketing surface by design).
+ *
+ * For AUTHENTICATED users we read from the raw `parcels` table — RLS allows
+ * all authenticated users to SELECT every parcel (policy
+ * `public_select_parcels_auth`), and more importantly a client who owns a
+ * sold parcel still needs to see it on the PlotPage when they open their
+ * parcel from the dashboard. Using the public view here caused the
+ * "Parcelle introuvable" empty-state when an investor clicked their
+ * purchased parcel — the view filtered it out because its status was 'sold'.
  */
 export async function fetchPublicProjectById(projectId) {
   const id = String(projectId || '').trim()
   if (!id) return null
 
+  // Detect an authenticated session without awaiting network: the Supabase
+  // client keeps the session in storage and `auth.getSession()` resolves
+  // synchronously from there. If we can't confirm auth, default to the
+  // public view (safe for anon visitors).
+  let isAuthed = false
+  try {
+    const { data } = await db().auth.getSession()
+    isAuthed = Boolean(data?.session?.user?.id)
+  } catch {
+    isAuthed = false
+  }
+
+  const parcelsTable = isAuthed ? 'parcels' : 'public_parcels'
+  const batchesTable = isAuthed ? 'parcel_tree_batches' : 'public_parcel_tree_batches'
+
   const [projRes, parcelRes] = await Promise.all([
     db().from('projects').select('*').eq('id', id).maybeSingle(),
-    db().from('public_parcels').select('*').eq('project_id', id),
+    db().from(parcelsTable).select('*').eq('project_id', id),
   ])
   if (projRes.error) throw new Error(`project: ${projRes.error.message}`)
   const p = projRes.data
   if (!p) return null
 
-  const parcels = throwIfError(parcelRes, 'parcels')
+  let parcels
+  if (parcelRes.error && isAuthed) {
+    // Belt-and-braces: if the raw table read unexpectedly fails (e.g. a
+    // future RLS tightening), fall back to the public view so the user
+    // at least sees the available catalog instead of a hard error.
+    const fb = await db().from('public_parcels').select('*').eq('project_id', id)
+    parcels = throwIfError(fb, 'parcels')
+  } else {
+    parcels = throwIfError(parcelRes, 'parcels')
+  }
+
   const parcelIds = (parcels || []).map((p) => p.id).filter(Boolean)
   const batchRes =
     parcelIds.length > 0
-      ? await db().from('public_parcel_tree_batches').select('*').in('parcel_id', parcelIds)
+      ? await db().from(batchesTable).select('*').in('parcel_id', parcelIds)
       : { data: [], error: null }
   const batches = throwIfError(batchRes, 'batches')
 
@@ -249,6 +283,9 @@ export async function fetchPublicProjectById(projectId) {
     .map((pl) => ({
       id: pl.parcel_number,
       dbId: pl.id,
+      // The raw parcels table has a `label` column (added in 07_hardening E1).
+      // The public view does not — keep null on the anon path.
+      label: pl.label || null,
       area: Number(pl.area_m2 || 0),
       trees: Number(pl.tree_count || 0),
       totalPrice: Number(pl.total_price || 0),

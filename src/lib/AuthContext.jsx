@@ -162,11 +162,20 @@ async function resolveProfiles(authUser) {
     let healMigrated = null
     let healError = null
     try {
-      // RESEARCH 01 §3: the previous bare `await` could hang indefinitely on
-      // a stalled RPC → init()'s finally never runs → .app-loader-spinner
-      // forever. 8s budget: generous for free-tier cold-start, fast enough
-      // that a user hard-refreshing after ~10s doesn't wait twice.
-      const healed = await withAuthTimeout(ensureCurrentClientProfile(), 8_000, 'ensureCurrentClientProfile[admin]')
+      // RESEARCH 01 §3: run heal and post-refresh in parallel. The heal RPC
+      // mutates the buyer row server-side; the client fetch right after reads
+      // the post-heal snapshot. Doing these sequentially added ~8s to every
+      // login. Parallel is safe because the refresh is idempotent; if it
+      // happens before the heal commits, the heal's realtime/refresh triggers
+      // pick up the diff.
+      const [healed, refreshed] = await Promise.all([
+        withAuthTimeout(ensureCurrentClientProfile(), 8_000, 'ensureCurrentClientProfile[admin]'),
+        withAuthTimeout(
+          fetchAuthClientProfile(authUser.id),
+          8_000,
+          'fetchAuthClientProfile[admin-refresh]',
+        ),
+      ])
       healMigrated = healed?.migrated || null
       if (healed && !healed.ok) {
         profileStatus = {
@@ -176,13 +185,6 @@ async function resolveProfiles(authUser) {
           migrated: healed.migrated || null,
         }
       }
-      // PLAN 01 §3: wrap with timeout — otherwise a stalled PostgREST can
-      // pin init() here.
-      const refreshed = await withAuthTimeout(
-        fetchAuthClientProfile(authUser.id),
-        8_000,
-        'fetchAuthClientProfile[admin-refresh]',
-      )
       if (refreshed && !refreshed.__profileError) client = refreshed
       else if (refreshed?.__profileError) healError = refreshed.message || null
     } catch (e) {
@@ -229,25 +231,35 @@ async function resolveProfiles(authUser) {
           6_000,
           'upsertClient[admin-link]',
         )
+        let linked
         if (savedClient?.id && cc && local) {
-          await withAuthTimeout(
-            upsertClientPhoneIdentity({
-              countryCode: cc,
-              phoneLocal: local,
-              clientId: savedClient.id,
-              authUserId: authUser.id,
-              verificationStatus: 'verified',
-              verificationReason: null,
-            }),
-            6_000,
-            'upsertClientPhoneIdentity[admin-link]',
+          const [, linkedRes] = await Promise.all([
+            withAuthTimeout(
+              upsertClientPhoneIdentity({
+                countryCode: cc,
+                phoneLocal: local,
+                clientId: savedClient.id,
+                authUserId: authUser.id,
+                verificationStatus: 'verified',
+                verificationReason: null,
+              }),
+              6_000,
+              'upsertClientPhoneIdentity[admin-link]',
+            ),
+            withAuthTimeout(
+              fetchAuthClientProfile(authUser.id),
+              8_000,
+              'fetchAuthClientProfile[admin-link]',
+            ),
+          ])
+          linked = linkedRes
+        } else {
+          linked = await withAuthTimeout(
+            fetchAuthClientProfile(authUser.id),
+            8_000,
+            'fetchAuthClientProfile[admin-link]',
           )
         }
-        const linked = await withAuthTimeout(
-          fetchAuthClientProfile(authUser.id),
-          8_000,
-          'fetchAuthClientProfile[admin-link]',
-        )
         if (linked && !linked.__profileError) client = linked
       } catch (e) {
         safeWarn('resolveProfiles[admin] auto-link failed:', e)
@@ -286,7 +298,17 @@ async function resolveProfiles(authUser) {
   // RESEARCH 01 §3: must be timeout-wrapped; otherwise a hanging heal RPC
   // pins the entire auth init.
   try {
-    const healed = await withAuthTimeout(ensureCurrentClientProfile(), 8_000, 'ensureCurrentClientProfile[buyer]')
+    // Parallelize heal + refresh (see admin path above for rationale): both
+    // are independent network round-trips on the same session; serialising
+    // them cost ~8s of login latency.
+    const [healed, refreshed] = await Promise.all([
+      withAuthTimeout(ensureCurrentClientProfile(), 8_000, 'ensureCurrentClientProfile[buyer]'),
+      withAuthTimeout(
+        fetchAuthClientProfile(authUser.id),
+        8_000,
+        'fetchAuthClientProfile[buyer-refresh]',
+      ),
+    ])
     if (healed && !healed.ok) {
       profileStatus = {
         reason: healed.reason || 'unknown',
@@ -295,16 +317,8 @@ async function resolveProfiles(authUser) {
         migrated: healed.migrated || null,
       }
     } else if (healed?.migrated) {
-      // Successful heal — still attach counters so the dashboard can show
-      // "Heal a rattaché N vente(s)" if non-zero migrations happened.
       profileStatus = { reason: null, migrated: healed.migrated }
     }
-    // PLAN 01 §3: wrap with timeout.
-    const refreshed = await withAuthTimeout(
-      fetchAuthClientProfile(authUser.id),
-      8_000,
-      'fetchAuthClientProfile[buyer-refresh]',
-    )
     if (refreshed && !refreshed.__profileError) {
       client = refreshed
     } else if (refreshed?.__profileError) {
@@ -343,24 +357,33 @@ async function resolveProfiles(authUser) {
         'upsertClient[buyer-link]',
       )
       if (savedClient?.id && cc && local) {
-        await withAuthTimeout(
-          upsertClientPhoneIdentity({
-            countryCode: cc,
-            phoneLocal: local,
-            clientId: savedClient.id,
-            authUserId: authUser.id,
-            verificationStatus: 'verified',
-            verificationReason: null,
-          }),
-          6_000,
-          'upsertClientPhoneIdentity[buyer-link]',
+        const [, linkedRes] = await Promise.all([
+          withAuthTimeout(
+            upsertClientPhoneIdentity({
+              countryCode: cc,
+              phoneLocal: local,
+              clientId: savedClient.id,
+              authUserId: authUser.id,
+              verificationStatus: 'verified',
+              verificationReason: null,
+            }),
+            6_000,
+            'upsertClientPhoneIdentity[buyer-link]',
+          ),
+          withAuthTimeout(
+            fetchAuthClientProfile(authUser.id),
+            8_000,
+            'fetchAuthClientProfile[buyer-link]',
+          ),
+        ])
+        client = linkedRes
+      } else {
+        client = await withAuthTimeout(
+          fetchAuthClientProfile(authUser.id),
+          8_000,
+          'fetchAuthClientProfile[buyer-link]',
         )
       }
-      client = await withAuthTimeout(
-        fetchAuthClientProfile(authUser.id),
-        8_000,
-        'fetchAuthClientProfile[buyer-link]',
-      )
     } catch (e) {
       safeWarn('resolveProfiles auto-link failed:', e)
     }

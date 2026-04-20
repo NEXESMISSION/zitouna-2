@@ -82,6 +82,7 @@ export default function DashboardPage() {
     ready,
     adminUser,
     clientProfile,
+    profileStatus,
     logout,
     refreshAuth,
   } = useAuth()
@@ -95,7 +96,26 @@ export default function DashboardPage() {
   // section is ever pinned on an initial-mount spinner. The in-component
   // `heal_my_client_profile_now` effect has been removed — heal is now
   // owned by RequireCustomerAuth + AuthContext (plan 04 §3.3 / §5).
-  const clientId = (ready && clientProfile?.id) ? clientProfile.id : null
+  //
+  // 2026-04 fix — useSalesScoped / useInstallmentsScoped distinguish:
+  //     clientId === null → "still resolving, keep skeleton"
+  //     clientId === ''   → "explicit empty, show empty state"
+  // When the server-side heal RPC fails (e.g. the clients_code_key
+  // collision we just patched in 03_functions.sql) or the admin has no
+  // buyer profile, `ready` flips to true but `clientProfile` stays null.
+  // The old code left `clientId = null`, which pinned every scoped hook
+  // on a permanent skeleton. Map those terminal states to `''` so the
+  // dashboard renders the empty state immediately instead of loading forever.
+  const terminalProfileReason = profileStatus?.reason
+  const profileResolutionFinalized =
+    Boolean(terminalProfileReason) &&
+    ['rpc_error', 'ambiguous_client_profile', 'phone_conflict', 'admin_no_buyer_profile', 'not_authenticated'].includes(
+      terminalProfileReason,
+    )
+  const clientId =
+    ready
+      ? (clientProfile?.id || (profileResolutionFinalized ? '' : null))
+      : null
 
   const { sales: mySalesRaw, loading: salesLoading } = useSalesScoped({ clientId })
   const { plans: myPlans, loading: plansLoadingRaw, refresh: refreshPlans } = useInstallmentsScoped({ clientId })
@@ -117,30 +137,39 @@ export default function DashboardPage() {
   // per-sale filter below excludes sales where the current user is the seller
   // or ambassador, so hybrid accounts never see their own sell-side work here.
   const portfolioAllowed = Boolean(clientId)
-  const mySalesAll = useMemo(
-    () =>
-      // Dashboard portfolio is buyer-facing only.
-      // Admin/seller-style accounts should not expose owned parcel portfolio here.
-      (!portfolioAllowed ? [] : (mySalesRaw || []))
-        .filter((s) => s.status !== 'cancelled' && s.status !== 'rejected')
-        .filter((s) => {
-          if (!portfolioAllowed) return false
-          if (!clientId) return true
-          const isSellerBound =
-            String(s.ambassadorClientId || '') === String(clientId) ||
-            String(s.sellerClientId || '') === String(clientId)
-          return !isSellerBound
-        }),
-    [mySalesRaw, portfolioAllowed, clientId]
-  )
-  const mySales = useMemo(
-    () => mySalesAll.filter((s) => saleInInvestorPortfolio(s)),
-    [mySalesAll],
-  )
-  const mySalesInProgress = useMemo(
-    () => mySalesAll.filter((s) => !saleInInvestorPortfolio(s)),
-    [mySalesAll]
-  )
+  // Single-pass filter: combine the cancelled/rejected + seller-bound guards
+  // and split into investor vs in-progress buckets in one walk. Prior code
+  // made three separate passes + two dependent memos.
+  const { mySalesAll, mySales, mySalesInProgress } = useMemo(() => {
+    if (!portfolioAllowed) {
+      return { mySalesAll: [], mySales: [], mySalesInProgress: [] }
+    }
+    const clientIdStr = clientId ? String(clientId) : ''
+    const all = []
+    const investor = []
+    const inProgress = []
+    for (const s of mySalesRaw || []) {
+      if (s.status === 'cancelled' || s.status === 'rejected') continue
+      if (clientIdStr) {
+        const sellerBound =
+          String(s.ambassadorClientId || '') === clientIdStr ||
+          String(s.sellerClientId || '') === clientIdStr
+        if (sellerBound) continue
+      }
+      all.push(s)
+      if (saleInInvestorPortfolio(s)) investor.push(s)
+      else inProgress.push(s)
+    }
+    return { mySalesAll: all, mySales: investor, mySalesInProgress: inProgress }
+  }, [mySalesRaw, portfolioAllowed, clientId])
+
+  // Indexed lookup so per-plan .find() over mySalesRaw becomes O(1) inside
+  // the renderer below (the plan list re-runs this on every render).
+  const saleByIdMap = useMemo(() => {
+    const m = new Map()
+    for (const s of mySalesRaw || []) m.set(String(s.id), s)
+    return m
+  }, [mySalesRaw])
   const scopedProjectIds = useMemo(
     () => [...new Set((mySalesAll || []).map((s) => s.projectId).filter(Boolean))],
     [mySalesAll]
@@ -150,19 +179,43 @@ export default function DashboardPage() {
   // dropped: a single stalled sub-hook no longer pins the whole page.
   // Each section below owns its own RenderDataGate + watchdog so
   // independent stores recover independently.
-  const portfolioLoading = Boolean(clientId) && (salesLoading || projectsLoading) && mySalesAll.length === 0
+  //
+  // 2026-04 fix — previously gated on `(salesLoading || projectsLoading) && mySalesAll.length === 0`.
+  // That pinned the skeleton whenever the GLOBAL projects cache (populated
+  // by useProjects()) was still warming up on first mount, even though the
+  // sales fetch had already returned. Users with no sales stared at a
+  // shimmer for up to 8–16s (fetch timeout + one retry) before the empty
+  // state appeared. We now clear the gate as soon as sales resolves — if
+  // `myPurchases` ends up empty, RenderDataGate renders the empty state;
+  // if projects data lands later, React re-renders the list in place.
+  const portfolioLoading = Boolean(clientId) && salesLoading && mySalesAll.length === 0
+  // Kept for downstream consumers that still want to show a subtle "syncing…"
+  // hint while projects catch up — does NOT block the portfolio render.
+  void projectsLoading
 
   const { myPurchases } = useMemo(() => {
+    // Pre-index projects and plots once to avoid O(n·m·k) nested .find()
+    // inside the per-sale loop (was up to ~20k lookups on larger accounts).
+    const projectsById = new Map()
+    const plotsByKey = new Map()
+    for (const p of allProjects || []) {
+      projectsById.set(p.id, p)
+      for (const pl of p.plots || []) {
+        plotsByKey.set(`${p.id}:${pl.id}`, pl)
+      }
+    }
     const flat = []
     for (const sale of mySales) {
-      const proj = allProjects.find((p) => p.id === sale.projectId)
+      const proj = projectsById.get(sale.projectId)
       const plotIds = Array.isArray(sale.plotIds) ? sale.plotIds : (sale.plotId ? [sale.plotId] : [])
       for (const pid of plotIds) {
-        const plot = proj?.plots?.find((pl) => pl.id === Number(pid) || pl.id === pid)
+        const plot =
+          plotsByKey.get(`${sale.projectId}:${pid}`) ||
+          plotsByKey.get(`${sale.projectId}:${Number(pid)}`)
         const trees = plot?.trees || 0
         const invested = plot?.totalPrice || 0
         const annualRevenue = trees * REVENUE_PER_TREE
-        const row = {
+        flat.push({
           saleId: sale.id,
           projectId: sale.projectId,
           plotId: pid,
@@ -175,8 +228,7 @@ export default function DashboardPage() {
           mapUrl: plot?.mapUrl || '',
           status: sale.status,
           createdAt: sale.createdAt,
-        }
-        flat.push(row)
+        })
       }
     }
     return { myPurchases: flat }
@@ -318,14 +370,23 @@ export default function DashboardPage() {
    *   themselves keep their own global subscriptions; these scoped filters
    *   catch mutations faster for the currently viewed client.
    */
+  // Stable refs for the refresh callbacks so the realtime channel is not
+  // torn down + resubscribed every time the useCallback identities change
+  // (they change on any parent re-render — previously caused a resubscribe
+  // storm and missed events during each ~300ms reconnect window).
+  const refreshReferralSummaryRef = useRef(refreshReferralSummary)
+  const refreshCommissionLedgerRef = useRef(refreshCommissionLedger)
+  useEffect(() => { refreshReferralSummaryRef.current = refreshReferralSummary }, [refreshReferralSummary])
+  useEffect(() => { refreshCommissionLedgerRef.current = refreshCommissionLedger }, [refreshCommissionLedger])
+
   useEffect(() => {
     if (activeTab !== 'parrainage') return undefined
     const beneficiaryId = clientProfile?.id
     if (!beneficiaryId) return undefined
     const filter = `beneficiary_client_id=eq.${beneficiaryId}`
     const reactEvent = () => {
-      try { refreshReferralSummary?.() } catch { /* noop */ }
-      try { refreshCommissionLedger?.() } catch { /* noop */ }
+      try { refreshReferralSummaryRef.current?.() } catch { /* noop */ }
+      try { refreshCommissionLedgerRef.current?.() } catch { /* noop */ }
     }
     const channel = supabase
       .channel(`parrainage-live-${beneficiaryId}`)
@@ -335,7 +396,7 @@ export default function DashboardPage() {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [activeTab, clientProfile?.id, refreshReferralSummary, refreshCommissionLedger])
+  }, [activeTab, clientProfile?.id])
 
   /*
    * CSV export: flatten myCommissionEvents into a spreadsheet-friendly CSV
@@ -607,11 +668,6 @@ export default function DashboardPage() {
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
             </button>
           </div>
-          <div className="inv-header__actions">
-            <button type="button" className="inv-header__cta" onClick={() => navigate('/browse')}>
-              Prendre un rendez-vous
-            </button>
-          </div>
         </div>
 
         {/* ── Profile Edit Panel ── */}
@@ -729,6 +785,12 @@ export default function DashboardPage() {
               loading={portfolioLoading}
               error={null}
               data={myPurchases}
+              // Show the "Chargement plus long…" retry banner after 4s
+              // instead of the 8s default. On real networks the sales
+              // fetch resolves in <1s; if we're not back by 4s something
+              // is off and the user should get a visible recovery path
+              // rather than staring at a shimmer.
+              watchdogMs={4000}
               skeleton={() => (
                 <div className="inv-parcels" aria-busy="true" aria-live="polite">
                   {[0, 1, 2].map((i) => (
@@ -859,6 +921,7 @@ export default function DashboardPage() {
                 loading={plansLoadingRaw}
                 data={myPlans}
                 skeleton="table"
+                watchdogMs={4000}
                 onRetry={refreshPlans}
                 empty={
                   <EmptyState
@@ -870,7 +933,7 @@ export default function DashboardPage() {
                 {(list) => (
                   <div className="ip__plan-list">
                     {list.map(plan => {
-                      const sale = (mySalesRaw || []).find((s) => String(s.id) === String(plan.saleId)) || {}
+                      const sale = saleByIdMap.get(String(plan.saleId)) || {}
                       const metrics = instMetrics.computeInstallmentSaleMetrics(sale, plan)
                       const progress = metrics.approvedPct
                       const nextAction = plan.payments.find(p => p.status === 'rejected' || p.status === 'pending' || p.status === 'submitted')
@@ -951,7 +1014,7 @@ export default function DashboardPage() {
                   </div>
                   <div className="ip__modal-body ip__modal-body--plan-detail">
                     {(() => {
-                      const sale = (mySalesRaw || []).find((s) => String(s.id) === String(focusedPlan.saleId)) || {}
+                      const sale = saleByIdMap.get(String(focusedPlan.saleId)) || {}
                       const m = instMetrics.computeInstallmentSaleMetrics(sale, focusedPlan)
                       return (
                         <div className="ip-metrics ip-metrics--embedded ip-metrics--in-modal">
@@ -1296,6 +1359,7 @@ export default function DashboardPage() {
                           loading={ledgerLoading && myCommissionEvents.length === 0}
                           data={myCommissionEvents}
                           skeleton="table"
+                          watchdogMs={4000}
                           onRetry={refreshCommissionLedger}
                           empty={
                             <EmptyState

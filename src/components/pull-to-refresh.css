@@ -10,11 +10,18 @@
 .ptr-root {
   position: fixed;
   /* Indicator lives above the viewport when idle: top = safe-area - 50px.
-     JS adds `translate3d(-50%, ${pullPx}, 0)` so it enters the viewport
-     as the finger drags down. */
+     JS adds `translate3d(0, ${pullPx}, 0)` so it enters the viewport
+     as the finger drags down. Horizontal centering uses left:0 / right:0
+     + margin-inline:auto — that keys off the viewport's *layout* width
+     (minus any system scrollbar), which `left:50%` + `translateX(-50%)`
+     doesn't always match on Android Chrome / iOS Safari when the app has
+     `overflow-x:hidden` or a visible scrollbar. Result: the bubble is now
+     centered on screen instead of drifting a few px to one side. */
   top: calc(env(safe-area-inset-top, 0px) - 50px);
-  left: 50%;
-  z-index: 9999;
+  left: 0;
+  right: 0;
+  margin-inline: auto;
+  z-index: 10000;
   width: 40px;
   height: 40px;
   pointer-events: none;
@@ -22,7 +29,7 @@
      track the finger 1:1. The .ptr-root--returning class is added on
      release to animate back to rest. */
   will-change: transform;
-  transform: translate3d(-50%, 0, 0);
+  transform: translate3d(0, 0, 0);
 }
 
 .ptr-root--visible .ptr-bubble { opacity: 1; }

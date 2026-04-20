@@ -9,7 +9,7 @@
   --adm-text-muted: #94a3b8; --adm-surface-2: #ffffff; --adm-red: #dc2626;
   background: #f8fafc !important; color: #0f172a !important;
 }
-.adm-main--standalone:has(.zitu-page) { background: #f8fafc !important; padding: 0 !important; }
+.adm-main--standalone:has(.zitu-page) { background: #f8fafc !important; padding: env(safe-area-inset-top, 0px) 0 0 !important; }
 
 .zitu-page {
   --fg: #ffffff; --bg: #f8fafc;
@@ -20,13 +20,16 @@
   --r: 10px;
 
   box-sizing: border-box; width: 100%; margin: 0; padding: 0;
-  min-height: 100vh; background: var(--bg); color: var(--900);
+  min-height: 100vh; min-height: 100dvh; background: var(--bg); color: var(--900);
   font-family: 'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
   -webkit-font-smoothing: antialiased; letter-spacing: -.01em;
 }
 .zitu-page__column {
   max-width: 480px !important; margin: 0 auto !important;
-  padding: 12px 14px 90px !important;
+  padding: 12px 14px calc(90px + env(safe-area-inset-bottom, 0px)) !important;
+}
+@media (max-width: 600px) {
+  .zitu-page__column { padding-left: 12px !important; padding-right: 12px !important; }
 }
 
 /* ═══ PAGE HEADER ═══ */

@@ -797,6 +797,7 @@ textarea.zadm-filter__control {
   width: 100%;
   max-width: 520px;
   max-height: calc(100vh - 48px);
+  max-height: calc(100dvh - 48px);
   background: var(--zadm-surface);
   color: var(--zadm-text);
   border: 1px solid var(--zadm-border);
@@ -899,6 +900,7 @@ textarea.zadm-filter__control {
   width: 100%;
   max-width: 480px;
   height: 100vh;
+  height: 100dvh;
   background: var(--zadm-surface);
   color: var(--zadm-text);
   border-left: 1px solid var(--zadm-border);

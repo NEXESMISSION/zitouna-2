@@ -126,10 +126,13 @@ body {
     font-size: 16px !important;
   }
 
-  /* Minimum touch target 40px. Tighter than 44 on purpose: 44px was
-     making buttons feel oversized and contributing to the stretched look. */
-  button,
-  [role='button'],
+  /* Minimum touch target 40px for text buttons and CTAs. We exclude
+     fixed-size circular icon buttons (.icon-action, dashboard profile
+     button, notification bell, etc.) — raising their min-height alone
+     turns them into ovals because width stays at 36px. Those buttons
+     already meet the tap-target via their own 36px square. */
+  button:not(.icon-action):not(.inv-header__profile-btn):not(.zadm-modal__close):not(.zadm-drawer__close):not(.adm-modal-close):not(.adm-drawer-close):not(.eye-button):not(.zitu-sidebar__toggle),
+  [role='button']:not(.icon-action),
   .adm-btn,
   .sp-detail__btn,
   .sp-wizard__btn,
@@ -137,6 +140,17 @@ body {
   .sp-back-btn,
   .sp2-cta,
   .sp2-back {
+    min-height: 40px;
+  }
+
+  /* Promote round icon buttons to 40×40 uniformly on phones so they stay
+     perfectly circular AND meet the 40px tap target. Owns both axes so
+     the global min-height rule can never distort them. */
+  .icon-action,
+  .inv-header__profile-btn {
+    width: 40px !important;
+    height: 40px !important;
+    min-width: 40px;
     min-height: 40px;
   }
 }
@@ -237,14 +251,27 @@ th,
 }
 
 /* ── 7 / Images, SVGs, embeds ───────────────────────────────────────── */
+/* Responsive media: must NOT apply to icon SVGs. An SVG declared inline
+   with width="20" height="20" gets its height collapsed to `auto` under
+   `height: auto`, which — inside a flex row — causes the icon to visually
+   stretch (browser recomputes height from the shrunk flex width while the
+   intrinsic ratio is locked at 1:1, so the row makes it taller than wide).
+   We keep the rule for <img>/<video>/<iframe> only, and add a targeted
+   safety-net for images inside SVGs (which can overflow). */
 img,
 video,
-iframe,
-svg {
+iframe {
   max-width: 100%;
   height: auto;
 }
 iframe { border: 0; }
+/* Generic SVGs in page flow (hero art, decorative) still need responsive
+   sizing. Opt-in via .svg-responsive or explicit role="img" on the svg. */
+svg.svg-responsive,
+svg[role='img'][width='100%'] {
+  max-width: 100%;
+  height: auto;
+}
 
 /* ── 8 / Scroll momentum on opt-in containers ───────────────────────── */
 .sp-wizard__body,

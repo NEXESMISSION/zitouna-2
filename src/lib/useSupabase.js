@@ -20,7 +20,14 @@ import { createScopedStore, getScopedStoreRegistry, getScopedResetHandlers } fro
 // the UI before the user hard-refreshes out of frustration. Was 20s (40s with
 // retry) — too long; users hit hard-refresh before the second attempt even
 // finished.
-const DEFAULT_FETCH_TIMEOUT_MS = 8000
+// 2026-04 fix (SKELETON_LOADING_ANALYTICS §Strategy A): 8 s × 1 retry = 16 s
+// worst case before the UI gave up — long enough that users perceived the
+// skeleton as "stuck" on slow networks / Supabase cold starts. Drop the per-
+// attempt ceiling to 5 s. With the single retry path inside
+// `fetchWithRetryOnTimeout`, the true max is now 10 s (5 s + backoff + 5 s),
+// and stores watchdog-banner at 4 s so users always have a visible escape
+// hatch before the outer deadline.
+const DEFAULT_FETCH_TIMEOUT_MS = 5000
 
 async function withTimeout(promiseOrFactory, timeoutMs = DEFAULT_FETCH_TIMEOUT_MS, label = 'request') {
   // Accept both: an already-running promise (legacy callers) OR a factory
@@ -194,11 +201,14 @@ function buildInitialAuthPromise() {
       finish('failsafe')
     })
 
-    // Path C — last-resort 15 s failsafe. 7x the old 2 s timer — long
-    // enough to be conservative, short enough that a truly dead network
-    // surfaces in the UI. If Supabase v2 ever stops emitting INITIAL_SESSION
-    // under unexpected conditions, this keeps the app usable.
-    failsafeTimer = window.setTimeout(() => finish('failsafe'), 15_000)
+    // Path C — last-resort failsafe. Was 15 s in the plan 01 rewrite; that's
+    // a very long stretch of skeleton for the user to look at when
+    // INITIAL_SESSION never fires (rare, but happens after sleep/wake on
+    // mobile Chrome). 2026-04 fix (SKELETON_LOADING_ANALYTICS §Strategy C):
+    // shorten to 8 s. Still conservative — path A + B together resolve in
+    // <500 ms in >99% of loads — and it puts the effective first-paint
+    // ceiling at 8 s + 5 s fetch = ~13 s worst case (down from ~23 s).
+    failsafeTimer = window.setTimeout(() => finish('failsafe'), 8_000)
   })
 }
 export function awaitInitialAuth() {
@@ -644,7 +654,12 @@ if (typeof window !== 'undefined') {
       //     but ran without a valid session. Without this flag,
       //     reviveStale treated such stores as healthy and the user sat
       //     on an empty page forever.
-      const stale = st.loadedAt && now - st.loadedAt > 30_000
+      // 2026-04 fix (SKELETON_LOADING_ANALYTICS §Strategy B): 30 s was too
+      // patient — a stuck store wasn't self-healing until the user waited
+      // half a minute AND triggered a focus/visibility event. 10 s keeps
+      // healthy refreshes from thundering while ensuring a truly stuck
+      // skeleton recovers on the next tab switch instead of feeling dead.
+      const stale = st.loadedAt && now - st.loadedAt > 10_000
       const loadedPreAuth = st.loadedAt && _lastAuthChangeAt && st.loadedAt < _lastAuthChangeAt
       if (st.error || (st.loading && !st.loadedAt) || stale || loadedPreAuth || st.emptyFromNoAuth) {
         const lastForcedAt = s._lastForcedRefreshAt || 0
@@ -661,7 +676,12 @@ if (typeof window !== 'undefined') {
     try {
       for (const s of getScopedStoreRegistry()) {
         const st = s.getState()
-        const stale = st.loadedAt && now - st.loadedAt > 30_000
+        // 2026-04 fix (SKELETON_LOADING_ANALYTICS §Strategy B): 30 s was too
+      // patient — a stuck store wasn't self-healing until the user waited
+      // half a minute AND triggered a focus/visibility event. 10 s keeps
+      // healthy refreshes from thundering while ensuring a truly stuck
+      // skeleton recovers on the next tab switch instead of feeling dead.
+      const stale = st.loadedAt && now - st.loadedAt > 10_000
         const loadedPreAuth = st.loadedAt && _lastAuthChangeAt && st.loadedAt < _lastAuthChangeAt
         if (st.error || (st.loading && !st.loadedAt) || stale || loadedPreAuth || st.emptyFromNoAuth) {
           const lastForcedAt = s._lastForcedRefreshAt || 0
@@ -967,7 +987,7 @@ export function usePublicBrowseProjects() {
           setError(e instanceof Error ? e : new Error(String(e?.message || e)))
         }
       } finally {
-        if (!cancelled) setLoading(false)
+        setLoading(false)
       }
     })()
     const channel = enableCatalogRealtime
@@ -1025,7 +1045,7 @@ export function usePublicProjectDetail(projectId) {
         console.error('fetchPublicProjectById', e)
         if (!cancelled) setProject(null)
       } finally {
-        if (!cancelled) setLoading(false)
+        setLoading(false)
       }
     })()
     // RESEARCH 04 §8: parcel_tree_batches has no project_id column to filter
@@ -1086,7 +1106,7 @@ export function usePublicVisitSlotOptions() {
         console.error('fetchPublicVisitSlotOptions', e)
         if (!cancelled) setOptions([])
       } finally {
-        if (!cancelled) setLoading(false)
+        setLoading(false)
       }
     })()
     const channel = supabase
@@ -1345,7 +1365,10 @@ export function useSalesScoped(filters = {}) {
       } catch (e) {
         if (!cancelled) { logFetchError('fetchSalesScoped', e); setLastError(e) }
       } finally {
-        if (!cancelled) setLoading(false)
+        // Always clear loading. React 18 ignores setState on unmounted
+        // components silently, so the cancelled guard on loading leaves the
+        // skeleton stuck when deps change rapidly mid-fetch.
+        setLoading(false)
       }
     })()
     return () => { cancelled = true }
@@ -1427,7 +1450,7 @@ export function useSalesBySellerClientId(sellerClientId) {
         if (!cancelled) logFetchError('fetchSalesBySellerClientId', e)
       } finally {
         loadedOnceRef.current = true
-        if (!cancelled) setLoading(false)
+        setLoading(false)
       }
     })()
     const channel = supabase
@@ -1630,7 +1653,7 @@ export function useWorkspaceAudit() {
         console.error('fetchAuditLog', e)
         if (!cancelled) setError(e instanceof Error ? e : new Error(String(e?.message || e)))
       } finally {
-        if (!cancelled) setLoading(false)
+        setLoading(false)
       }
     })()
     const channel = supabase
@@ -1777,7 +1800,7 @@ function useCommissionWorkspace() {
       } catch (e) {
         console.error('commissionWorkspace', e)
       } finally {
-        if (!cancelled) setLoading(false)
+        setLoading(false)
       }
     })()
     const channel = supabase
@@ -1849,7 +1872,7 @@ export function useSellerRelations() {
       } catch (e) {
         console.error('sellerRelations', e)
       } finally {
-        if (!cancelled) setLoading(false)
+        setLoading(false)
       }
     })()
     const channel = supabase
@@ -1925,7 +1948,7 @@ export function useMySellerParcelAssignments(enabled = true) {
       } catch (e) {
         console.error('fetchMySellerParcelAssignments', e)
       } finally {
-        if (!cancelled) setLoading(false)
+        setLoading(false)
       }
     })()
     const channel = supabase
@@ -2001,6 +2024,17 @@ export function useAmbassadorReferralSummary(enabled = true) {
       return
     }
     let cancelled = false
+    // Belt-and-braces watchdog — withTimeout() already races the RPC
+    // against DEFAULT_FETCH_TIMEOUT_MS, but if that timeout mechanism
+    // itself misbehaves (auth-gate wait, unhandled rejection in the
+    // factory, etc.) the `finally` never runs and the dashboard's
+    // Parrainage section pins on skeleton. This hard floor guarantees
+    // loading clears after 9 s no matter what.
+    const hardFloor = window.setTimeout(() => {
+      if (!cancelled) {
+        setLoading(false)
+      }
+    }, DEFAULT_FETCH_TIMEOUT_MS + 1000)
     ;(async () => {
       try {
         const next = await withTimeout(
@@ -2012,7 +2046,7 @@ export function useAmbassadorReferralSummary(enabled = true) {
       } catch (e) {
         if (!cancelled) setSummary((prev) => ({ ...prev, ok: false, reason: 'rpc_error', errorMessage: String(e?.message || e) }))
       } finally {
-        if (!cancelled) setLoading(false)
+        setLoading(false)
       }
     })()
 
@@ -2025,6 +2059,7 @@ export function useAmbassadorReferralSummary(enabled = true) {
 
     return () => {
       cancelled = true
+      window.clearTimeout(hardFloor)
       supabase.removeChannel(channel)
     }
   }, [enabled, refresh])
@@ -2107,7 +2142,7 @@ export function useMyCommissionLedger(optsOrLegacy = null) {
       } catch (e) {
         if (!cancelled) setError(String(e?.message || e))
       } finally {
-        if (!cancelled) setLoading(false)
+        setLoading(false)
       }
     })()
     const filter = explicitId ? `beneficiary_client_id=eq.${explicitId}` : undefined

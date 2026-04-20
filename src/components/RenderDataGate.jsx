@@ -45,7 +45,12 @@ import {
  * @param {(data:any)=>boolean} [props.isEmpty]  Override empty check.
  * @param {()=>void} [props.onRetry]             Retry callback (stuck banner + error retry).
  * @param {string} [props.label]                 Accessible label for the loading region.
- * @param {number} [props.watchdogMs=8000]       Threshold after which the stuck banner appears.
+ * @param {number} [props.watchdogMs=5000]       Threshold after which the stuck banner appears.
+ *        2026-04 — lowered from 8000 to 5000 alongside the
+ *        DEFAULT_FETCH_TIMEOUT_MS drop (8 s → 5 s). With fetches capped at
+ *        5 s per attempt, an 8 s watchdog would have fired on the retry
+ *        window instead of the initial hang; 5 s keeps the stuck banner
+ *        visible well before the retry path completes.
  */
 
 const SKELETON_PRESETS = {
@@ -117,7 +122,7 @@ export function RenderDataGate(props) {
     isEmpty,
     onRetry,
     label = 'Chargement…',
-    watchdogMs = 8000,
+    watchdogMs = 5000,
   } = props
 
   const status = deriveStatus(props)

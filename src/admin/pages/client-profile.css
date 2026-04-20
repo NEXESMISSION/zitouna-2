@@ -81,4 +81,6 @@
 @media (max-width: 420px) {
   .cp2-money { grid-template-columns:1fr 1fr; }
   .cp2-sale__stats { flex-wrap:wrap; }
+  .cp2-comm__row { grid-template-columns: 1fr 1fr; }
+  .cp2-comm__cell-val { font-size: 13px; }
 }

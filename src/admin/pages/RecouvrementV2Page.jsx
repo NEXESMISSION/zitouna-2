@@ -119,6 +119,11 @@ export default function RecouvrementV2Page() {
 
   return (
     <section className="recouvrement-page">
+      <button type="button" className="sp-back-btn" onClick={() => navigate('/admin')}>
+        <span className="sp-back-btn__icon-wrap" aria-hidden>←</span>
+        <span>Retour</span>
+      </button>
+
       <header className="recouvrement-page__hero">
         <div>
           <h1 className="recouvrement-page__title">Recouvrement 2+ mois</h1>

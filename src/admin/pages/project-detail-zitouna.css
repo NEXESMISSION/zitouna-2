@@ -11,6 +11,7 @@
   margin-right: calc(-1 * var(--adm-hub-pad-x, 20px));
   padding: 16px var(--adm-hub-pad-x, 20px) 40px;
   min-height: calc(100vh - 88px);
+  min-height: calc(100dvh - 88px);
   background: #f8fafc;
   color: #475569;
   font-family: var(--adm-font, system-ui, sans-serif);

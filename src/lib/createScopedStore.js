@@ -340,6 +340,7 @@ function buildStoreInstance({
     const myGen = fetchGen
 
     const run = async () => {
+      let bailedEarly = false
       try {
         // Resolve the auth gate (if any) up-front so we can classify the
         // outcome as emptyFromNoAuth when the caller is still anonymous.
@@ -349,7 +350,7 @@ function buildStoreInstance({
             const res = await awaitAuth()
             authOk = Boolean(res && res.ok)
           } catch { authOk = false }
-          if (myGen !== fetchGen) return
+          if (myGen !== fetchGen) { bailedEarly = true; return }
         }
 
         const data = await retryWithBackoff(
@@ -361,7 +362,7 @@ function buildStoreInstance({
             shouldCancel: () => myGen !== fetchGen,
           },
         )
-        if (myGen !== fetchGen) return
+        if (myGen !== fetchGen) { bailedEarly = true; return }
 
         const isEmpty = Array.isArray(data) ? data.length === 0 : isEmptyObjectPayload(data)
         publish({
@@ -374,7 +375,7 @@ function buildStoreInstance({
           emptyFromNoAuth: isEmpty && authOk !== true,
         })
       } catch (e) {
-        if (myGen !== fetchGen) return
+        if (myGen !== fetchGen) { bailedEarly = true; return }
         console.error(`[scoped:${key}]`, e)
         publish({
           loading: false,
@@ -382,6 +383,15 @@ function buildStoreInstance({
           error: e instanceof Error ? e : new Error(String(e?.message || e)),
           lastAttemptAt: Date.now(),
         })
+      } finally {
+        // Safety net: a generation-mismatch bail leaves state.loading=true.
+        // If the newer generation is no longer inflight either (e.g. nobody
+        // kicked off a replacement fetch yet), clear the loading flag so the
+        // skeleton doesn't stick forever. The state keeps loadedAt=0 so the
+        // next subscribe() will still refresh.
+        if (bailedEarly && !inflight && state.loading) {
+          publish({ loading: false, isRefreshing: false })
+        }
       }
     }
 
@@ -471,9 +481,10 @@ function buildStoreInstance({
 
   function reset({ refetch = true } = {}) {
     fetchGen += 1
+    const willRefetch = refetch && subCount > 0
     state = {
       data: emptyOf(initial),
-      loading: true,
+      loading: willRefetch,
       isRefreshing: false,
       loadedAt: 0,
       lastAttemptAt: 0,
@@ -486,7 +497,7 @@ function buildStoreInstance({
     // Same rationale as createCachedStore: on SIGNED_OUT the caller passes
     // `refetch: false` so we don't fire RLS-denied requests right as the
     // admin page unmounts on its way to /login.
-    if (refetch && subCount > 0) doFetch().catch(() => {})
+    if (willRefetch) doFetch().catch(() => {})
   }
 
   const handle = /** @type {ScopedStoreInstance} */ ({

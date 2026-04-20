@@ -49,6 +49,9 @@
 @media (max-width: 640px) {
   .ct-kpi-5 { grid-template-columns: repeat(2, 1fr); }
 }
+@media (max-width: 380px) {
+  .ct-kpi-5 { grid-template-columns: 1fr; }
+}
 
 /* Dashboard parrainage breakdown (consumed by DashboardPage) */
 .inv-wallet__breakdown { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; border: 1px dashed var(--adm-border); border-radius: 10px; margin-top: 12px; }
@@ -149,9 +152,9 @@
 .ct-graph-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 8px; }
 .ct-selected-chip { display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid #bfdbfe; background: #eff6ff; color: #1e40af; border-radius: 999px; font-size: 12px; font-weight: 600; }
 .ct-selected-chip__clear { border: 0; background: transparent; color: inherit; cursor: pointer; padding: 0 2px; font-size: 14px; line-height: 1; }
-.ct-graph-box--tracker { border: 1px solid #e2e8f0; border-radius: 14px; background: #fff; height: calc(100vh - 110px); min-height: 520px; overflow: hidden; position: relative; margin: 4px 0 14px; }
-.ct-compact:has(.ct-compactbar) .ct-graph-box--tracker { height: calc(100vh - 92px); }
-@media (max-width: 600px) { .ct-graph-box--tracker { height: calc(100vh - 110px); min-height: 0; } }
+.ct-graph-box--tracker { border: 1px solid #e2e8f0; border-radius: 14px; background: #fff; height: calc(100dvh - 110px); min-height: 520px; overflow: hidden; position: relative; margin: 4px 0 14px; }
+.ct-compact:has(.ct-compactbar) .ct-graph-box--tracker { height: calc(100dvh - 92px); }
+@media (max-width: 600px) { .ct-graph-box--tracker { height: calc(100dvh - 160px); min-height: 320px; } }
 
 /* ══════════════════════════════════════════════════════════════
    COMPACT TOP BAR — the page's default skin. Graph is the hero.
@@ -409,8 +412,22 @@
 }
 .ct-fullscreen .cg-canvas,
 .ct-fullscreen .cg-stage {
-  height: 100vh !important;
-  max-height: 100vh !important;
+  height: 100dvh !important;
+  max-height: 100dvh !important;
+}
+/* Mobile: give the back button bigger touch target + safe-area inset. */
+@media (max-width: 600px) {
+  .ct-fs-back {
+    top: calc(10px + env(safe-area-inset-top, 0px));
+    left: 10px;
+    width: 40px;
+    height: 40px;
+  }
+  .ct-fs-error {
+    top: calc(10px + env(safe-area-inset-top, 0px));
+    left: 60px;
+    right: 10px;
+  }
 }
 
 /* ══════════════════════════════════════════════════════════════

@@ -3,16 +3,12 @@
    Per-page skeleton shimmers (sp-sk-*, cp-sk-*) take over from there. */
 .app-loader {
   min-height: 100vh;
-  display: block;
+  display: grid;
+  place-items: center;
   background: transparent;
 }
 .app-loader-spinner {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  border: 3px solid rgba(22, 163, 74, 0.15);
-  border-top-color: #16a34a;
-  animation: spin 0.8s linear infinite;
+  display: none;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
@@ -936,8 +932,11 @@
 
 @media (max-width: 640px) {
   .brand-inline { gap: 0.5rem; margin-right: 0.25rem; }
-  .top-actions { gap: 0.36rem; }
-  .icon-action { width: 34px; height: 34px; }
+  .top-actions { gap: 0.4rem; }
+  /* .icon-action sizing lives in pwa-responsive.css (40×40 on phones).
+     Deleted the 34×34 mobile override — the global min-height: 40px for
+     text buttons was dragging height to 40 while width stayed 34, which
+     rendered every header icon as a vertical oval. */
 }
 
 /* ── Shared utilities ── */
@@ -1741,7 +1740,7 @@
   }
 
   .map-landing-map {
-    height: calc(100vh - 170px) !important;
+    height: calc(100dvh - 170px) !important;
     min-height: 420px;
   }
 

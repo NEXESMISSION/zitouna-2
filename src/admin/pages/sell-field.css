@@ -39,7 +39,10 @@
 
 .adm-main--standalone:has(.sell-field) {
   background: #f8fafc !important;
-  padding: 0 !important;
+  /* No horizontal padding (sell-field owns its own gutters), but we MUST
+     keep a top inset equal to the OS safe-area so the back button / top
+     actions don't hide under the notch/status bar in PWA standalone mode. */
+  padding: env(safe-area-inset-top, 0px) 0 0 !important;
 }
 
 /* Sell-field pages ship their own back affordance (e.g. sp-back-btn). Hide the
@@ -130,6 +133,9 @@
 .sell-field .adm-input::placeholder { color: #94a3b8 !important; }
 .sell-field .adm-btn { border-radius: 10px !important; font-size: 12px !important; padding: 10px 20px !important; font-weight: 700 !important; }
 .sell-field .adm-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 480px) {
+  .sell-field .adm-form-row { grid-template-columns: 1fr; }
+}
 .sell-field .adm-form-actions {
   display: flex; gap: 8px; justify-content: flex-end;
   margin-top: 16px; padding-top: 14px; border-top: 1px solid #f1f5f9;
@@ -213,7 +219,10 @@
   max-width: 480px;
   margin: 0 auto;
   min-height: 100vh;
-  padding: 12px 14px 96px;
+  min-height: 100dvh;
+  /* 96px base bottom padding clears the fixed .sp-bottom action bar; add
+     env() so it also clears the home indicator in PWA standalone mode. */
+  padding: 12px 14px calc(96px + env(safe-area-inset-bottom, 0px));
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   font-size: 14px;
   color: var(--sp-900);
@@ -226,6 +235,13 @@
   padding-left: 16px !important;
   padding-right: 16px !important;
   min-height: 100vh !important;
+  min-height: 100dvh !important;
+}
+@media (max-width: 600px) {
+  .adm-main--standalone .sell-field {
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+  }
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -765,7 +781,7 @@
   display: flex; align-items: center; justify-content: center;
   font-size: 12px; font-weight: 700;
   background: #f1f5f9; color: #94a3b8; border: 2px solid #e2e8f0;
-  transition: all 0.2s;
+  transition: background-color 0.2s, border-color 0.2s, color 0.2s, box-shadow 0.2s, transform 0.2s, opacity 0.2s;
 }
 .sp-wizard__step-bubble--done {
   background: #2563eb; color: #fff; border-color: #2563eb;
@@ -904,7 +920,7 @@
 .sp-offer__radio {
   position: absolute; top: 12px; right: 12px;
   width: 16px; height: 16px; border-radius: 50%;
-  border: 2px solid #cbd5e1; transition: all 0.15s; flex-shrink: 0;
+  border: 2px solid #cbd5e1; transition: background-color 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s, transform 0.15s, opacity 0.15s; flex-shrink: 0;
 }
 .sp-offer--on .sp-offer__radio {
   border-color: #2563eb; background: #2563eb;
@@ -1161,7 +1177,7 @@
 .sp-detail__actions { display: flex; gap: 8px; padding: 12px 16px 16px; }
 .sp-detail__btn {
   flex: 1; border: none; border-radius: 10px; font-size: 13px; font-weight: 700;
-  padding: 11px 16px; cursor: pointer; transition: all 0.15s; text-align: center;
+  padding: 11px 16px; cursor: pointer; transition: background-color 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s, transform 0.15s, opacity 0.15s; text-align: center;
 }
 .sp-detail__btn--edit {
   background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
@@ -1262,7 +1278,7 @@
 .sp-edit__toggle-btn {
   flex: 1; border: none; border-radius: 7px; padding: 8px 10px;
   font-size: 12px; font-weight: 700; cursor: pointer;
-  background: transparent; color: #94a3b8; transition: all 0.15s;
+  background: transparent; color: #94a3b8; transition: background-color 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s, transform 0.15s, opacity 0.15s;
 }
 .sp-edit__toggle-btn--on { background: #fff; color: #0f172a; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
 
@@ -1270,13 +1286,13 @@
 .sp-edit__offer-opt {
   display: flex; align-items: center; gap: 10px; text-align: left; width: 100%;
   padding: 8px 12px; border-radius: 10px; border: 2px solid #e2e8f0;
-  background: #fff; cursor: pointer; transition: all 0.15s;
+  background: #fff; cursor: pointer; transition: background-color 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s, transform 0.15s, opacity 0.15s;
 }
 .sp-edit__offer-opt:hover { border-color: #93c5fd; background: #f8fafc; }
 .sp-edit__offer-opt--on { border-color: #2563eb; background: #eff6ff; }
 .sp-edit__offer-opt__radio {
   flex-shrink: 0; width: 16px; height: 16px; border-radius: 50%;
-  border: 2px solid #cbd5e1; transition: all 0.15s;
+  border: 2px solid #cbd5e1; transition: background-color 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s, transform 0.15s, opacity 0.15s;
 }
 .sp-edit__offer-opt--on .sp-edit__offer-opt__radio {
   border-color: #2563eb; background: #2563eb;
@@ -1295,7 +1311,7 @@
 }
 .sp-edit__btn {
   flex: 1; border: none; border-radius: 10px; font-size: 13px; font-weight: 700;
-  padding: 11px 16px; cursor: pointer; transition: all 0.15s; text-align: center;
+  padding: 11px 16px; cursor: pointer; transition: background-color 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s, transform 0.15s, opacity 0.15s; text-align: center;
 }
 .sp-edit__btn--cancel { background: #f1f5f9; color: #64748b; }
 .sp-edit__btn--cancel:hover { background: #e2e8f0; color: #475569; }

@@ -62,6 +62,16 @@ export default function PullToRefresh() {
   const activeId = useRef(null)
   const armed = useRef(false)
 
+  // Mirror state values into refs so touch handlers read the latest without
+  // needing to be in the effect's deps array (which otherwise re-attached
+  // four listeners on every single touchmove frame).
+  const pullRef = useRef(pull)
+  const refreshingRef = useRef(refreshing)
+  const returningRef = useRef(returning)
+  useEffect(() => { pullRef.current = pull }, [pull])
+  useEffect(() => { refreshingRef.current = refreshing }, [refreshing])
+  useEffect(() => { returningRef.current = returning }, [returning])
+
   useEffect(() => {
     function reset() {
       startY.current = null
@@ -70,30 +80,27 @@ export default function PullToRefresh() {
     }
 
     function onTouchStart(e) {
-      if (refreshing) return
+      if (refreshingRef.current) return
       if (e.touches.length !== 1) return
       if (window.scrollY > 2) return
       if (isModalOrDrawerOpen()) return
       startY.current = e.touches[0].clientY
       activeId.current = e.touches[0].identifier
       armed.current = false
-      if (returning) setReturning(false)
+      if (returningRef.current) setReturning(false)
     }
 
     function onTouchMove(e) {
-      if (startY.current == null || refreshing) return
+      if (startY.current == null || refreshingRef.current) return
       const t = Array.from(e.touches).find((x) => x.identifier === activeId.current)
       if (!t) return
       const dy = t.clientY - startY.current
       if (dy <= 0) {
-        if (pull !== 0) setPull(0)
+        if (pullRef.current !== 0) setPull(0)
         return
       }
       if (!armed.current) {
         if (dy < START_THRESHOLD) return
-        // Re-verify the page state at the moment of arming — the user may
-        // have scrolled further down or opened a modal between touchstart
-        // and the first real move.
         if (window.scrollY > 2 || isModalOrDrawerOpen()) {
           reset()
           return
@@ -102,34 +109,60 @@ export default function PullToRefresh() {
       }
       const visible = Math.min(MAX_PULL, dy * DAMP)
       setPull(visible)
-      // Stop native bounce / scroll-chaining once we're actively pulling.
       if (e.cancelable) e.preventDefault()
     }
 
     function onTouchEnd(e) {
       if (startY.current == null) return
-      // Make sure this is the end of OUR tracked touch (could fire when a
-      // different finger lifts during a multi-touch).
       if (e.changedTouches) {
         const ours = Array.from(e.changedTouches)
           .some((x) => x.identifier === activeId.current)
         if (!ours) return
       }
 
-      const shouldRefresh = armed.current && pull >= TRIGGER
+      const shouldRefresh = armed.current && pullRef.current >= TRIGGER
       reset()
 
       if (shouldRefresh) {
         setRefreshing(true)
-        setPull(TRIGGER) // park the spinner at the trigger line
-        // Give the spinner 280ms of visible spin before reloading, so the
-        // transition feels intentional rather than a flash.
+        setPull(TRIGGER)
+        // Smart refresh: invalidate every cached/scoped store instead of
+        // a full page reload. This preserves scroll, modal state, form
+        // drafts — and saves the full auth bootstrap round-trip.
+        const fallbackReload = () => {
+          try { window.location.reload() } catch { /* ignore */ }
+        }
         window.setTimeout(() => {
-          window.location.reload()
+          try {
+            const tasks = []
+            const cached = window.__zitounaStores
+            const scoped = window.__zitounaScoped
+            if (cached?.all) {
+              for (const s of cached.all) {
+                try { tasks.push(s.refresh({ force: true })) } catch { /* ignore */ }
+              }
+            }
+            if (scoped?.all) {
+              for (const s of scoped.all) {
+                try { tasks.push(s.refresh({ force: true })) } catch { /* ignore */ }
+              }
+            }
+            if (tasks.length === 0) {
+              fallbackReload()
+              return
+            }
+            Promise.allSettled(tasks).finally(() => {
+              setRefreshing(false)
+              setReturning(true)
+              setPull(0)
+              window.setTimeout(() => setReturning(false), 220)
+            })
+          } catch {
+            fallbackReload()
+          }
         }, 280)
         return
       }
-      // Snap back to zero with a CSS transition.
       setReturning(true)
       setPull(0)
       window.setTimeout(() => setReturning(false), 220)
@@ -145,7 +178,7 @@ export default function PullToRefresh() {
       window.removeEventListener('touchend', onTouchEnd)
       window.removeEventListener('touchcancel', onTouchEnd)
     }
-  }, [pull, refreshing, returning])
+  }, [])
 
   const visible = pull > 0 || refreshing
   const progress = Math.min(1, pull / TRIGGER)
@@ -160,7 +193,7 @@ export default function PullToRefresh() {
         + (visible ? ' ptr-root--visible' : '')
         + (returning ? ' ptr-root--returning' : '')
       }
-      style={{ transform: `translate3d(-50%, ${pull}px, 0)` }}
+      style={{ transform: `translate3d(0, ${pull}px, 0)` }}
     >
       <div className={'ptr-bubble' + (commit ? ' ptr-bubble--ready' : '')}>
         <svg

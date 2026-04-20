@@ -38,46 +38,100 @@
   --sk-easing: ease-in-out;
 }
 
-/* ── Base shimmer (canonical) ────────────────────────────────── */
+/* ── Base shimmer (canonical) ─────────────────────────────────
+   GPU-friendly implementation: static background tint + a
+   translate3d()'d pseudo-element glint. Prior version animated
+   `background-position`, which CPU-repaints every frame and
+   causes the skeleton to feel "stuck" on slower devices.
+   ─────────────────────────────────────────────────────────── */
 .sk {
   display: block;
-  background: linear-gradient(
-    90deg,
-    var(--sk-base-light) 0%,
-    var(--sk-glint-light) 50%,
-    var(--sk-base-light) 100%
-  );
-  background-size: 200% 100%;
-  animation: sk-shimmer var(--sk-duration) var(--sk-easing) infinite;
+  position: relative;
+  overflow: hidden;
+  background: var(--sk-base-light);
   border-radius: var(--sk-radius);
 }
-
-/* Dark-theme variant. The theme root sets data-theme="admin"|"dark"
-   via public/theme-init.js before React mounts. Use .sk--on-dark
-   to force the dark gradient regardless of theme (e.g. inside a
-   dark hero on a light-theme page). */
-[data-theme="dark"] .sk,
-.sk--on-dark {
+.sk::before {
+  content: "";
+  position: absolute;
+  inset: 0;
   background: linear-gradient(
     90deg,
-    var(--sk-base-dark) 0%,
-    var(--sk-glint-dark) 50%,
-    var(--sk-base-dark) 100%
+    transparent 0%,
+    var(--sk-glint-light) 50%,
+    transparent 100%
   );
-  background-size: 200% 100%;
+  transform: translate3d(-100%, 0, 0);
+  animation: sk-shimmer var(--sk-duration) var(--sk-easing) infinite;
+  will-change: transform;
+  pointer-events: none;
+}
+
+[data-theme="dark"] .sk,
+.sk--on-dark {
+  background: var(--sk-base-dark);
+}
+[data-theme="dark"] .sk::before,
+.sk--on-dark::before {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--sk-glint-dark) 50%,
+    transparent 100%
+  );
 }
 
 /* Hero/stat-pill shimmer (white-alpha on dark tinted bg). Use
    this for inline number placeholders that sit inside a dark
    hero card — direct port of .sp-sk-num. */
 .sk--hero {
+  background: var(--sk-base-hero);
+}
+.sk--hero::before {
   background: linear-gradient(
     90deg,
-    var(--sk-base-hero) 0%,
+    transparent 0%,
     var(--sk-glint-hero) 50%,
-    var(--sk-base-hero) 100%
+    transparent 100%
   );
-  background-size: 200% 100%;
+}
+
+/* ── Shared GPU shimmer for non-.sk primitives ───────────────
+   These variants are sometimes rendered standalone (without a
+   parent .sk class). Give each its own translate3d'd ::before
+   so the shimmer animation stays on the compositor thread. */
+.sk-line,
+.sk-num,
+.sk-box,
+.sk-avatar,
+.sk-button,
+.sk-map,
+.sk-thumb {
+  position: relative;
+  overflow: hidden;
+  background: var(--sk-base-light);
+  border-radius: var(--sk-radius);
+}
+.sk-line::before,
+.sk-num::before,
+.sk-box::before,
+.sk-avatar::before,
+.sk-button::before,
+.sk-map::before,
+.sk-thumb::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--sk-glint-light) 50%,
+    transparent 100%
+  );
+  transform: translate3d(-100%, 0, 0);
+  animation: sk-shimmer var(--sk-duration) var(--sk-easing) infinite;
+  will-change: transform;
+  pointer-events: none;
 }
 
 /* ── Line shapes ─────────────────────────────────────────────── */
@@ -104,14 +158,6 @@
   height: 0.9em;
   width: 36px;
   border-radius: 5px;
-  background: linear-gradient(
-    90deg,
-    var(--sk-base-light) 0%,
-    var(--sk-glint-light) 50%,
-    var(--sk-base-light) 100%
-  );
-  background-size: 200% 100%;
-  animation: sk-shimmer var(--sk-duration) var(--sk-easing) infinite;
 }
 .sk-num--wide    { width: 64px; }
 .sk-num--xl      { width: 96px; height: 1em; }
@@ -443,9 +489,11 @@
 }
 
 /* ── Canonical shimmer keyframes (ONCE) ──────────────────────── */
+/* Transform-based: runs on the compositor thread, no repaint per
+   frame. The sliding glint lives on .sk::before. */
 @keyframes sk-shimmer {
-  0%   { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
+  0%   { transform: translate3d(-100%, 0, 0); }
+  100% { transform: translate3d(100%, 0, 0); }
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -473,14 +521,24 @@
 .adm-shell .sk-button,
 .adm-shell .sk-map,
 .adm-shell .sk-thumb {
+  background: rgba(168, 204, 80, 0.08) !important;
+  position: relative;
+  overflow: hidden;
+}
+.adm-shell .sk::before,
+.adm-shell .sk-line::before,
+.adm-shell .sk-num::before,
+.adm-shell .sk-box::before,
+.adm-shell .sk-avatar::before,
+.adm-shell .sk-button::before,
+.adm-shell .sk-map::before,
+.adm-shell .sk-thumb::before {
   background: linear-gradient(
     90deg,
-    rgba(168, 204, 80, 0.08) 0%,
-    rgba(168, 204, 80, 0.24) 50%,
-    rgba(168, 204, 80, 0.08) 100%
+    transparent 0%,
+    rgba(168, 204, 80, 0.3) 50%,
+    transparent 100%
   ) !important;
-  background-size: 200% 100% !important;
-  animation: sk-shimmer 1.4s ease-in-out infinite;
 }
 
 /* Card surface — remove the dark-green default, use white */

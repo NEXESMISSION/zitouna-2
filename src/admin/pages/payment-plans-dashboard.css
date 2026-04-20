@@ -15,8 +15,11 @@
   background: #f8fafc !important;
   color: #0f172a !important;
 }
-.adm-main--standalone:has(.pp) { background: #f8fafc !important; padding: 0 !important; }
-.adm-main--standalone .pp { padding-left: 14px !important; padding-right: 14px !important; min-height: 100vh !important; }
+.adm-main--standalone:has(.pp) { background: #f8fafc !important; padding: env(safe-area-inset-top, 0px) 0 0 !important; }
+.adm-main--standalone .pp { padding-left: 14px !important; padding-right: 14px !important; min-height: 100vh !important; min-height: 100dvh !important; }
+@media (max-width: 600px) {
+  .adm-main--standalone .pp { padding-left: 12px !important; padding-right: 12px !important; }
+}
 
 /* ── Root ── */
 .pp {

@@ -158,8 +158,14 @@ export default function InstallmentsPage() {
     setError('')
     let finalFile = file
     if (file.type?.startsWith('image/')) {
-      finalFile = await optimizeImageFile(file)
-      if (finalFile.size > MAX_IMAGE_BYTES) throw new Error('Image trop lourde')
+      try {
+        finalFile = await optimizeImageFile(file)
+      } catch {
+        // Compression can fail for odd formats (HEIC on older Chrome, etc.);
+        // fall back to the raw file rather than blocking the submit.
+        finalFile = file
+      }
+      if (finalFile.size > MAX_IMAGE_BYTES) throw new Error('Image trop lourde (max 2 Mo après compression).')
     } else if (file.size > MAX_NON_IMAGE_BYTES) throw new Error('Fichier trop volumineux (max 5 Mo)')
     setReceiptFile(finalFile)
     if (receiptPreview?.startsWith('blob:')) URL.revokeObjectURL(receiptPreview)
