@@ -14,12 +14,16 @@ import './styles/pwa-responsive.css'
 import App from './App.jsx'
 import { AuthProvider } from './lib/AuthContext.jsx'
 import { registerServiceWorker } from './lib/registerServiceWorker.js'
+import PullToRefresh from './components/PullToRefresh.jsx'
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <AuthProvider>
       <BrowserRouter>
         <App />
+        {/* App-level pull-to-refresh gesture. Self-gates to scrollY<=2 and
+            no-modal-open so it can't fire inside a wizard or a confirm. */}
+        <PullToRefresh />
       </BrowserRouter>
     </AuthProvider>
   </StrictMode>,

@@ -1,0 +1,107 @@
+/* =============================================================================
+ * pull-to-refresh.css — visual state for the app-level PTR component.
+ *
+ * The indicator is a fixed, centered bubble sitting just above the top of
+ * the viewport at rest. JS translates it downward by the current pull
+ * distance, so positioning here is static; only the colour / shadow /
+ * commit state are handled in CSS.
+ * ========================================================================== */
+
+.ptr-root {
+  position: fixed;
+  /* Indicator lives above the viewport when idle: top = safe-area - 50px.
+     JS adds `translate3d(-50%, ${pullPx}, 0)` so it enters the viewport
+     as the finger drags down. */
+  top: calc(env(safe-area-inset-top, 0px) - 50px);
+  left: 50%;
+  z-index: 9999;
+  width: 40px;
+  height: 40px;
+  pointer-events: none;
+  /* No transition while a gesture is active — the JS-driven translate must
+     track the finger 1:1. The .ptr-root--returning class is added on
+     release to animate back to rest. */
+  will-change: transform;
+  transform: translate3d(-50%, 0, 0);
+}
+
+.ptr-root--visible .ptr-bubble { opacity: 1; }
+
+.ptr-root--returning {
+  transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.ptr-bubble {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #1f2937;
+  opacity: 0;
+  box-shadow:
+    0 4px 14px rgba(15, 23, 42, 0.16),
+    0 0 0 1px rgba(15, 23, 42, 0.06);
+  transition:
+    background 180ms ease,
+    color 180ms ease,
+    transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    box-shadow 180ms ease,
+    opacity 180ms ease;
+}
+
+/* "Past the trigger line" state: the indicator turns blue so the user has
+   unambiguous feedback that releasing now will actually fire the refresh.
+   Matches the rest of the app's primary-button blue. */
+.ptr-bubble--ready {
+  background: #2563eb;
+  color: #ffffff;
+  transform: scale(1.06);
+  box-shadow:
+    0 8px 22px rgba(37, 99, 235, 0.38),
+    0 0 0 1px rgba(37, 99, 235, 0.25);
+}
+
+.ptr-icon {
+  display: block;
+  transition: transform 80ms linear;
+}
+
+.ptr-icon--spin {
+  animation: ptr-spin 700ms linear infinite;
+}
+
+@keyframes ptr-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* Admin surfaces (light themed): the white bubble might get lost on a
+   very-light page. The blue commit state already stands out, so only the
+   idle bubble needs a slight tint here. */
+html[data-theme='admin'] .ptr-bubble {
+  background: #ffffff;
+  color: #0f172a;
+  box-shadow:
+    0 6px 18px rgba(15, 23, 42, 0.14),
+    0 0 0 1px rgba(15, 23, 42, 0.08);
+}
+
+/* Respect user-level motion preferences: no commit scale, no spinner
+   rotation. We still move the indicator down with the finger (that IS the
+   gesture), but the decorative bits go quiet. */
+@media (prefers-reduced-motion: reduce) {
+  .ptr-root--returning,
+  .ptr-bubble,
+  .ptr-icon {
+    transition: none !important;
+  }
+  .ptr-icon--spin {
+    animation: none !important;
+  }
+  .ptr-bubble--ready {
+    transform: none;
+  }
+}

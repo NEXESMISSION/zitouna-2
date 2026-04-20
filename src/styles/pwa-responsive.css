@@ -220,12 +220,22 @@ html:has(.zadm-modal-overlay) {
 
 /* ── 9 / Installed-PWA refinements (display-mode: standalone) ──────── */
 
-/* When launched from Home Screen, we have the whole screen. Drop any
-   assumption about a browser chrome height and treat hero paddings as
-   being under the status bar. */
+/* When launched from Home Screen, we have the whole screen. The status bar
+   and bottom home-indicator live inside the viewport, so we:
+     - push content down by the inset + a generous buffer so status-bar
+       icons (time, battery, signal) never overlap our UI,
+     - reserve space at the bottom for the iOS home indicator / Android
+       gesture pill,
+     - scale the whole app down slightly so the denser desktop-ish UI feels
+       right on a phone without the browser chrome. */
 @media (display-mode: standalone), (display-mode: fullscreen) {
+  /* Shrink the whole app a notch when the browser chrome is gone — the
+     px-based UI otherwise feels oversized on a phone. `zoom` scales every
+     dimension (including fixed/absolute children) without breaking layout. */
   body {
-    padding-top: max(env(safe-area-inset-top, 0), 8px);
+    zoom: 0.92;
+    padding-top: calc(env(safe-area-inset-top, 0) + 20px);
+    padding-bottom: calc(env(safe-area-inset-bottom, 0) + 16px);
   }
   /* Disable iOS pinch-zoom's visual glitch where the user can drag the
      whole "page" down from the status bar. Our main app screens set their
@@ -234,6 +244,18 @@ html:has(.zadm-modal-overlay) {
   body {
     overscroll-behavior: none;
     touch-action: manipulation;
+  }
+
+  /* Fixed-position drawers/modals don't inherit body padding, so push the
+     first/last children away from the status bar and home indicator without
+     disturbing the flex layout of the shell. */
+  .zadm-drawer__header,
+  .adm-drawer-header {
+    padding-top: calc(var(--zadm-space-4, 16px) + env(safe-area-inset-top, 0));
+  }
+  .zadm-drawer__footer,
+  .adm-drawer-footer {
+    padding-bottom: calc(var(--zadm-space-4, 16px) + env(safe-area-inset-bottom, 0));
   }
 }
 
