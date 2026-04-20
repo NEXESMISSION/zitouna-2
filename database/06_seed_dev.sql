@@ -21,7 +21,13 @@
 --
 -- Prerequisite (run once before this script):
 --   02_schema.sql -> 03_functions.sql -> 04_rls.sql -> 07_hardening.sql -> 08_notifications.sql
+--
+-- If you run only part of this file (or a fragment), you must execute this SET in the
+-- same session before the destructive section:
+--   SET app.allow_destructive_reset = 'I_UNDERSTAND_THIS_WIPES_DATA';
 -- =============================================================================
+
+SET app.allow_destructive_reset = 'I_UNDERSTAND_THIS_WIPES_DATA';
 
 create extension if not exists pgcrypto;
 
@@ -110,10 +116,14 @@ delete from public.visit_slot_options;
 -- Auth cleanup
 delete from auth.sessions;
 delete from auth.refresh_tokens;
-begin delete from auth.mfa_factors; exception when undefined_table then null; end;
-begin delete from auth.mfa_challenges; exception when undefined_table then null; end;
-begin delete from auth.mfa_amr_claims; exception when undefined_table then null; end;
-begin delete from auth.identities; exception when undefined_table then null; end;
+do $$
+begin
+  begin delete from auth.mfa_factors; exception when undefined_table then null; end;
+  begin delete from auth.mfa_challenges; exception when undefined_table then null; end;
+  begin delete from auth.mfa_amr_claims; exception when undefined_table then null; end;
+  begin delete from auth.identities; exception when undefined_table then null; end;
+end
+$$;
 delete from auth.users;
 
 -- -----------------------------------------------------------------------------
