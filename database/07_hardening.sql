@@ -334,14 +334,28 @@ BEGIN
     RAISE NOTICE 'lookup_client_for_sale: audit failed: %', sqlerrm;
   END;
 
+  -- Phone match: exact digit string OR last 8 digits (TN local vs +216… stored forms).
+  -- Include active + stub-like statuses (pending / unverified / pre-signup) so a
+  -- seller who knows the buyer's phone can still attach — we only exclude
+  -- explicit 'deleted' / 'archived' rows so they can't resurface via search.
   RETURN QUERY
     SELECT c.id, c.full_name, c.email, c.phone, c.code, c.status
       FROM public.clients c
-     WHERE c.status = 'active'
+     WHERE coalesce(c.status, 'active') NOT IN ('deleted', 'archived', 'banned')
        AND (
          lower(c.email) = lower(v_query)
-         OR (length(v_norm_phone) >= 6 AND regexp_replace(coalesce(c.phone,''), '\D', '', 'g') = v_norm_phone)
          OR lower(c.code)  = lower(v_query)
+         OR (
+           length(v_norm_phone) >= 6
+           AND (
+             regexp_replace(coalesce(c.phone,''), '\D', '', 'g') = v_norm_phone
+             OR (
+               length(regexp_replace(coalesce(c.phone,''), '\D', '', 'g')) >= 8
+               AND length(v_norm_phone) >= 8
+               AND right(regexp_replace(coalesce(c.phone,''), '\D', '', 'g'), 8) = right(v_norm_phone, 8)
+             )
+           )
+         )
        )
      LIMIT 5;
 END;
@@ -1300,6 +1314,75 @@ BEGIN
   END IF;
 END
 $zit_offer_mode$;
+
+-- ============================================================================
+-- F1 — Denormalized buyer snapshot on sales
+-- ----------------------------------------------------------------------------
+-- Why: RLS hides the clients row from sellers / coordinators who did not
+-- create the buyer. The join in fetchSales() then returns NULL for
+-- s.client and the Coordination / Finance / Legal screens show an empty
+-- "Nom" field even though a buyer was recorded. Keeping a denormalized
+-- snapshot (name, phone, cin, email, city) on the sale row serves TWO
+-- goals simultaneously:
+--   1. UI always has a buyer label, regardless of who is looking.
+--   2. If the buyer row is later hard-deleted, the contract history
+--      still carries the name the sale was signed with (audit trail).
+-- ============================================================================
+ALTER TABLE public.sales
+  ADD COLUMN IF NOT EXISTS client_name_snapshot  text,
+  ADD COLUMN IF NOT EXISTS client_phone_snapshot text,
+  ADD COLUMN IF NOT EXISTS client_cin_snapshot   text,
+  ADD COLUMN IF NOT EXISTS client_email_snapshot text,
+  ADD COLUMN IF NOT EXISTS client_city_snapshot  text;
+
+CREATE OR REPLACE FUNCTION public.sales_snapshot_client_info()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $zit_sales_snap$
+DECLARE
+  v_name  text; v_phone text; v_cin text; v_email text; v_city text;
+BEGIN
+  IF NEW.client_id IS NULL THEN
+    RETURN NEW;
+  END IF;
+  IF TG_OP = 'INSERT' OR NEW.client_id IS DISTINCT FROM OLD.client_id THEN
+    SELECT c.full_name, c.phone, c.cin, c.email, c.city
+      INTO v_name, v_phone, v_cin, v_email, v_city
+      FROM public.clients c WHERE c.id = NEW.client_id;
+    -- Only overwrite when we actually read a row (client_id is FK-checked so
+    -- this should always succeed, but be defensive against replica drift).
+    IF v_name IS NOT NULL OR v_phone IS NOT NULL THEN
+      NEW.client_name_snapshot  := COALESCE(NULLIF(v_name, ''),  NEW.client_name_snapshot);
+      NEW.client_phone_snapshot := COALESCE(NULLIF(v_phone, ''), NEW.client_phone_snapshot);
+      NEW.client_cin_snapshot   := COALESCE(NULLIF(v_cin, ''),   NEW.client_cin_snapshot);
+      NEW.client_email_snapshot := COALESCE(NULLIF(v_email, ''), NEW.client_email_snapshot);
+      NEW.client_city_snapshot  := COALESCE(NULLIF(v_city, ''),  NEW.client_city_snapshot);
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$zit_sales_snap$;
+
+DROP TRIGGER IF EXISTS sales_snapshot_client_info_trg ON public.sales;
+CREATE TRIGGER sales_snapshot_client_info_trg
+  BEFORE INSERT OR UPDATE OF client_id ON public.sales
+  FOR EACH ROW EXECUTE FUNCTION public.sales_snapshot_client_info();
+
+-- Backfill: populate any existing rows where the snapshot is missing.
+UPDATE public.sales s SET
+  client_name_snapshot  = COALESCE(NULLIF(s.client_name_snapshot, ''),  c.full_name),
+  client_phone_snapshot = COALESCE(NULLIF(s.client_phone_snapshot, ''), c.phone),
+  client_cin_snapshot   = COALESCE(NULLIF(s.client_cin_snapshot, ''),   c.cin),
+  client_email_snapshot = COALESCE(NULLIF(s.client_email_snapshot, ''), c.email),
+  client_city_snapshot  = COALESCE(NULLIF(s.client_city_snapshot, ''),  c.city)
+FROM public.clients c
+WHERE s.client_id = c.id
+  AND (
+    coalesce(s.client_name_snapshot, '') = '' OR
+    coalesce(s.client_phone_snapshot, '') = ''
+  );
 
 -- ============================================================================
 -- END — 07_hardening.sql

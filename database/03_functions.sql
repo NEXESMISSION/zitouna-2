@@ -489,6 +489,181 @@ as $zit_auto_6$
   order by spa.assigned_at desc;
 $zit_auto_6$;
 
+-- Same rows as list_seller_assignments for the authenticated client (SellPage seller mode).
+-- Exposed as a parameterless RPC for PostgREST / supabase-js (.rpc without args).
+create or replace function public.list_my_seller_assignments()
+returns table (
+  assignment_id uuid,
+  client_id uuid,
+  client_name text,
+  project_id text,
+  project_title text,
+  parcel_id bigint,
+  parcel_number int,
+  active boolean,
+  note text,
+  assigned_by uuid,
+  assigned_by_name text,
+  assigned_at timestamptz,
+  revoked_by uuid,
+  revoked_by_name text,
+  revoked_at timestamptz,
+  revoked_reason text
+)
+language sql
+stable
+security definer
+set search_path = public
+as $zit_auto_6b$
+  select
+    spa.id, spa.client_id, c.full_name, spa.project_id, pr.title,
+    spa.parcel_id, pa.parcel_number, spa.active, spa.note,
+    spa.assigned_by, au1.full_name, spa.assigned_at,
+    spa.revoked_by, au2.full_name, spa.revoked_at, spa.revoked_reason
+  from public.seller_parcel_assignments spa
+  join public.clients c on c.id = spa.client_id
+  left join public.projects pr on pr.id = spa.project_id
+  left join public.parcels pa on pa.id = spa.parcel_id
+  left join public.admin_users au1 on au1.id = spa.assigned_by
+  left join public.admin_users au2 on au2.id = spa.revoked_by
+  where public.current_client_id() is not null
+    and spa.client_id = public.current_client_id()
+  order by spa.assigned_at desc;
+$zit_auto_6b$;
+
+-- ============================================================================
+-- Seller parcel assignment mutations (staff-only).
+-- Assign: create/reactivate a (client_id, parcel_id) row, rejecting if the
+--         parcel is already actively assigned to a DIFFERENT client.
+-- Revoke: mark the row inactive (supports lookup by assignment_id OR by
+--         (client_id, parcel_id) so the UI can call it without tracking ids).
+-- ============================================================================
+create or replace function public.assign_seller_parcel(
+  p_client_id uuid,
+  p_project_id text,
+  p_parcel_id bigint,
+  p_note text default ''
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $zit_assign_seller$
+declare
+  v_actor_id uuid;
+  v_existing record;
+  v_row record;
+begin
+  if not public.is_active_staff() then
+    raise exception 'forbidden: active staff required' using errcode = '42501';
+  end if;
+  if p_client_id is null or p_project_id is null or p_parcel_id is null then
+    raise exception 'assign_seller_parcel: client_id/project_id/parcel_id required' using errcode = '22023';
+  end if;
+
+  select au.id into v_actor_id
+  from public.admin_users au
+  where lower(trim(coalesce(au.email, ''))) = lower(trim(coalesce(auth.email(), '')))
+  limit 1;
+
+  -- Block if another active owner already holds this parcel.
+  select spa.id, spa.client_id into v_existing
+  from public.seller_parcel_assignments spa
+  where spa.parcel_id = p_parcel_id and spa.active = true
+  limit 1;
+  if found and v_existing.client_id <> p_client_id then
+    raise exception 'parcel_already_assigned' using errcode = 'P0001';
+  end if;
+
+  -- Reactivate an existing (possibly inactive) row for the same client, or insert.
+  update public.seller_parcel_assignments spa
+     set active = true,
+         project_id = p_project_id,
+         note = coalesce(p_note, ''),
+         assigned_by = v_actor_id,
+         assigned_at = now(),
+         revoked_by = null,
+         revoked_at = null,
+         revoked_reason = ''
+   where spa.client_id = p_client_id and spa.parcel_id = p_parcel_id
+  returning spa.* into v_row;
+
+  if not found then
+    insert into public.seller_parcel_assignments(
+      client_id, project_id, parcel_id, active, note, assigned_by, assigned_at
+    ) values (
+      p_client_id, p_project_id, p_parcel_id, true, coalesce(p_note, ''), v_actor_id, now()
+    )
+    returning * into v_row;
+  end if;
+
+  return jsonb_build_object(
+    'assignment_id', v_row.id,
+    'client_id', v_row.client_id,
+    'project_id', v_row.project_id,
+    'parcel_id', v_row.parcel_id,
+    'active', v_row.active,
+    'assigned_at', v_row.assigned_at
+  );
+end;
+$zit_assign_seller$;
+
+create or replace function public.revoke_seller_parcel(
+  p_assignment_id uuid default null,
+  p_client_id uuid default null,
+  p_parcel_id bigint default null,
+  p_reason text default ''
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $zit_revoke_seller$
+declare
+  v_actor_id uuid;
+  v_row record;
+begin
+  if not public.is_active_staff() then
+    raise exception 'forbidden: active staff required' using errcode = '42501';
+  end if;
+  if p_assignment_id is null and (p_client_id is null or p_parcel_id is null) then
+    raise exception 'revoke_seller_parcel: assignment_id OR (client_id+parcel_id) required' using errcode = '22023';
+  end if;
+
+  select au.id into v_actor_id
+  from public.admin_users au
+  where lower(trim(coalesce(au.email, ''))) = lower(trim(coalesce(auth.email(), '')))
+  limit 1;
+
+  update public.seller_parcel_assignments spa
+     set active = false,
+         revoked_by = v_actor_id,
+         revoked_at = now(),
+         revoked_reason = coalesce(p_reason, '')
+   where spa.active = true
+     and (
+       (p_assignment_id is not null and spa.id = p_assignment_id)
+       or (p_assignment_id is null and spa.client_id = p_client_id and spa.parcel_id = p_parcel_id)
+     )
+  returning spa.* into v_row;
+
+  if not found then
+    return jsonb_build_object('revoked', false, 'reason', 'not_found');
+  end if;
+
+  return jsonb_build_object(
+    'revoked', true,
+    'assignment_id', v_row.id,
+    'client_id', v_row.client_id,
+    'parcel_id', v_row.parcel_id,
+    'revoked_at', v_row.revoked_at
+  );
+end;
+$zit_revoke_seller$;
+
+grant execute on function public.assign_seller_parcel(uuid, text, bigint, text) to authenticated;
+grant execute on function public.revoke_seller_parcel(uuid, uuid, bigint, text) to authenticated;
+
 -- ============================================================================
 -- Referral wallet summary: consumed by the buyer dashboard "Parrainage" card.
 -- Aggregates commission events without requiring a precomputed wallet table,

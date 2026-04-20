@@ -1354,6 +1354,111 @@
   color: #64748b;
 }
 
+.pdp-batches--edit {
+  margin-top: 4px;
+}
+.pdp-batch-edit-row {
+  display: grid;
+  grid-template-columns: minmax(72px, 1fr) minmax(72px, 1fr) 1fr auto;
+  gap: 8px;
+  align-items: end;
+  padding: 8px 0;
+  border-bottom: 1px solid #e2e8f0;
+}
+.pdp-batch-edit-row:last-of-type {
+  border-bottom: 0;
+}
+@media (max-width: 480px) {
+  .pdp-batch-edit-row {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto auto;
+  }
+  .pdp-batch-edit-row__meta {
+    grid-column: 1 / -1;
+  }
+  .pdp-batch-edit-row__rm {
+    grid-column: 2;
+    grid-row: 1;
+    justify-self: end;
+  }
+}
+.pdp-batch-edit-row__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.pdp-batch-edit-row__lbl {
+  font-size: 10px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.pdp-batch-edit-row__meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  min-height: 38px;
+  padding-bottom: 2px;
+}
+.pdp-batch-edit-row__age {
+  font-size: 11px;
+  color: #1d4ed8;
+  font-weight: 600;
+}
+.pdp-batch-edit-row__rev {
+  font-size: 10px;
+  color: #64748b;
+}
+.pdp-batch-edit-row__rm {
+  width: 36px;
+  height: 38px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  font-size: 18px;
+  line-height: 1;
+  color: #64748b;
+  cursor: pointer;
+}
+.pdp-batch-edit-row__rm:hover:not(:disabled) {
+  border-color: #cbd5e1;
+  color: #b91c1c;
+  background: #fef2f2;
+}
+.pdp-batch-edit-row__rm:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.pdp-batch-add {
+  margin-top: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px dashed #cbd5e1;
+  background: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1d4ed8;
+  cursor: pointer;
+}
+.pdp-batch-add:hover {
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+.pdp-batch-total {
+  margin-top: 10px;
+  font-size: 13px;
+  color: #475569;
+}
+.pdp-batch-total strong {
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ══════════ EDIT-PARCEL BOTTOM SHEET (prj-overlay / prj-sheet) ══════════ */
 .pdp-root .prj-overlay {
   position: fixed;

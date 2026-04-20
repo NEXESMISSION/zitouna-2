@@ -493,6 +493,7 @@ GRANT EXECUTE ON FUNCTION public.current_client_id_is_ambiguous()               
 GRANT EXECUTE ON FUNCTION public.ensure_current_client_profile()                  TO authenticated;
 GRANT EXECUTE ON FUNCTION public.is_active_staff()                                TO authenticated;
 GRANT EXECUTE ON FUNCTION public.list_seller_assignments(uuid)                    TO authenticated;
+GRANT EXECUTE ON FUNCTION public.list_my_seller_assignments()                      TO authenticated;
 GRANT EXECUTE ON FUNCTION public.get_my_referral_summary()                        TO authenticated;
 GRANT EXECUTE ON FUNCTION public.request_ambassador_payout(numeric, text)         TO authenticated;
 GRANT EXECUTE ON FUNCTION public.increment_ambassador_wallet_balance(uuid, numeric) TO authenticated;

@@ -366,12 +366,6 @@ export default function RecouvrementPage() {
           <h1 className="sp-hero__name">Recouvrement</h1>
           <p className="sp-hero__role">Validez les reçus et suivez les impayés</p>
         </div>
-        <div className="sp-hero__kpis">
-          <span className="sp-hero__kpi-num">
-            {showSkeletons ? <span className="sk-num sk-num--wide" /> : totalSubmitted}
-          </span>
-          <span className="sp-hero__kpi-label">à valider</span>
-        </div>
       </header>
 
       <div className="sp-cat-bar">
@@ -408,24 +402,6 @@ export default function RecouvrementPage() {
           ))}
         </div>
       </div>
-
-      {missingPlanSales.length > 0 && (
-        <div className="rv-alert rv-alert--warn" role="alert">
-          <span aria-hidden className="rv-alert__icon">⚠️</span>
-          <div className="rv-alert__body">
-            <strong>{missingPlanSales.length} vente{missingPlanSales.length > 1 ? 's' : ''} sans échéancier</strong>
-            <span>Ventes clôturées à tempérament sans plan de paiement.</span>
-          </div>
-          <button
-            type="button"
-            className="rv-alert__btn"
-            disabled={repairBusy}
-            onClick={runBulkRepair}
-          >
-            {repairBusy ? 'Réparation…' : 'Tout réparer'}
-          </button>
-        </div>
-      )}
 
       {repairStatus && (
         <div className="rv-alert rv-alert--info" role="status">
@@ -473,6 +449,28 @@ export default function RecouvrementPage() {
           ))
         ) : (
           <>
+            {missingPlanSales.length > 0 && (
+              <div className="rv-missing-toolbar">
+                <div className="rv-missing-toolbar__text">
+                  <p className="rv-missing-toolbar__title" id="rv-missing-toolbar-title">
+                    {missingPlanSales.length} échéancier{missingPlanSales.length > 1 ? 's' : ''} à créer
+                  </p>
+                  <p className="rv-missing-toolbar__hint">
+                    Ventes à tempérament déjà clôturées, sans plan de suivi des mensualités. Créez le plan pour activer relances et validation des reçus.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="rv-alert__btn"
+                  disabled={repairBusy}
+                  onClick={runBulkRepair}
+                  aria-describedby="rv-missing-toolbar-title"
+                >
+                  {repairBusy ? 'Création…' : 'Tout créer'}
+                </button>
+              </div>
+            )}
+
             {filteredMissingPlan.map((sale) => {
               const isBusy = repairSingleBusy === sale.id
               return (
@@ -490,10 +488,10 @@ export default function RecouvrementPage() {
                         <p className="sp-card__sub">{sale.projectTitle || 'Projet'} · {sale.code || sale.id}</p>
                       </div>
                     </div>
-                    <span className="sp-badge sp-badge--orange">Sans plan</span>
+                    <span className="sp-badge sp-badge--orange">Plan manquant</span>
                   </div>
                   <p className="rv-card__hint">
-                    Vente à tempérament clôturée sans échéancier.
+                    Le plan de paiement n’a pas été généré automatiquement après clôture.
                   </p>
                   <button
                     type="button"
@@ -502,7 +500,7 @@ export default function RecouvrementPage() {
                     onClick={() => runSingleRepair(sale)}
                     style={{ width: '100%' }}
                   >
-                    {isBusy ? 'Réparation…' : 'Générer l\u2019échéancier'}
+                    {isBusy ? 'Création…' : 'Créer l’échéancier'}
                   </button>
                 </div>
               )

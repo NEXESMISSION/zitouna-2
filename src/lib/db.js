@@ -799,7 +799,10 @@ export async function fetchClientByPhone(rawPhone) {
   const e164 = normalizePhoneE164(input)
   const legacy = normalizePhone(input)
   const canonical = normalizePhoneCanonical(input)
-  const candidates = [...new Set([e164, legacy, canonical, input.replace(/\D/g, '')].filter(Boolean))]
+  const digitsOnly = input.replace(/\D/g, '')
+  const tnLocal8 =
+    digitsOnly.length === 8 ? [`216${digitsOnly}`, '+216' + digitsOnly, `+216${digitsOnly}`] : []
+  const candidates = [...new Set([e164, legacy, canonical, digitsOnly, ...tnLocal8].filter(Boolean))]
   if (!candidates.length) return null
 
   const byNorm = await db()
@@ -812,6 +815,33 @@ export async function fetchClientByPhone(rawPhone) {
     console.warn('[fetchClientByPhone] phone_normalized:', byNorm.error.message)
   }
   if (byNorm.data) return mapClientFromDb(byNorm.data)
+
+  // Staff can read clients directly; delegated sellers cannot (RLS). Narrow RPC
+  // from 07_hardening.lookup_client_for_sale — matches last 8 digits + email/code.
+  const { data: rpcRows, error: rpcErr } = await db().rpc('lookup_client_for_sale', { p_query: input })
+  if (rpcErr) {
+    const msg = String(rpcErr.message || rpcErr.code || '')
+    if (msg && !/schema cache|42883|function.*does not exist/i.test(msg)) {
+      console.warn('[fetchClientByPhone] lookup_client_for_sale:', rpcErr.message)
+    }
+  }
+  if (Array.isArray(rpcRows) && rpcRows.length > 0) {
+    const r = rpcRows[0]
+    return mapClientFromDb({
+      id: r.id,
+      full_name: r.full_name,
+      email: r.email,
+      phone: r.phone,
+      code: r.code,
+      status: r.status,
+      phone_normalized: null,
+      city: '',
+      cin: '',
+      auth_user_id: null,
+      allowed_pages: null,
+      allowed_project_ids: null,
+    })
+  }
 
   if (canonical) {
     const identRes = await db()
@@ -2471,10 +2501,14 @@ function mapSaleFromDb(s, parcelMap) {
     plotId: plotIds[0],
     plotCount: plotIds.length,
     clientId: s.client_id,
-    clientName: s.client?.full_name || '',
-    clientCin: s.client?.cin || '',
-    clientEmail: s.client?.email || '',
-    clientPhone: s.client?.phone || '',
+    // RLS often hides the joined `s.client` row from delegated sellers and
+    // other non-staff viewers; fall back to the BEFORE-INSERT trigger-populated
+    // snapshot so coordination/legal screens always have a buyer label and the
+    // history survives a later client delete.
+    clientName: s.client?.full_name || s.client_name_snapshot || '',
+    clientCin: s.client?.cin || s.client_cin_snapshot || '',
+    clientEmail: s.client?.email || s.client_email_snapshot || '',
+    clientPhone: s.client?.phone || s.client_phone_snapshot || '',
     paymentType: s.payment_type,
     offerId: s.offer_id || '',
     agreedPrice: Number(s.agreed_price || 0),
@@ -2696,8 +2730,26 @@ export async function fetchSellerParcelAssignments(clientId = '') {
 
 export async function fetchMySellerParcelAssignments() {
   const { data, error } = await db().rpc('list_my_seller_assignments')
-  if (error) throw new Error(`mySellerAssignments: ${error.message}`)
-  return Array.isArray(data) ? data.map(mapSellerAssignmentFromDb) : []
+  if (!error) {
+    return Array.isArray(data) ? data.map(mapSellerAssignmentFromDb) : []
+  }
+  const msg = String(error.message || '').toLowerCase()
+  const code = String(error.code || '')
+  const rpcMissing =
+    code === '42883'
+    || msg.includes('could not find the function')
+    || msg.includes('schema cache')
+  if (rpcMissing) {
+    try {
+      const uid = await currentUserId()
+      const cid = uid ? await fetchClientIdByAuthUserId(uid) : null
+      if (cid) return fetchSellerParcelAssignments(cid)
+    } catch {
+      /* ignore — surface empty until DB migration is applied */
+    }
+    return []
+  }
+  throw new Error(`mySellerAssignments: ${error.message}`)
 }
 
 export async function assignSellerParcel({ clientId, projectId, parcelId, note = '' }) {

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import TopBar from '../TopBar.jsx'
 import { useAuth } from '../lib/AuthContext.jsx'
@@ -7,7 +7,7 @@ import RenderDataGate from '../components/RenderDataGate.jsx'
 import EmptyState from '../components/EmptyState.jsx'
 import { runSafeAction } from '../lib/runSafeAction.js'
 import { addInstallmentReceiptRecord, updatePaymentStatus, uploadInstallmentReceipt } from '../lib/db.js'
-import { computeInstallmentSaleMetrics, formatMoneyTnd } from '../domain/installmentMetrics.js'
+import { computeInstallmentSaleMetrics, formatMoneyTnd, getPaymentPageForNextDue } from '../domain/installmentMetrics.js'
 import './installments-page.css'
 
 const MAX_IMAGE_DIMENSION = 1600
@@ -114,10 +114,16 @@ export default function InstallmentsPage() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
 
-  // Pagination for the payments list on the focused plan. Reset to page 1
-  // every time the user opens a different plan.
+  // Pagination for the payments list — open on the page that contains the next due installment.
   const PAYMENTS_PER_PAGE = 5
   const [paymentPager, setPaymentPager] = useState({ planId: '', page: 1 })
+  useLayoutEffect(() => {
+    if (!focusedPlanId || !focusedPlan?.payments?.length) return
+    setPaymentPager({
+      planId: focusedPlanId,
+      page: getPaymentPageForNextDue(focusedPlan.payments, PAYMENTS_PER_PAGE),
+    })
+  }, [focusedPlanId, focusedPlan?.id, focusedPlan?.payments?.length])
   const paymentPage = paymentPager.planId === focusedPlanId ? paymentPager.page : 1
   const setPaymentPage = useCallback((next) => {
     setPaymentPager((prev) => {
@@ -206,16 +212,22 @@ export default function InstallmentsPage() {
       <TopBar />
       <div className="ip">
         <button type="button" className="ip__back" onClick={() => (focusedPlan ? navigate('/installments') : navigate('/browse'))}>
-          ← {focusedPlan ? 'Tous les plans' : 'Retour accueil'}
+          <span className="ip__back-icon" aria-hidden>←</span>
+          <span className="ip__back-label">{focusedPlan ? 'Tous les plans' : 'Retour accueil'}</span>
         </button>
-        <div className="ip__hero">
-          <h1 className="ip__hero-title">Mes échéances</h1>
-          <p className="ip__hero-sub">Suivez vos facilités en temps réel</p>
-          <div className="ip__hero-kpi">
-            <div className="ip__kpi"><span className="ip__kpi-value">{globalStats.totalPlans}</span><span className="ip__kpi-label">Plans</span></div>
-            <div className="ip__kpi"><span className="ip__kpi-value">{globalStats.submitted}</span><span className="ip__kpi-label">En révision</span></div>
-            <div className="ip__kpi"><span className="ip__kpi-value">{globalStats.rejected}</span><span className="ip__kpi-label">À corriger</span></div>
-            <div className="ip__kpi"><span className="ip__kpi-value">{globalStats.approved}</span><span className="ip__kpi-label">Confirmés</span></div>
+        <div className="ip__hero ip__hero--standalone">
+          <div className="ip__hero-intro">
+            <span className="ip__hero-icon" aria-hidden>📅</span>
+            <div>
+              <h1 className="ip__hero-title">Mes échéances</h1>
+              <p className="ip__hero-sub">Suivez vos facilités en temps réel</p>
+            </div>
+          </div>
+          <div className="ip__hero-kpi ip__hero-kpi--strip" role="list">
+            <div className="ip__kpi" role="listitem"><span className="ip__kpi-value">{globalStats.totalPlans}</span><span className="ip__kpi-label">Plans</span></div>
+            <div className="ip__kpi" role="listitem"><span className="ip__kpi-value">{globalStats.submitted}</span><span className="ip__kpi-label">En révision</span></div>
+            <div className="ip__kpi" role="listitem"><span className="ip__kpi-value">{globalStats.rejected}</span><span className="ip__kpi-label">À corriger</span></div>
+            <div className="ip__kpi" role="listitem"><span className="ip__kpi-value">{globalStats.approved}</span><span className="ip__kpi-label">Confirmés</span></div>
           </div>
         </div>
 
@@ -378,28 +390,52 @@ export default function InstallmentsPage() {
                       className="ip__plan-card"
                       onClick={() => navigate('/installments', { state: { planId: plan.id } })}
                     >
-                      <div className="ip__plan-head">
-                        <span className="ip__plan-title">{plan.projectTitle}</span>
-                        <span className="ip__plan-ref">{plan.projectCity}</span>
+                      <div className="ip__plan-card__header">
+                        <div className="ip__plan-card__titles">
+                          <span className="ip__plan-title">{plan.projectTitle}</span>
+                          <span className="ip__plan-ref">{plan.projectCity}</span>
+                        </div>
+                        <div className="ip__plan-pills">
+                          {metrics.submittedCount > 0 && <span className="ip__pill ip__pill--submitted">{metrics.submittedCount} en révision</span>}
+                          {metrics.rejectedCount > 0 && <span className="ip__pill ip__pill--rejected">{metrics.rejectedCount} à corriger</span>}
+                          {metrics.submittedCount === 0 && metrics.rejectedCount === 0 && <span className="ip__pill ip__pill--ok">Rythme normal</span>}
+                        </div>
                       </div>
-                      <div className="ip__plan-pills">
-                        {metrics.submittedCount > 0 && <span className="ip__pill ip__pill--submitted">{metrics.submittedCount} en révision</span>}
-                        {metrics.rejectedCount > 0 && <span className="ip__pill ip__pill--rejected">{metrics.rejectedCount} à corriger</span>}
-                        {metrics.submittedCount === 0 && metrics.rejectedCount === 0 && <span className="ip__pill ip__pill--ok">Rythme normal</span>}
+                      <div className="ip__plan-money" aria-label="Montants validés et restants">
+                        <div className="ip__plan-money__item ip__plan-money__item--ok">
+                          <span className="ip__plan-money__label">Validé</span>
+                          <span className="ip__plan-money__value">{formatMoneyTnd(metrics.cashValidatedStrict)}</span>
+                        </div>
+                        <div className="ip__plan-money__item">
+                          <span className="ip__plan-money__label">Reste</span>
+                          <span className="ip__plan-money__value">{formatMoneyTnd(metrics.remainingStrict)}</span>
+                        </div>
                       </div>
-                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', fontSize: 10, color: '#475569', marginTop: 4 }}>
-                        <span>Validé : <strong style={{ color: '#065f46' }}>{formatMoneyTnd(metrics.cashValidatedStrict)}</strong></span>
-                        <span>·</span>
-                        <span>Reste : <strong style={{ color: '#0f172a' }}>{formatMoneyTnd(metrics.remainingStrict)}</strong></span>
-                      </div>
-                      <div className="ip__progress">
-                        <div className="ip__progress-track"><div className="ip__progress-fill" style={{ width: `${Math.max(progress, 2)}%` }} /></div>
-                        <span className="ip__progress-label">{metrics.approvedCount}/{metrics.totalMonths}</span>
+                      <div className="ip__plan-progress-block">
+                        <div className="ip__plan-progress-head">
+                          <span className="ip__plan-progress-title">Facilités confirmées</span>
+                          <span className="ip__progress-label">{metrics.approvedCount}/{metrics.totalMonths}</span>
+                        </div>
+                        <div className="ip__progress">
+                          <div className="ip__progress-track">
+                            <div className="ip__progress-fill" style={{ width: `${Math.max(progress, 2)}%` }} />
+                          </div>
+                        </div>
                       </div>
                       <div className="ip__plan-next">
-                        {nextAction ? `Prochaine action : F.${nextAction.month} — ${statusMeta(nextAction.status).label}` : 'Toutes les facilités sont confirmées.'}
+                        {nextAction ? (
+                          <>
+                            <span className="ip__plan-next__kicker">Prochaine action</span>
+                            <span className="ip__plan-next__text">F.{nextAction.month} — {statusMeta(nextAction.status).label}</span>
+                          </>
+                        ) : (
+                          <span className="ip__plan-next__text ip__plan-next__text--done">Toutes les facilités sont confirmées.</span>
+                        )}
                       </div>
-                      <div className="ip__plan-cta"><span>Ouvrir le détail</span><span aria-hidden>→</span></div>
+                      <div className="ip__plan-cta">
+                        <span>Ouvrir le détail</span>
+                        <span className="ip__plan-cta__arrow" aria-hidden>→</span>
+                      </div>
                     </button>
                   )
                 })}
@@ -409,7 +445,7 @@ export default function InstallmentsPage() {
         )}
 
         {payTarget && (
-          <div className="ip__overlay" onClick={closePay}>
+          <div className="ip__overlay ip__overlay--receipt" onClick={closePay}>
             <div className="ip__modal" onClick={(e) => e.stopPropagation()}>
               <div className="ip__modal-header">
                 <div>

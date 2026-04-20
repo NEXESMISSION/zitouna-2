@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect } from 'react'
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { canonicalRole } from '../../lib/adminRole.js'
 import { useAuth } from '../../lib/AuthContext.jsx'
@@ -327,6 +327,12 @@ export default function SellPage() {
   const { adminUsers } = useAdminUsers()
   const { assignments: mySellerAssignments } = useMySellerParcelAssignments(sellerMode)
 
+  /** True when DB has seller_parcel_assignments rows — vendeur is restricted to those parcelles only. */
+  const sellerHasParcelWhitelist = useMemo(
+    () => sellerMode && (mySellerAssignments || []).length > 0,
+    [sellerMode, mySellerAssignments],
+  )
+
   const resolveAgentForSale = useCallback((sale) => {
     if (sellerMode) return null
     if (sale?.agentId) {
@@ -352,13 +358,33 @@ export default function SellPage() {
 
   const scopedProjects = useMemo(() => {
     if (!sellerMode) return projects
-    return projects
-      .filter((p) => sellerAssignedProjectIds.has(String(p.id)))
-      .map((p) => ({
-        ...p,
-        plots: (p.plots || []).filter((pl) => sellerAssignedParcelDbIds.has(Number(pl.dbId))),
-      }))
-  }, [sellerMode, projects, sellerAssignedProjectIds, sellerAssignedParcelDbIds])
+    // Fine-grained scope: explicit parcel assignments from seller_parcel_assignments.
+    if (sellerHasParcelWhitelist) {
+      return projects
+        .filter((p) => sellerAssignedProjectIds.has(String(p.id)))
+        .map((p) => ({
+          ...p,
+          plots: (p.plots || []).filter((pl) => sellerAssignedParcelDbIds.has(Number(pl.dbId))),
+        }))
+    }
+    // Sinon : Utilisateurs & permissions n’a souvent que allowed_project_ids — aucune ligne parcelle.
+    const allowed = clientProfile?.allowedProjectIds
+    if (allowed == null) {
+      return projects
+    }
+    if (!Array.isArray(allowed) || allowed.length === 0) {
+      return []
+    }
+    const set = new Set(allowed.map(String))
+    return projects.filter((p) => set.has(String(p.id)))
+  }, [
+    sellerMode,
+    projects,
+    sellerHasParcelWhitelist,
+    sellerAssignedProjectIds,
+    sellerAssignedParcelDbIds,
+    clientProfile?.allowedProjectIds,
+  ])
 
   // Per-project arabon: derived from selected project's arabonDefault
   const arabonForProject = useCallback((projId) => {
@@ -477,6 +503,9 @@ export default function SellPage() {
   const [saleSaving, setSaleSaving] = useState(false)
   const [cinLookup, setCinLookup] = useState('')
   const [cinLookupResult, setCinLookupResult] = useState(null)
+  const [phoneLookupBusy, setPhoneLookupBusy] = useState(false)
+  const [phoneLookupError, setPhoneLookupError] = useState(false)
+  const phoneLookupGenRef = useRef(0)
   const [actionModal, setActionModal] = useState(null)
   const [detailSale, setDetailSale] = useState(null)
 
@@ -585,7 +614,7 @@ export default function SellPage() {
 
   const plotIdTaken = useCallback(
     pl => {
-      if (sellerMode && !sellerAssignedParcelDbIds.has(Number(pl.dbId))) return true
+      if (sellerHasParcelWhitelist && !sellerAssignedParcelDbIds.has(Number(pl.dbId))) return true
       const id = pl.id
       const n = Number(id)
       if (soldOrReservedIds.has(id)) return true
@@ -593,7 +622,7 @@ export default function SellPage() {
       if (soldOrReservedIds.has(String(id))) return true
       return false
     },
-    [soldOrReservedIds, sellerMode, sellerAssignedParcelDbIds]
+    [soldOrReservedIds, sellerHasParcelWhitelist, sellerAssignedParcelDbIds]
   )
 
   const isPlotAvailable = useCallback(
@@ -668,7 +697,15 @@ export default function SellPage() {
     !form.clientId ||
     (form.paymentType === 'installments' && form.offerId === '' && projectOffers.length > 0)
 
-  const wizardSelectedClient = clients.find(c => c.id === form.clientId)
+  // Must resolve from cinLookupResult when the client was found via fetchClientByPhone
+  // (delegated sellers often don't have the full clients[] list in memory).
+  const wizardSelectedClient = useMemo(() => {
+    if (!form.clientId) return null
+    const fromList = clients.find((c) => String(c.id) === String(form.clientId))
+    if (fromList) return fromList
+    if (cinLookupResult && String(cinLookupResult.id) === String(form.clientId)) return cinLookupResult
+    return null
+  }, [clients, form.clientId, cinLookupResult])
 
   const wizardFinancialRecap = useMemo(() => {
     const arabon = Number(form.deposit) || 0
@@ -735,9 +772,16 @@ export default function SellPage() {
 
   const openEdit = (sale) => {
     const { ambassadorClientId: _omitAmb, ...saleRest } = sale
+    const projOffers = offersByProject[sale.projectId] || []
+    const offerIdx =
+      sale.paymentType === 'installments' && sale.offerId
+        ? projOffers.findIndex((o) => String(o.dbId) === String(sale.offerId))
+        : -1
+    const offerIdForForm = offerIdx >= 0 ? String(offerIdx) : ''
     setForm({
       ...saleRest,
       plotIds: normalizePlotIds(sale),
+      offerId: offerIdForForm,
       // L acompte terrain est pilote uniquement par les reglages projet.
       // Always display the project default, never the historical/manual value.
       deposit: String(arabonForProject(sale.projectId)),
@@ -837,64 +881,6 @@ export default function SellPage() {
     [allProjectPlots]
   )
 
-  // ── "Sélection rapide" panel state (step 2). Lets the staff auto-pick N
-  // adjacent or random available parcels instead of clicking each tile.
-  const [quickPickOpen, setQuickPickOpen] = useState(false)
-  const [quickPickCount, setQuickPickCount] = useState(1)
-  const [quickPickMode, setQuickPickMode] = useState('adjacent') // 'adjacent' | 'random'
-
-  const sortedAvailablePlots = useMemo(
-    () => sortedProjectPlots.filter(isPlotAvailable),
-    [sortedProjectPlots, isPlotAvailable]
-  )
-  const quickPickMax = sortedAvailablePlots.length
-
-  const runQuickPick = useCallback(() => {
-    const n = Math.max(1, Math.min(Number(quickPickCount) || 1, quickPickMax))
-    if (quickPickMax === 0) {
-      addToast("Aucune parcelle disponible pour ce projet.", 'info')
-      return
-    }
-    let chosen = []
-    if (quickPickMode === 'adjacent') {
-      // Find all windows of N consecutive parcel_numbers among available plots.
-      // We use the legacy integer id (pl.id) for adjacency — label is cosmetic.
-      const windows = []
-      const list = sortedAvailablePlots
-      for (let i = 0; i + n <= list.length; i++) {
-        let ok = true
-        for (let k = 1; k < n; k++) {
-          if (Number(list[i + k].id) !== Number(list[i + k - 1].id) + 1) { ok = false; break }
-        }
-        if (ok) windows.push(list.slice(i, i + n))
-      }
-      if (windows.length > 0) {
-        chosen = windows[Math.floor(Math.random() * windows.length)]
-      } else {
-        chosen = list.slice(0, n)
-        addToast('Pas assez de parcelles consécutives — sélection partielle.', 'info')
-      }
-    } else {
-      // Random: pick N distinct available plots (Fisher-Yates partial shuffle).
-      const pool = [...sortedAvailablePlots]
-      for (let i = pool.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1))
-        const t = pool[i]; pool[i] = pool[j]; pool[j] = t
-      }
-      chosen = pool.slice(0, n)
-    }
-    const ids = chosen.map(pl => {
-      const num = Number(pl.id)
-      return Number.isFinite(num) ? num : String(pl.id)
-    })
-    setForm(f => ({ ...f, plotIds: ids }))
-    setQuickPickOpen(false)
-    addToast(`${ids.length} parcelle${ids.length > 1 ? 's' : ''} sélectionnée${ids.length > 1 ? 's' : ''}.`, 'success')
-  }, [quickPickCount, quickPickMax, quickPickMode, sortedAvailablePlots, setForm, addToast])
-
-  // Derived clamp for the "combien" input — avoids a set-state-in-effect.
-  const clampedQuickPickCount = Math.max(1, Math.min(quickPickCount, Math.max(1, quickPickMax)))
-
   const handleSave = useCallback(async () => {
     if (saleSaving) return
     // cinLookupResult is the last successful phone lookup / RPC-created row;
@@ -930,9 +916,9 @@ export default function SellPage() {
     const depositAmount = Number(arabonForProject(form.projectId)) || 0
     const plotDbIds = plots.map(p => p.dbId).filter(Boolean)
 
-    if (sellerMode) {
+    if (sellerMode && sellerHasParcelWhitelist) {
       if (!plotDbIds.length || plotDbIds.some((id) => !sellerAssignedParcelDbIds.has(Number(id)))) {
-        addToast('Vous pouvez uniquement vendre les parcelles assignees a votre compte vendeur.', 'error')
+        addToast('Vous pouvez uniquement vendre les parcelles assignées à votre compte vendeur.', 'error')
         return
       }
     }
@@ -1118,7 +1104,7 @@ export default function SellPage() {
       window.clearTimeout(watchdog)
       if (!watchdogFired) setSaleSaving(false)
     }
-  }, [saleSaving, form, editId, clients, scopedProjects, projectOffers, sales, salesCreate, salesUpdate, updateParcelStatus, addToast, role, adminUser, closeSaleDrawer, refreshSales, sellerMode, sellerAssignedParcelDbIds, myClientId, effectiveSellerClientId, cinLookup, sellerClientRecord?.cin, effectivePlotPrice])
+  }, [saleSaving, form, editId, clients, scopedProjects, projectOffers, sales, salesCreate, salesUpdate, updateParcelStatus, addToast, role, adminUser, closeSaleDrawer, refreshSales, sellerMode, sellerHasParcelWhitelist, sellerAssignedParcelDbIds, myClientId, effectiveSellerClientId, cinLookup, sellerClientRecord?.cin, effectivePlotPrice])
 
   const advanceStatus = useCallback(async (sale) => {
     const flow = STATUS_FLOW[sale.status]
@@ -1317,12 +1303,21 @@ export default function SellPage() {
   const renderSaleList = () => (
     <>
       <div className="sp-cat-bar">
-        <div className="sp-cat-stats">
-          <strong>{salesForList.length}</strong> total
-          <span className="sp-cat-stat-dot" />
-          <strong>{activeSales}</strong> actives
-          <span className="sp-cat-stat-dot" />
-          <strong>{totalRevenue.toLocaleString('fr-FR')}</strong> TND
+        <div className="sp2-kpis" aria-label="Synthèse des ventes">
+          <div className="sp2-kpi">
+            <span className="sp2-kpi__num">{salesForList.length}</span>
+            <span className="sp2-kpi__lbl">Total</span>
+          </div>
+          <span className="sp2-kpi__sep" aria-hidden />
+          <div className="sp2-kpi">
+            <span className="sp2-kpi__num">{activeSales}</span>
+            <span className="sp2-kpi__lbl">Actives</span>
+          </div>
+          <span className="sp2-kpi__sep" aria-hidden />
+          <div className="sp2-kpi sp2-kpi--money">
+            <span className="sp2-kpi__num">{totalRevenue.toLocaleString('fr-FR')}</span>
+            <span className="sp2-kpi__cur">TND</span>
+          </div>
         </div>
         <div className="sp-cat-filters">
           <input className="sp-cat-search" placeholder="Rechercher…" value={search} onChange={e => setSearch(e.target.value)} />
@@ -1477,34 +1472,39 @@ export default function SellPage() {
 
   return (
     <div className="sell-field" dir="ltr">
-      <button type="button" className="sp-back-btn" onClick={goBack}>
-        <span className="sp-back-btn__icon-wrap" aria-hidden>←</span>
-        <span>Retour</span>
-      </button>
-      <header className="sp-hero">
-        <div className="sp-hero__avatar">
-          <img src={`https://api.dicebear.com/9.x/initials/svg?seed=${avatarSeed}&backgroundColor=eff6ff&textColor=2563eb&fontSize=42`} alt="" width={52} height={52} />
+      <header className="sp2-topbar">
+        <button type="button" className="sp2-back" onClick={goBack} aria-label="Retour">
+          <span aria-hidden>←</span>
+        </button>
+        <div className="sp2-topbar__id">
+          <img
+            className="sp2-topbar__avatar"
+            src={`https://api.dicebear.com/9.x/initials/svg?seed=${avatarSeed}&backgroundColor=eff6ff&textColor=2563eb&fontSize=42`}
+            alt=""
+            width={36}
+            height={36}
+          />
+          <div className="sp2-topbar__info">
+            <span className="sp2-topbar__name">{displayAgentName}</span>
+            <span className="sp2-topbar__role">{commercialRoleLabel}{agentCity ? ` · ${agentCity}` : ''}</span>
+          </div>
         </div>
-        <div className="sp-hero__info">
-          <h1 className="sp-hero__name">{displayAgentName}</h1>
-          <p className="sp-hero__role">{commercialRoleLabel}{agentCity ? ` · ${agentCity}` : ''}</p>
-        </div>
-        <div className="sp-hero__kpis">
-          <span className="sp-hero__kpi-num">{todayDepositTotal.toLocaleString('fr-FR')}</span>
-          <span className="sp-hero__kpi-unit">TND</span>
-          <span className="sp-hero__kpi-label">{todaySaleCount} vente{todaySaleCount !== 1 ? 's' : ''} aujourd'hui</span>
+        <div className="sp2-topbar__today" aria-label={`${todayDepositTotal} TND aujourd'hui`}>
+          <span className="sp2-topbar__today-num">{todayDepositTotal.toLocaleString('fr-FR')}</span>
+          <span className="sp2-topbar__today-unit">TND</span>
+          <span className="sp2-topbar__today-lbl">aujourd'hui</span>
         </div>
       </header>
 
       <button
         type="button"
-        className="sp-cta-btn"
+        className="sp2-cta"
         onClick={openNew}
-        title="Démarrer le formulaire de vente en 6 étapes"
+        aria-label="Enregistrer une nouvelle vente"
       >
-        <span className="sp-cta-btn__icon">+</span>
-        <span className="sp-cta-btn__text">Enregistrer une nouvelle vente</span>
-        <span className="sp-cta-btn__arrow">→</span>
+        <span className="sp2-cta__plus" aria-hidden>+</span>
+        <span className="sp2-cta__text">Nouvelle vente</span>
+        <span className="sp2-cta__arrow" aria-hidden>→</span>
       </button>
 
       {renderSaleList()}
@@ -1621,9 +1621,11 @@ export default function SellPage() {
                 </div>
               )}
 
-              <div className="sp-detail__actions">
-                <button type="button" className="sp-detail__btn sp-detail__btn--edit" onClick={() => { setDetailSale(null); openEdit(ds) }}>Modifier</button>
-              </div>
+              {!['cancelled', 'rejected', 'completed'].includes(ds.status) && (
+                <div className="sp-detail__actions">
+                  <button type="button" className="sp-detail__btn sp-detail__btn--edit" onClick={() => { setDetailSale(null); openEdit(ds) }}>Modifier</button>
+                </div>
+              )}
             </div>
           </AdminModal>
         )
@@ -1634,6 +1636,10 @@ export default function SellPage() {
         const prevSale = sales.find(s => s.id === editId)
         const editProject = scopedProjects.find(p => p.id === form.projectId)
         const editPlotLabel = form.plotIds.length <= 3 ? form.plotIds.map(id => `#${id}`).join(', ') : `${form.plotIds.length} parcelles`
+        const canEditStructure = prevSale && ['draft', 'pending_finance'].includes(prevSale.status)
+        const flowMeta = prevSale ? STATUS_FLOW[prevSale.status] : null
+        const editTtl = prevSale ? reservationTtlText(prevSale) : null
+        const saleCodeLabel = prevSale?.code ? String(prevSale.code) : (prevSale?.id ? `…${String(prevSale.id).slice(-8)}` : '—')
         return (
           <AdminModal open onClose={closeSaleDrawer} title="">
             <div className="sp-edit">
@@ -1643,6 +1649,90 @@ export default function SellPage() {
               </div>
 
               <div className="sp-edit__body">
+                <div className="sp-edit__field sp-edit__field--full sp-edit__context">
+                  <div className="sp-edit__meta-strip">
+                    {flowMeta && (
+                      <span className={`sp-badge sp-badge--${flowMeta.badge || 'gray'}`}>{flowMeta.label || prevSale.status}</span>
+                    )}
+                    {editTtl && (
+                      <span className={`sp-edit__ttl${editTtl.urgent ? ' sp-edit__ttl--urgent' : ''}`}>⏱ {editTtl.text}</span>
+                    )}
+                    <span className="sp-edit__meta-date" title="Création">
+                      {prevSale?.createdAt ? fmtFrDateTime(prevSale.createdAt) : '—'}
+                    </span>
+                    <span className="sp-edit__meta-code" title="Référence vente">
+                      {saleCodeLabel}
+                    </span>
+                  </div>
+                  {!canEditStructure && (
+                    <p className="sp-edit__lock-hint">
+                      Projet, client et parcelles ne sont plus modifiables après transmission hors brouillon / finance. Vous pouvez ajuster le paiement et les notes.
+                    </p>
+                  )}
+                </div>
+
+                {prevSale && (
+                  <div className="sp-detail__section sp-edit__field sp-edit__field--full" style={{ margin: 0, border: 'none', padding: '10px 14px' }}>
+                    <div className="sp-detail__section-title">Client (acheteur)</div>
+                    <div className="sp-detail__row">
+                      <span>Nom</span><strong>{prevSale.clientName || '—'}</strong>
+                    </div>
+                    {prevSale.clientPhone && (
+                      <div className="sp-detail__row">
+                        <span>Téléphone</span><strong style={{ direction: 'ltr' }}>{prevSale.clientPhone}</strong>
+                      </div>
+                    )}
+                    {prevSale.clientEmail && (
+                      <div className="sp-detail__row">
+                        <span>Email</span><strong style={{ direction: 'ltr', wordBreak: 'break-all' }}>{prevSale.clientEmail}</strong>
+                      </div>
+                    )}
+                    {prevSale.clientCin && (
+                      <div className="sp-detail__row">
+                        <span>CIN</span><strong style={{ direction: 'ltr' }}>{prevSale.clientCin}</strong>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {selectedPlots.length > 0 && (
+                  <div className="sp-detail__section sp-edit__field sp-edit__field--full" style={{ margin: 0, border: 'none', padding: '10px 14px' }}>
+                    <div className="sp-detail__section-title">Parcelles</div>
+                    <div className="sp-detail__row">
+                      <span>Sélection</span>
+                      <strong>
+                        {selectedPlots
+                          .map((p) => `#${p.label ?? p.id}${p.area != null ? ` · ${Number(p.area).toLocaleString('fr-FR')} m²` : ''}${p.trees != null ? ` · ${p.trees} arbres` : ''}`)
+                          .join(' · ')}
+                      </strong>
+                    </div>
+                    {totalArea > 0 && (
+                      <div className="sp-detail__row">
+                        <span>Surface totale</span>
+                        <strong>{totalArea.toLocaleString('fr-FR')} m²</strong>
+                      </div>
+                    )}
+                    {form.useCustomPrice && (
+                      <div className="sp-detail__row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
+                        <span>Prix personnalisés (catalogue remplacé)</span>
+                        <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12 }}>
+                          {selectedPlots.map((pl) => {
+                            const key = String(pl.id)
+                            const raw = form.overridePrices?.[key]
+                            const n = Number(String(raw ?? '').replace(/\s/g, '').replace(',', '.'))
+                            const shown = Number.isFinite(n) && n >= 0 ? n : computedPlotPrice(pl)
+                            return (
+                              <li key={pl.id}>
+                                <strong>#{pl.label ?? pl.id}</strong> — {shown.toLocaleString('fr-FR')} TND
+                              </li>
+                            )
+                          })}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="sp-edit__field">
                   <label className="sp-edit__label">Acompte (TND)</label>
                   <div className="sp-edit__input" style={{ opacity: 0.8, cursor: 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -1685,6 +1775,79 @@ export default function SellPage() {
                     </div>
                   </div>
                 )}
+                <div className="sp-detail__section sp-edit__field sp-edit__field--full" style={{ margin: 0, border: 'none', padding: '10px 14px', background: '#f8fafc', borderRadius: 12 }}>
+                  <div className="sp-detail__section-title">Aperçu si vous enregistrez maintenant</div>
+                  <div className="sp-detail__row">
+                    <span>Projet</span>
+                    <strong>
+                      {editProject ? `${editProject.title}${editProject.city ? ` — ${editProject.city}` : ''}` : (prevSale?.projectTitle || '—')}
+                    </strong>
+                  </div>
+                  <div className="sp-detail__row">
+                    <span>Mode</span>
+                    <strong>{form.paymentType === 'full' ? 'Comptant' : 'Echelonné'}</strong>
+                  </div>
+                  {wizardFinancialRecap.kind === 'installments' && wizardFinancialRecap.offer && (
+                    <>
+                      <div className="sp-detail__row">
+                        <span>Offre</span>
+                        <strong>{wizardFinancialRecap.offer.name}</strong>
+                      </div>
+                      <div className="sp-detail__row">
+                        <span>Prix convenu ({wizardFinancialRecap.plotCount} parcelle(s))</span>
+                        <strong>{wizardFinancialRecap.price.toLocaleString('fr-FR')} TND</strong>
+                      </div>
+                      <div className="sp-detail__row">
+                        <span>1er versement ({wizardFinancialRecap.downPct} %)</span>
+                        <strong>{wizardFinancialRecap.down.toLocaleString('fr-FR')} TND</strong>
+                      </div>
+                      <div className="sp-detail__row">
+                        <span>Capital restant</span>
+                        <strong>{wizardFinancialRecap.remaining.toLocaleString('fr-FR')} TND</strong>
+                      </div>
+                      <div className="sp-detail__row">
+                        <span>Mensualité × durée</span>
+                        <strong>
+                          {wizardFinancialRecap.monthly.toLocaleString('fr-FR')} TND × {wizardFinancialRecap.duration} mois
+                        </strong>
+                      </div>
+                    </>
+                  )}
+                  {wizardFinancialRecap.kind === 'full' && (
+                    <div className="sp-detail__row">
+                      <span>Montant total (parcelles)</span>
+                      <strong>{wizardFinancialRecap.totalPlotPrice.toLocaleString('fr-FR')} TND</strong>
+                    </div>
+                  )}
+                  <div className="sp-detail__row">
+                    <span>Acompte (terrain)</span>
+                    <strong>
+                      {wizardFinancialRecap.kind !== 'incomplete'
+                        ? wizardFinancialRecap.arabon.toLocaleString('fr-FR')
+                        : (Number(form.deposit) || 0).toLocaleString('fr-FR')}{' '}
+                      TND
+                    </strong>
+                  </div>
+                  {wizardFinancialRecap.kind !== 'incomplete' && (
+                    <div className="sp-detail__row sp-detail__row--highlight">
+                      <span>Solde à encaisser (finance)</span>
+                      <strong>{wizardFinancialRecap.toPay.toLocaleString('fr-FR')} TND</strong>
+                    </div>
+                  )}
+                  {wizardFinancialRecap.kind === 'incomplete' && form.paymentType === 'installments' && (
+                    <p style={{ margin: '6px 0 0', fontSize: 12, color: '#64748b' }}>
+                      Choisissez une offre ci-dessus pour afficher le détail des montants.
+                    </p>
+                  )}
+                </div>
+
+                {prevSale && (
+                  <div className="sp-edit__ledger-wrap sp-edit__field sp-edit__field--full">
+                    <div className="sp-edit__ledger-cap">Carnet &amp; références (figé à la création / état actuel)</div>
+                    <SaleLedgerPanel sale={prevSale} variant="detail" />
+                  </div>
+                )}
+
                 <div className="sp-edit__field sp-edit__field--full">
                   <label className="sp-edit__label">Notes</label>
                   <textarea className="sp-edit__input sp-edit__textarea" rows={2}
@@ -1813,97 +1976,6 @@ export default function SellPage() {
                 <span><span className="sp-plot-legend__dot" style={{ background: '#2563eb' }} />Sélectionnée</span>
                 <span><span className="sp-plot-legend__dot" style={{ background: '#f1f5f9', border: '1px solid #cbd5e1' }} />Disponible</span>
                 <span><span className="sp-plot-legend__dot" style={{ background: '#e5e7eb' }} />Indisponible</span>
-              </div>
-              <div className="sp-quickpick" style={{ marginTop: 10 }}>
-                <button
-                  type="button"
-                  className="sp-quickpick__toggle"
-                  aria-expanded={quickPickOpen}
-                  aria-controls="sp-quickpick-panel"
-                  onClick={() => setQuickPickOpen(v => !v)}
-                  disabled={quickPickMax === 0}
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 6,
-                    padding: '6px 12px', borderRadius: 8,
-                    border: '1px solid #cbd5e1', background: quickPickOpen ? '#eff6ff' : '#f8fafc',
-                    color: '#0f172a', fontSize: 12, fontWeight: 600,
-                    cursor: quickPickMax === 0 ? 'not-allowed' : 'pointer',
-                    opacity: quickPickMax === 0 ? 0.5 : 1,
-                  }}
-                  title={quickPickMax === 0 ? 'Aucune parcelle disponible' : 'Sélectionner plusieurs parcelles en une fois'}
-                >
-                  <span aria-hidden>⚡</span>
-                  <span>Sélection rapide</span>
-                </button>
-                {quickPickOpen && (
-                  <div
-                    id="sp-quickpick-panel"
-                    className="sp-quickpick__panel"
-                    role="group"
-                    aria-label="Sélection rapide de parcelles"
-                    style={{
-                      marginTop: 8, padding: 10, borderRadius: 10,
-                      border: '1px solid #e2e8f0', background: '#f8fafc',
-                      display: 'grid', gap: 8,
-                    }}
-                  >
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 600, color: '#334155' }}>
-                      Combien de parcelles ?
-                      <input
-                        type="number"
-                        min={1}
-                        max={quickPickMax || 1}
-                        value={clampedQuickPickCount}
-                        onChange={e => setQuickPickCount(Math.max(1, Math.min(quickPickMax || 1, Number(e.target.value) || 1)))}
-                        style={{
-                          width: 72, padding: '4px 8px', borderRadius: 6,
-                          border: '1px solid #cbd5e1', fontSize: 13, fontWeight: 600,
-                          textAlign: 'center',
-                        }}
-                      />
-                      <span style={{ fontWeight: 400, color: '#64748b' }}>/ {quickPickMax} dispo.</span>
-                    </label>
-                    <div role="radiogroup" aria-label="Mode de sélection" style={{ display: 'flex', gap: 12, fontSize: 12, color: '#334155' }}>
-                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
-                        <input
-                          type="radio"
-                          name="sp-quickpick-mode"
-                          value="adjacent"
-                          checked={quickPickMode === 'adjacent'}
-                          onChange={() => setQuickPickMode('adjacent')}
-                        />
-                        Adjacentes (côte à côte)
-                      </label>
-                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
-                        <input
-                          type="radio"
-                          name="sp-quickpick-mode"
-                          value="random"
-                          checked={quickPickMode === 'random'}
-                          onChange={() => setQuickPickMode('random')}
-                        />
-                        Aléatoires
-                      </label>
-                    </div>
-                    <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                      <button
-                        type="button"
-                        onClick={() => setQuickPickOpen(false)}
-                        style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid #cbd5e1', background: '#fff', color: '#475569', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
-                      >
-                        Annuler
-                      </button>
-                      <button
-                        type="button"
-                        onClick={runQuickPick}
-                        disabled={quickPickMax === 0}
-                        style={{ padding: '5px 12px', borderRadius: 6, border: 'none', background: '#2563eb', color: '#fff', fontSize: 12, fontWeight: 700, cursor: quickPickMax === 0 ? 'not-allowed' : 'pointer' }}
-                      >
-                        Sélectionner
-                      </button>
-                    </div>
-                  </div>
-                )}
               </div>
             </div>
             {allProjectPlots.length === 0 ? (
@@ -2088,18 +2160,31 @@ export default function SellPage() {
                   //    so we don't invite the user to create a duplicate stub.
                   if (!found && val.length >= 8) {
                     const guard = val
+                    const gen = ++phoneLookupGenRef.current
+                    setPhoneLookupBusy(true)
+                    setPhoneLookupError(false)
                     db.fetchClientByPhone(val)
                       .then(dbClient => {
-                        if (!dbClient) return
                         if (guard !== val) return
-                        setCinLookupResult(dbClient)
-                        setForm(f => ({ ...f, clientId: dbClient.id }))
+                        if (dbClient) {
+                          setCinLookupResult(dbClient)
+                          setForm(f => ({ ...f, clientId: dbClient.id }))
+                        }
                       })
                       .catch(err => {
                         console.warn('[SellPage] fetchClientByPhone:', err?.message || err)
+                        if (gen === phoneLookupGenRef.current) setPhoneLookupError(true)
                       })
+                      .finally(() => {
+                        if (gen === phoneLookupGenRef.current) setPhoneLookupBusy(false)
+                      })
+                  } else {
+                    setPhoneLookupBusy(false)
+                    setPhoneLookupError(false)
                   }
                 } else {
+                  setPhoneLookupBusy(false)
+                  setPhoneLookupError(false)
                   setCinLookupResult(null)
                   setForm(f => ({ ...f, clientId: '' }))
                 }
@@ -2111,14 +2196,9 @@ export default function SellPage() {
             <button
               type="button"
               className="sp-wizard__btn sp-wizard__btn--ghost"
-              style={{ whiteSpace: 'nowrap', flexShrink: 0, opacity: (!adminUser && sellerMode) ? 0.5 : 1, cursor: (!adminUser && sellerMode) ? 'not-allowed' : 'pointer' }}
-              disabled={!adminUser && sellerMode}
-              title={(!adminUser && sellerMode) ? "Accès délégué : la création d'une fiche client doit être faite par un staff SQL." : ''}
+              style={{ whiteSpace: 'nowrap', flexShrink: 0 }}
+              title="Ouvre le formulaire pour créer une fiche acheteur (autorisé si votre compte a l’accès vente)"
               onClick={() => {
-                if (!adminUser && sellerMode) {
-                  addToast("Création de fiche réservée au staff. Demandez à un administrateur d'ajouter le client.", 'error')
-                  return
-                }
                 setClientForm({ name: '', phone: cinLookup || '', phoneCc: '+216', cin: '', city: '' })
                 setClientModal(true)
               }}
@@ -2139,15 +2219,78 @@ export default function SellPage() {
               <span style={{ fontSize: 10, fontWeight: 700 }}>OK</span>
             </div>
           )}
-          {!cinLookupResult && cinLookup.length >= 8 && (
-            <div className="sp-wizard__mini sp-wizard__mini--warn">
+          {phoneLookupBusy && cinLookup.length >= 8 && (
+            <div className="sp-wizard__mini" style={{ background: 'rgba(37, 99, 235, 0.08)', borderColor: 'rgba(37, 99, 235, 0.25)' }}>
+              <span aria-hidden>…</span>
+              <div style={{ fontSize: 12 }}>Recherche dans la base…</div>
+            </div>
+          )}
+          {!cinLookupResult && cinLookup.length >= 8 && !phoneLookupBusy && (
+            <div className="sp-wizard__mini sp-wizard__mini--warn" style={{ flexWrap: 'wrap' }}>
               <span>⚠</span>
-              <div>
-                <div style={{ fontWeight: 700 }}>Aucun client avec ce téléphone</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700 }}>
+                  {phoneLookupError
+                    ? 'Recherche indisponible — utilisez « Lier ce numéro »'
+                    : 'Aucun client visible avec ce téléphone'}
+                </div>
                 <div style={{ fontSize: 11, marginTop: 2 }}>
-                  Créez une fiche avec « Nouveau », ou poursuivez : la vente enregistre une réclamation téléphone et se rattache à l'inscription.
+                  {phoneLookupError
+                    ? 'La recherche directe a échoué (permissions ou réseau). Cliquez « Lier ce numéro » — si une fiche existe déjà, elle sera rattachée automatiquement.'
+                    : 'Le client n\'apparaît pas dans votre liste. Cliquez « + Nouveau » pour créer la fiche, ou « Lier ce numéro » : si un client existe déjà avec ce numéro, il sera rattaché automatiquement.'}
                 </div>
               </div>
+              <button
+                type="button"
+                className="sp-wizard__btn sp-wizard__btn--ghost"
+                style={{ whiteSpace: 'nowrap', fontSize: 11 }}
+                disabled={clientSaving}
+                title="Rattache la vente au client existant (par téléphone) ; crée une fiche anonyme sinon."
+                onClick={async () => {
+                  if (clientSaving) return
+                  setClientSaving(true)
+                  try {
+                    const phoneE164 = cinLookup.length === 8 ? `+216${cinLookup}` : cinLookup
+                    const stub = await withTimeout(
+                      db.createBuyerStubForSale({
+                        code: `CLI-${Date.now()}`,
+                        name: 'Client',
+                        email: '',
+                        phone: phoneE164,
+                        cin: '',
+                        city: '',
+                      }),
+                      8_000,
+                      'rpc_timeout',
+                    )
+                    if (!stub?.id) {
+                      addToast('Impossible de rattacher ce numéro pour le moment.', 'error')
+                      return
+                    }
+                    setCinLookupResult(stub)
+                    setForm(f => ({ ...f, clientId: stub.id }))
+                    refreshClients().catch(() => {})
+                    addToast(stub.name && stub.name !== 'Client'
+                      ? `Client existant rattaché : ${stub.name}`
+                      : 'Fiche anonyme créée et rattachée.')
+                  } catch (err) {
+                    const raw = String(err?.message || err || '')
+                    if (/no_sell_grant/i.test(raw)) {
+                      addToast("Rattachement refusé : votre compte n'a pas l'accès vente.", 'error')
+                    } else if (/caller_not_linked_to_client/i.test(raw)) {
+                      addToast('Votre session n\'est liée à aucune fiche client.', 'error')
+                    } else if (/timeout/i.test(raw)) {
+                      addToast('Serveur lent : réessayez dans quelques secondes.', 'error')
+                    } else {
+                      addToast(`Erreur : ${raw}`, 'error')
+                    }
+                  } finally {
+                    setClientSaving(false)
+                  }
+                }}
+              >
+                {clientSaving ? '…' : 'Lier ce numéro'}
+              </button>
             </div>
           )}
         </div>
@@ -2370,11 +2513,11 @@ export default function SellPage() {
               </div>
               <div className="sp-recap-row">
                 <span>Email</span>
-                <strong style={{ direction: 'ltr', wordBreak: 'break-all' }}>{wizardSelectedClient?.email || '—'}</strong>
+                <strong style={{ direction: 'ltr', wordBreak: 'break-all' }}>{wizardSelectedClient?.email || cinLookupResult?.email || '—'}</strong>
               </div>
               <div className="sp-recap-row">
                 <span>Ville</span>
-                <strong>{wizardSelectedClient?.city || '—'}</strong>
+                <strong>{wizardSelectedClient?.city || cinLookupResult?.city || '—'}</strong>
               </div>
             </div>
 

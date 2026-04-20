@@ -125,6 +125,11 @@ export default function CoordinationPage() {
   const [expiryOpen, setExpiryOpen] = useState(false)
   const [reservationBusy, setReservationBusy] = useState(null)
   const [reservationNotice, setReservationNotice] = useState('')
+  // Cancel-sale modal state. Sale stays in DB with status='cancelled' so the
+  // audit log + commission history + buyer snapshot remain queryable later.
+  const [cancelTarget, setCancelTarget] = useState(null)
+  const [cancelReason, setCancelReason] = useState('')
+  const [cancelBusy, setCancelBusy] = useState(false)
 
   // ---- derived lists -------------------------------------------------------
   const appointments = useMemo(() => {
@@ -164,6 +169,19 @@ export default function CoordinationPage() {
       .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
   }, [sales])
 
+  // Cancelled archive: sales keep their data and snapshot so the coordinator
+  // can still look them up for tracking / reconciliation. Sorted by most
+  // recent cancel (falls back to createdAt when no releasedAt recorded).
+  const cancelledSales = useMemo(() => {
+    return (sales || [])
+      .filter((s) => String(s.status || '') === 'cancelled')
+      .sort((a, b) => {
+        const aT = String(a.reservationReleasedAt || a.updatedAt || a.createdAt || '')
+        const bT = String(b.reservationReleasedAt || b.updatedAt || b.createdAt || '')
+        return bT.localeCompare(aT)
+      })
+  }, [sales])
+
   const planningBySale = useMemo(() => {
     const map = new Map()
     for (const a of appointments) map.set(`${a.saleId}:${a.type}`, a)
@@ -184,9 +202,12 @@ export default function CoordinationPage() {
 
   const salesForCoordination = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return salesInScope
+    // 'cancelled' is a read-only archive view: pull from cancelledSales
+    // instead of the active scope.
+    const source = statusFilter === 'cancelled' ? cancelledSales : salesInScope
+    return source
       .filter((s) => {
-        if (statusFilter === 'all') return true
+        if (statusFilter === 'all' || statusFilter === 'cancelled') return true
         const fin = planningBySale.has(`${s.id}:finance`)
         const jur = planningBySale.has(`${s.id}:juridique`)
         if (statusFilter === 'unplanned') return !fin && !jur
@@ -199,7 +220,7 @@ export default function CoordinationPage() {
         const hay = `${s.clientName || ''} ${s.projectTitle || ''} ${s.code || s.id || ''} ${normalizePlotIds(s).join(',')}`.toLowerCase()
         return hay.includes(q)
       })
-  }, [salesInScope, planningBySale, statusFilter, query])
+  }, [salesInScope, cancelledSales, planningBySale, statusFilter, query])
 
   const reservationExpiryQueue = useMemo(() => {
     const now = Date.now()
@@ -395,6 +416,74 @@ export default function CoordinationPage() {
     })
   }
 
+  // Coordinator cancel: marks the sale cancelled but leaves the row + its
+  // buyer snapshot, commission events, and audit trail in place so the user
+  // can still look it up later. Reason is appended to coordination_notes so
+  // it surfaces in the detail drawer.
+  const cancelSaleFromCoordination = async () => {
+    if (!cancelTarget || cancelBusy) return
+    const reason = cancelReason.trim()
+    if (!reason) {
+      setReservationNotice('Indiquez un motif d\u2019annulation.')
+      window.setTimeout(() => setReservationNotice(''), 5000)
+      return
+    }
+    setCancelBusy(true)
+    try {
+      const sale = cancelTarget
+      const parcelDbIds = parcelDbIdsFromSale(sale)
+      const prevSt = String(sale.status || '')
+      const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ')
+      const notePrefix = `[Annulée ${stamp}] ${reason}`
+      const nextNotes = sale.coordinationNotes
+        ? `${notePrefix}\n---\n${sale.coordinationNotes}`
+        : notePrefix
+      await salesUpdate(sale.id, {
+        status: 'cancelled',
+        pipelineStatus: 'cancelled',
+        reservationStatus: 'released',
+        reservationReleasedAt: new Date().toISOString(),
+        reservationReleaseReason: 'coordination_manual_cancel',
+        coordinationNotes: nextNotes,
+      })
+      for (const pid of parcelDbIds) {
+        try { await updateParcelStatus(pid, 'available') } catch (e) {
+          console.warn('[coord] cancel parcel release failed:', e?.message || e, { pid })
+        }
+      }
+      try {
+        await appendAuditLog({
+          action: 'sale_cancelled',
+          entity: 'sale',
+          entityId: String(sale.id),
+          actorUserId: adminUser?.id || null,
+          actorEmail: adminUser?.email || '',
+          details: `Annulation coordination — ${reason}`,
+          metadata: { previousStatus: prevSt, parcelDbIds },
+          severity: 'warn',
+        })
+      } catch (e) { console.warn('[coord] appendAuditLog failed:', e?.message || e) }
+      try {
+        await db.insertSaleReservationEvent({
+          saleId: sale.id,
+          eventType: 'reservation_released',
+          fromStatus: prevSt,
+          toStatus: 'cancelled',
+          actorUserId: adminUser?.id || null,
+          details: `Annulation coordination: ${reason}`,
+        })
+      } catch (e) { console.warn('[coord] insertSaleReservationEvent failed:', e?.message || e) }
+      setCancelTarget(null)
+      setCancelReason('')
+      setDetailSale(null)
+    } catch (e) {
+      setReservationNotice(`Annulation impossible : ${e?.message || e}`)
+      window.setTimeout(() => setReservationNotice(''), 6000)
+    } finally {
+      setCancelBusy(false)
+    }
+  }
+
   // ---- render --------------------------------------------------------------
   const dateError = scheduler.open && scheduler.date && scheduler.time
     && new Date(`${scheduler.date}T${scheduler.time}:00`).getTime() < Date.now()
@@ -405,6 +494,7 @@ export default function CoordinationPage() {
     ['unplanned', 'À planifier',   statusCounts.unplanned],
     ['partial',   'Partiellement', statusCounts.partial],
     ['planned',   'Planifiés',     statusCounts.planned],
+    ['cancelled', 'Annulées',      cancelledSales.length],
   ]
 
   return (
@@ -760,9 +850,9 @@ export default function CoordinationPage() {
               <div className="sp-detail__section">
                 <div className="sp-detail__section-title">Acheteur</div>
                 <div className="sp-detail__row"><span>Nom</span><strong>{c?.name || s.clientName || '—'}</strong></div>
-                <div className="sp-detail__row"><span>Téléphone</span><strong style={{ direction: 'ltr' }}>{c?.phone || s.buyerPhoneNormalized || '—'}</strong></div>
-                {c?.cin && <div className="sp-detail__row"><span>CIN</span><strong style={{ direction: 'ltr' }}>{c.cin}</strong></div>}
-                {c?.email && <div className="sp-detail__row"><span>Email</span><strong style={{ wordBreak: 'break-all' }}>{c.email}</strong></div>}
+                <div className="sp-detail__row"><span>Téléphone</span><strong style={{ direction: 'ltr' }}>{c?.phone || s.clientPhone || s.buyerPhoneNormalized || '—'}</strong></div>
+                {(c?.cin || s.clientCin) && <div className="sp-detail__row"><span>CIN</span><strong style={{ direction: 'ltr' }}>{c?.cin || s.clientCin}</strong></div>}
+                {(c?.email || s.clientEmail) && <div className="sp-detail__row"><span>Email</span><strong style={{ wordBreak: 'break-all' }}>{c?.email || s.clientEmail}</strong></div>}
                 {c?.city && <div className="sp-detail__row"><span>Ville</span><strong>{c.city}</strong></div>}
               </div>
 
@@ -833,6 +923,17 @@ export default function CoordinationPage() {
                 >
                   {juridiquePlan ? 'Modifier Juridique' : 'Planifier Juridique'}
                 </button>
+                {!['cancelled', 'rejected', 'completed'].includes(String(s.status)) && (
+                  <button
+                    type="button"
+                    className="sp-detail__btn"
+                    style={{ color: '#b91c1c', borderColor: '#fecaca' }}
+                    onClick={() => { setCancelTarget(s); setCancelReason('') }}
+                    title="Annule la vente ; les données restent pour le suivi."
+                  >
+                    Annuler la vente
+                  </button>
+                )}
               </div>
             </div>
           )
@@ -1046,6 +1147,62 @@ export default function CoordinationPage() {
               {selectedAppointment.coordinationNotes ? (
                 <div className="cv-notes">{selectedAppointment.coordinationNotes}</div>
               ) : null}
+            </div>
+          </div>
+        )}
+      </AdminModal>
+
+      {/* ── Cancel sale confirmation modal ──────────────────────────── */}
+      <AdminModal
+        open={Boolean(cancelTarget)}
+        onClose={() => { if (!cancelBusy) { setCancelTarget(null); setCancelReason('') } }}
+        title="Annuler la vente"
+        width={440}
+      >
+        {cancelTarget && (
+          <div className="sp-detail">
+            <p className="adm-confirm-text" style={{ marginBottom: 10 }}>
+              <strong>{cancelTarget.clientName || 'Client'}</strong> · {cancelTarget.projectTitle || 'Projet'}
+            </p>
+            <div style={{
+              padding: 10, borderRadius: 8, background: '#fef3c7', color: '#92400e',
+              fontSize: 12.5, lineHeight: 1.5, marginBottom: 12, border: '1px solid #fde68a',
+            }}>
+              La vente est conservée dans la base avec le statut « annulée ».
+              L'historique (acheteur, commissions, audit) reste consultable.
+              Les parcelles redeviennent disponibles.
+            </div>
+            <label className="adm-label" style={{ display: 'block', marginBottom: 6 }}>
+              Motif d&apos;annulation *
+            </label>
+            <textarea
+              className="adm-input"
+              rows={3}
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              placeholder="Ex : acheteur s'est rétracté, parcelle finalement indisponible…"
+              style={{ width: '100%', resize: 'vertical' }}
+              autoFocus
+              disabled={cancelBusy}
+            />
+            <div className="sp-detail__actions" style={{ marginTop: 14 }}>
+              <button
+                type="button"
+                className="sp-detail__btn"
+                onClick={() => { setCancelTarget(null); setCancelReason('') }}
+                disabled={cancelBusy}
+              >
+                Conserver
+              </button>
+              <button
+                type="button"
+                className="sp-detail__btn"
+                style={{ background: '#b91c1c', color: '#fff', borderColor: '#b91c1c' }}
+                onClick={cancelSaleFromCoordination}
+                disabled={cancelBusy || !cancelReason.trim()}
+              >
+                {cancelBusy ? 'Annulation…' : 'Confirmer l\u2019annulation'}
+              </button>
             </div>
           </div>
         )}

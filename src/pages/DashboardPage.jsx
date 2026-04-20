@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useCountUp } from '../hooks/useCountUp.js'
 import { useNavigate } from 'react-router-dom'
 import TopBar from '../TopBar.jsx'
@@ -15,7 +15,7 @@ import {
   useSalesScoped,
 } from '../lib/useSupabase.js'
 import { addInstallmentReceiptRecord, requestAmbassadorPayout, updatePaymentStatus, uploadInstallmentReceipt } from '../lib/db.js'
-import { computeInstallmentSaleMetrics, formatMoneyTnd } from '../domain/installmentMetrics.js'
+import * as instMetrics from '../domain/installmentMetrics.js'
 import RenderDataGate from '../components/RenderDataGate.jsx'
 import EmptyState from '../components/EmptyState.jsx'
 import ErrorPanel from '../components/ErrorPanel.jsx'
@@ -39,6 +39,7 @@ function ipStatusMeta(status) {
   return { label: 'En attente', hint: 'Vous pouvez envoyer le reçu.', tone: 'pending' }
 }
 function isPayable(status) { return status === 'pending' || status === 'rejected' || status === 'submitted' }
+
 function isImageUrl(url) { if (!url) return false; try { return IMAGE_EXT_RE.test(new URL(url).pathname) } catch { return IMAGE_EXT_RE.test(url) } }
 function lastReceipt(payment) {
   if (Array.isArray(payment.receipts) && payment.receipts.length > 0) { const r = payment.receipts[0]; return { url: r.url, name: r.fileName || 'reçu', date: r.createdAt } }
@@ -99,17 +100,9 @@ export default function DashboardPage() {
     useAmbassadorReferralSummary(showAmbassadorCard)
   // PLAN 02 §14 — migrated from boolean form to canonical {clientId, enabled}.
   const { events: myCommissionEvents, loading: ledgerLoading, refresh: refreshCommissionLedger } = useMyCommissionLedger({ clientId: clientId || null, enabled: Boolean(clientId) })
-  const [referralLoadStale, setReferralLoadStale] = useState(false)
-  useEffect(() => {
-    if (!referralLoading) {
-      setReferralLoadStale(false)
-      return undefined
-    }
-    setReferralLoadStale(false)
-    const t = window.setTimeout(() => setReferralLoadStale(true), 30000)
-    return () => window.clearTimeout(t)
-  }, [referralLoading])
-  const referralHasError = referralSummary?.reason === 'rpc_error' || referralLoadStale
+  // The hook's own withTimeout (8s) already resolves loading=false on failure,
+  // so no external watchdog is needed. Older 30s timer caused extra renders.
+  const referralHasError = referralSummary?.reason === 'rpc_error'
   const [payoutBusy, setPayoutBusy] = useState(false)
   const [payoutError, setPayoutError] = useState('')
   const payoutIdempotencyRef = useRef(null)
@@ -279,7 +272,18 @@ export default function DashboardPage() {
   const handleAmbassadorPayout = useCallback(async () => {
     const bal = referralSummary?.walletBalance ?? 0
     const min = referralSummary?.minPayoutAmount ?? 0
-    if (referralVerificationBlocked || bal < min || bal <= 0) return
+    if (referralVerificationBlocked) {
+      setPayoutError("Vérification d'identité requise avant tout retrait bancaire.")
+      return
+    }
+    if (bal <= 0) {
+      setPayoutError('Aucun gain disponible à retirer pour le moment.')
+      return
+    }
+    if (bal < min) {
+      setPayoutError(`Seuil minimum non atteint (${min.toLocaleString('fr-FR')} DT).`)
+      return
+    }
     if (!payoutIdempotencyRef.current) payoutIdempotencyRef.current = crypto.randomUUID()
     const idem = payoutIdempotencyRef.current
     setPayoutBusy(true)
@@ -395,7 +399,28 @@ export default function DashboardPage() {
   // switching plans so the user isn't stranded on page 3 of a short plan.
   const IP_PAYMENTS_PER_PAGE = 5
   const [ipPaymentPage, setIpPaymentPage] = useState(1)
-  useEffect(() => { setIpPaymentPage(1) }, [focusedPlanId])
+  const ipNextDueCardRef = useRef(null)
+  const ipScrollPendingRef = useRef(false)
+  useLayoutEffect(() => {
+    if (!focusedPlanId) {
+      ipScrollPendingRef.current = false
+      return
+    }
+    const plan = myPlans.find((p) => p.id === focusedPlanId)
+    if (!plan?.payments?.length) return
+    setIpPaymentPage(instMetrics.getPaymentPageForNextDue(plan.payments, IP_PAYMENTS_PER_PAGE))
+    ipScrollPendingRef.current = true
+  }, [focusedPlanId, myPlans])
+  useLayoutEffect(() => {
+    if (!focusedPlanId || !ipScrollPendingRef.current) return
+    ipScrollPendingRef.current = false
+    const id = requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        ipNextDueCardRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      })
+    })
+    return () => cancelAnimationFrame(id)
+  }, [focusedPlanId, ipPaymentPage])
   const [ipPayTarget, setIpPayTarget] = useState(null)
   const [ipReceiptName, setIpReceiptName] = useState('')
   const [ipReceiptFile, setIpReceiptFile] = useState(null)
@@ -403,6 +428,14 @@ export default function DashboardPage() {
   const [ipNote, setIpNote] = useState('')
   const [ipSubmitting, setIpSubmitting] = useState(false)
   const [ipError, setIpError] = useState('')
+  useEffect(() => {
+    if (!focusedPlanId || ipPayTarget) return
+    const onKey = (e) => {
+      if (e.key === 'Escape') setFocusedPlanId(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [focusedPlanId, ipPayTarget])
   const [showProfile, setShowProfile] = useState(false)
   const [profileForm, setProfileForm] = useState({})
   const [profileSaving, setProfileSaving] = useState(false)
@@ -784,120 +817,24 @@ export default function DashboardPage() {
            ══════════════════════════════════════ */}
         {activeTab === 'echeances' && (
           <div className="ip ip--embedded">
-            {/* KPI strip */}
-            <div className="ip__hero">
-              <h1 className="ip__hero-title">Mes échéances</h1>
-              <p className="ip__hero-sub">Suivez vos facilités en temps réel</p>
-              <div className="ip__hero-kpi">
-                <div className="ip__kpi"><span className="ip__kpi-value">{ipStats.total}</span><span className="ip__kpi-label">Plans</span></div>
-                <div className="ip__kpi"><span className="ip__kpi-value">{ipStats.submitted}</span><span className="ip__kpi-label">En révision</span></div>
-                <div className="ip__kpi"><span className="ip__kpi-value">{ipStats.rejected}</span><span className="ip__kpi-label">À corriger</span></div>
-                <div className="ip__kpi"><span className="ip__kpi-value">{ipStats.approved}</span><span className="ip__kpi-label">Confirmés</span></div>
+            <div className="ip__hero ip__hero--embedded">
+              <div className="ip__hero-intro">
+                <span className="ip__hero-icon" aria-hidden>📅</span>
+                <div>
+                  <h1 className="ip__hero-title">Mes échéances</h1>
+                  <p className="ip__hero-sub">Suivez vos facilités en temps réel</p>
+                </div>
+              </div>
+              <div className="ip__hero-kpi ip__hero-kpi--strip" role="list">
+                <div className="ip__kpi" role="listitem"><span className="ip__kpi-value">{ipStats.total}</span><span className="ip__kpi-label">Plans</span></div>
+                <div className="ip__kpi" role="listitem"><span className="ip__kpi-value">{ipStats.submitted}</span><span className="ip__kpi-label">En révision</span></div>
+                <div className="ip__kpi" role="listitem"><span className="ip__kpi-value">{ipStats.rejected}</span><span className="ip__kpi-label">À corriger</span></div>
+                <div className="ip__kpi" role="listitem"><span className="ip__kpi-value">{ipStats.approved}</span><span className="ip__kpi-label">Confirmés</span></div>
               </div>
             </div>
 
-            {/* ── Detail view: single plan ── */}
-            {focusedPlan ? (
-              <>
-                <button type="button" className="ip__back" onClick={() => setFocusedPlanId(null)}>← Tous les plans</button>
-                <div className="ip__detail-head">
-                  <div className="ip__detail-title">{focusedPlan.projectTitle}</div>
-                  <div className="ip__detail-ref">{focusedPlan.projectCity} · #{focusedPlan.id}</div>
-                  {(() => {
-                    const sale = (mySalesRaw || []).find((s) => String(s.id) === String(focusedPlan.saleId)) || {}
-                    const m = computeInstallmentSaleMetrics(sale, focusedPlan)
-                    return (
-                      <div className="ip-metrics ip-metrics--embedded">
-                        <div className="ip-metric ip-metric--ok">
-                          <div className="ip-metric__label">Validé</div>
-                          <div className="ip-metric__value">{formatMoneyTnd(m.cashValidatedStrict)}</div>
-                          <div className="ip-metric__hint">1er versement + mensualités confirmées</div>
-                        </div>
-                        <div className="ip-metric ip-metric--review">
-                          <div className="ip-metric__label">En révision</div>
-                          <div className="ip-metric__value">{formatMoneyTnd(m.submittedAmount)}</div>
-                          <div className="ip-metric__hint">Reçus envoyés, en attente</div>
-                        </div>
-                        <div className="ip-metric ip-metric--bad">
-                          <div className="ip-metric__label">À corriger</div>
-                          <div className="ip-metric__value">{formatMoneyTnd(m.rejectedAmount)}</div>
-                          <div className="ip-metric__hint">Reçus refusés à renvoyer</div>
-                        </div>
-                        <div className="ip-metric ip-metric--neutral">
-                          <div className="ip-metric__label">Reste à valider</div>
-                          <div className="ip-metric__value">{formatMoneyTnd(m.remainingStrict)}</div>
-                          <div className="ip-metric__hint">Sur un total de {formatMoneyTnd(m.saleAgreed)}</div>
-                        </div>
-                      </div>
-                    )
-                  })()}
-                </div>
-                <div className="ip__detail-hint">
-                  <strong>Mode d&apos;emploi :</strong> En attente / Rejeté = envoyez ou corrigez un reçu. En révision = attente validation. Confirmé = rien à faire.
-                </div>
-                {(() => {
-                  const all = focusedPlan.payments || []
-                  const totalPages = Math.max(1, Math.ceil(all.length / IP_PAYMENTS_PER_PAGE))
-                  const page = Math.min(Math.max(1, ipPaymentPage), totalPages)
-                  const start = (page - 1) * IP_PAYMENTS_PER_PAGE
-                  const slice = all.slice(start, start + IP_PAYMENTS_PER_PAGE)
-                  return (
-                    <>
-                      <div className="ip__payments">
-                        {slice.map(p => {
-                          const meta = ipStatusMeta(p.status)
-                          const receipt = lastReceipt(p)
-                          const receiptIsImage = receipt && isImageUrl(receipt.url)
-                          return (
-                            <div key={`${focusedPlan.id}:${p.month}`} className="ip__pay-card">
-                              <div className="ip__pay-top">
-                                <span className="ip__pay-month">Facilité {p.month}</span>
-                                <span className="ip__pay-due">{fmtDate(p.dueDate)}</span>
-                              </div>
-                              <div className="ip__pay-mid">
-                                <span className="ip__pay-amount">{p.amount.toLocaleString()} <small>DT</small></span>
-                                <span className={`ip__status ip__status--${meta.tone}`}>{meta.label}</span>
-                              </div>
-                              <div className="ip__pay-hint">{meta.hint}</div>
-                              {p.status === 'rejected' && p.rejectedNote && <div className="ip__pay-reject">⚠ {p.rejectedNote}</div>}
-                              {receipt && (
-                                <div className="ip__receipt">
-                                  {receiptIsImage
-                                    ? <img src={receipt.url} alt="Reçu" className="ip__receipt-thumb" />
-                                    : <div className="ip__receipt-file-icon">📄</div>}
-                                  <div className="ip__receipt-info">
-                                    <div className="ip__receipt-name">{receipt.name}</div>
-                                    {receipt.date && <div className="ip__receipt-date">{fmtDate(receipt.date)}</div>}
-                                  </div>
-                                  <a href={receipt.url} target="_blank" rel="noreferrer" className="ip__receipt-link">Voir</a>
-                                </div>
-                              )}
-                              {isPayable(p.status) && (
-                                <button type="button" className={`ip__pay-btn${p.status === 'submitted' ? ' ip__pay-btn--correct' : ''}`} onClick={() => ipOpenPay(focusedPlan, p)}>
-                                  {p.status === 'submitted' ? '📝 Corriger le reçu' : '📤 Envoyer un reçu'}
-                                </button>
-                              )}
-                            </div>
-                          )
-                        })}
-                      </div>
-                      {totalPages > 1 && (
-                        <nav className="ip__pager" aria-label="Pagination des facilités">
-                          <button type="button" className="ip__pager-btn ip__pager-btn--nav" onClick={() => setIpPaymentPage(v => Math.max(1, v - 1))} disabled={page <= 1} aria-label="Page précédente">‹</button>
-                          {Array.from({ length: totalPages }, (_, i) => i + 1).map((n) => (
-                            <button key={n} type="button" className={`ip__pager-btn${n === page ? ' ip__pager-btn--active' : ''}`} onClick={() => setIpPaymentPage(n)} aria-current={n === page ? 'page' : undefined}>{n}</button>
-                          ))}
-                          <button type="button" className="ip__pager-btn ip__pager-btn--nav" onClick={() => setIpPaymentPage(v => Math.min(totalPages, v + 1))} disabled={page >= totalPages} aria-label="Page suivante">›</button>
-                          <span className="ip__pager-hint">Facilités {start + 1}–{Math.min(start + IP_PAYMENTS_PER_PAGE, all.length)} / {all.length}</span>
-                        </nav>
-                      )}
-                    </>
-                  )
-                })()}
-              </>
-            ) : (
-              /* ── List view: all plans ── */
-              <RenderDataGate
+            {/* ── List: all plans (détail = popup) ── */}
+            <RenderDataGate
                 loading={plansLoadingRaw}
                 data={myPlans}
                 skeleton="table"
@@ -913,48 +850,192 @@ export default function DashboardPage() {
                   <div className="ip__plan-list">
                     {list.map(plan => {
                       const sale = (mySalesRaw || []).find((s) => String(s.id) === String(plan.saleId)) || {}
-                      const metrics = computeInstallmentSaleMetrics(sale, plan)
+                      const metrics = instMetrics.computeInstallmentSaleMetrics(sale, plan)
                       const progress = metrics.approvedPct
                       const nextAction = plan.payments.find(p => p.status === 'rejected' || p.status === 'pending' || p.status === 'submitted')
                       return (
                         <button key={plan.id} type="button" className="ip__plan-card" onClick={() => setFocusedPlanId(plan.id)}>
-                          <div className="ip__plan-head">
-                            <span className="ip__plan-title">{plan.projectTitle}</span>
-                            <span className="ip__plan-ref">{plan.projectCity}</span>
-                          </div>
-                          <div className="ip__plan-pills">
-                            {metrics.submittedCount > 0 && <span className="ip__pill ip__pill--submitted">{metrics.submittedCount} en révision</span>}
-                            {metrics.rejectedCount > 0 && <span className="ip__pill ip__pill--rejected">{metrics.rejectedCount} à corriger</span>}
-                            {metrics.submittedCount === 0 && metrics.rejectedCount === 0 && <span className="ip__pill ip__pill--ok">Rythme normal</span>}
-                          </div>
-                          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', fontSize: 10, color: '#475569', marginTop: 4 }}>
-                            <span>Validé : <strong style={{ color: '#065f46' }}>{formatMoneyTnd(metrics.cashValidatedStrict)}</strong></span>
-                            <span>·</span>
-                            <span>Reste : <strong style={{ color: '#0f172a' }}>{formatMoneyTnd(metrics.remainingStrict)}</strong></span>
-                          </div>
-                          <div className="ip__progress">
-                            <div className="ip__progress-track">
-                              <div className="ip__progress-fill" style={{ width: `${Math.max(progress, 2)}%` }} />
+                          <div className="ip__plan-card__header">
+                            <div className="ip__plan-card__titles">
+                              <span className="ip__plan-title">{plan.projectTitle}</span>
+                              <span className="ip__plan-ref">{plan.projectCity}</span>
                             </div>
-                            <span className="ip__progress-label">{metrics.approvedCount}/{metrics.totalMonths}</span>
+                            <div className="ip__plan-pills">
+                              {metrics.submittedCount > 0 && <span className="ip__pill ip__pill--submitted">{metrics.submittedCount} en révision</span>}
+                              {metrics.rejectedCount > 0 && <span className="ip__pill ip__pill--rejected">{metrics.rejectedCount} à corriger</span>}
+                              {metrics.submittedCount === 0 && metrics.rejectedCount === 0 && <span className="ip__pill ip__pill--ok">Rythme normal</span>}
+                            </div>
+                          </div>
+                          <div className="ip__plan-money" aria-label="Montants validés et restants">
+                            <div className="ip__plan-money__item ip__plan-money__item--ok">
+                              <span className="ip__plan-money__label">Validé</span>
+                              <span className="ip__plan-money__value">{instMetrics.formatMoneyTnd(metrics.cashValidatedStrict)}</span>
+                            </div>
+                            <div className="ip__plan-money__item">
+                              <span className="ip__plan-money__label">Reste</span>
+                              <span className="ip__plan-money__value">{instMetrics.formatMoneyTnd(metrics.remainingStrict)}</span>
+                            </div>
+                          </div>
+                          <div className="ip__plan-progress-block">
+                            <div className="ip__plan-progress-head">
+                              <span className="ip__plan-progress-title">Facilités confirmées</span>
+                              <span className="ip__progress-label">{metrics.approvedCount}/{metrics.totalMonths}</span>
+                            </div>
+                            <div className="ip__progress">
+                              <div className="ip__progress-track">
+                                <div className="ip__progress-fill" style={{ width: `${Math.max(progress, 2)}%` }} />
+                              </div>
+                            </div>
                           </div>
                           <div className="ip__plan-next">
-                            {nextAction ? `Prochaine action : F.${nextAction.month} — ${ipStatusMeta(nextAction.status).label}` : 'Toutes les facilités sont confirmées.'}
+                            {nextAction ? (
+                              <>
+                                <span className="ip__plan-next__kicker">Prochaine action</span>
+                                <span className="ip__plan-next__text">F.{nextAction.month} — {ipStatusMeta(nextAction.status).label}</span>
+                              </>
+                            ) : (
+                              <span className="ip__plan-next__text ip__plan-next__text--done">Toutes les facilités sont confirmées.</span>
+                            )}
                           </div>
-                          <div className="ip__plan-cta"><span>Ouvrir le détail</span><span aria-hidden>→</span></div>
+                          <div className="ip__plan-cta">
+                            <span>Ouvrir le détail</span>
+                            <span className="ip__plan-cta__arrow" aria-hidden>→</span>
+                          </div>
                         </button>
                       )
                     })}
                   </div>
                 )}
               </RenderDataGate>
+
+            {focusedPlan && (
+              <div
+                className="ip__overlay ip__overlay--plan-detail"
+                role="presentation"
+                onClick={() => setFocusedPlanId(null)}
+              >
+                <div
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="ip-plan-detail-title"
+                  className="ip__modal ip__modal--plan-detail"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="ip__modal-header ip__modal-header--plan-detail">
+                    <div>
+                      <h2 id="ip-plan-detail-title" className="ip__modal-title">{focusedPlan.projectTitle}</h2>
+                      <p className="ip__modal-sub">{focusedPlan.projectCity} · #{focusedPlan.id}</p>
+                    </div>
+                    <button type="button" className="ip__modal-close" onClick={() => setFocusedPlanId(null)} aria-label="Fermer le détail du plan">✕</button>
+                  </div>
+                  <div className="ip__modal-body ip__modal-body--plan-detail">
+                    {(() => {
+                      const sale = (mySalesRaw || []).find((s) => String(s.id) === String(focusedPlan.saleId)) || {}
+                      const m = instMetrics.computeInstallmentSaleMetrics(sale, focusedPlan)
+                      return (
+                        <div className="ip-metrics ip-metrics--embedded ip-metrics--in-modal">
+                          <div className="ip-metric ip-metric--ok">
+                            <div className="ip-metric__label">Validé</div>
+                            <div className="ip-metric__value">{instMetrics.formatMoneyTnd(m.cashValidatedStrict)}</div>
+                            <div className="ip-metric__hint">1er versement + mensualités confirmées</div>
+                          </div>
+                          <div className="ip-metric ip-metric--review">
+                            <div className="ip-metric__label">En révision</div>
+                            <div className="ip-metric__value">{instMetrics.formatMoneyTnd(m.submittedAmount)}</div>
+                            <div className="ip-metric__hint">Reçus envoyés, en attente</div>
+                          </div>
+                          <div className="ip-metric ip-metric--bad">
+                            <div className="ip-metric__label">À corriger</div>
+                            <div className="ip-metric__value">{instMetrics.formatMoneyTnd(m.rejectedAmount)}</div>
+                            <div className="ip-metric__hint">Reçus refusés à renvoyer</div>
+                          </div>
+                          <div className="ip-metric ip-metric--neutral">
+                            <div className="ip-metric__label">Reste à valider</div>
+                            <div className="ip-metric__value">{instMetrics.formatMoneyTnd(m.remainingStrict)}</div>
+                            <div className="ip-metric__hint">Sur un total de {instMetrics.formatMoneyTnd(m.saleAgreed)}</div>
+                          </div>
+                        </div>
+                      )
+                    })()}
+                    <div className="ip__detail-hint ip__detail-hint--modal">
+                      <strong>Mode d&apos;emploi :</strong> En attente / Rejeté = envoyez ou corrigez un reçu. En révision = attente validation. Confirmé = rien à faire.
+                    </div>
+                    {(() => {
+                      const all = focusedPlan.payments || []
+                      const nextDueIdx = instMetrics.getNextDuePaymentIndex(all)
+                      const totalPages = Math.max(1, Math.ceil(all.length / IP_PAYMENTS_PER_PAGE))
+                      const page = Math.min(Math.max(1, ipPaymentPage), totalPages)
+                      const start = (page - 1) * IP_PAYMENTS_PER_PAGE
+                      const slice = all.slice(start, start + IP_PAYMENTS_PER_PAGE)
+                      return (
+                        <>
+                          <div className="ip__payments">
+                            {slice.map((p, i) => {
+                              const meta = ipStatusMeta(p.status)
+                              const receipt = lastReceipt(p)
+                              const receiptIsImage = receipt && isImageUrl(receipt.url)
+                              const globalIdx = start + i
+                              const isNextDue = nextDueIdx >= 0 && globalIdx === nextDueIdx
+                              return (
+                                <div
+                                  key={`${focusedPlan.id}:${p.month}`}
+                                  ref={isNextDue ? ipNextDueCardRef : undefined}
+                                  className={`ip__pay-card${isNextDue ? ' ip__pay-card--next' : ''}`}
+                                >
+                                  <div className="ip__pay-top">
+                                    <span className="ip__pay-month">Facilité {p.month}</span>
+                                    <span className="ip__pay-due">{fmtDate(p.dueDate)}</span>
+                                  </div>
+                                  <div className="ip__pay-mid">
+                                    <span className="ip__pay-amount">{p.amount.toLocaleString()} <small>DT</small></span>
+                                    <span className={`ip__status ip__status--${meta.tone}`}>{meta.label}</span>
+                                  </div>
+                                  <div className="ip__pay-hint">{meta.hint}</div>
+                                  {p.status === 'rejected' && p.rejectedNote && <div className="ip__pay-reject">⚠ {p.rejectedNote}</div>}
+                                  {receipt && (
+                                    <div className="ip__receipt">
+                                      {receiptIsImage
+                                        ? <img src={receipt.url} alt="Reçu" className="ip__receipt-thumb" />
+                                        : <div className="ip__receipt-file-icon">📄</div>}
+                                      <div className="ip__receipt-info">
+                                        <div className="ip__receipt-name">{receipt.name}</div>
+                                        {receipt.date && <div className="ip__receipt-date">{fmtDate(receipt.date)}</div>}
+                                      </div>
+                                      <a href={receipt.url} target="_blank" rel="noreferrer" className="ip__receipt-link">Voir</a>
+                                    </div>
+                                  )}
+                                  {isPayable(p.status) && (
+                                    <button type="button" className={`ip__pay-btn${p.status === 'submitted' ? ' ip__pay-btn--correct' : ''}`} onClick={() => ipOpenPay(focusedPlan, p)}>
+                                      {p.status === 'submitted' ? '📝 Corriger le reçu' : '📤 Envoyer un reçu'}
+                                    </button>
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
+                          {totalPages > 1 && (
+                            <nav className="ip__pager" aria-label="Pagination des facilités">
+                              <button type="button" className="ip__pager-btn ip__pager-btn--nav" onClick={() => setIpPaymentPage((v) => Math.max(1, v - 1))} disabled={page <= 1} aria-label="Page précédente">‹</button>
+                              {Array.from({ length: totalPages }, (_, idx) => idx + 1).map((n) => (
+                                <button key={n} type="button" className={`ip__pager-btn${n === page ? ' ip__pager-btn--active' : ''}`} onClick={() => setIpPaymentPage(n)} aria-current={n === page ? 'page' : undefined}>{n}</button>
+                              ))}
+                              <button type="button" className="ip__pager-btn ip__pager-btn--nav" onClick={() => setIpPaymentPage((v) => Math.min(totalPages, v + 1))} disabled={page >= totalPages} aria-label="Page suivante">›</button>
+                              <span className="ip__pager-hint">Facilités {start + 1}–{Math.min(start + IP_PAYMENTS_PER_PAGE, all.length)} / {all.length}</span>
+                            </nav>
+                          )}
+                        </>
+                      )
+                    })()}
+                  </div>
+                </div>
+              </div>
             )}
           </div>
         )}
 
         {/* ── Receipt Upload Modal ── */}
         {ipPayTarget && (
-          <div className="ip__overlay" onClick={ipClosePay}>
+          <div className="ip__overlay ip__overlay--receipt" onClick={ipClosePay}>
             <div className="ip__modal" onClick={e => e.stopPropagation()}>
               <div className="ip__modal-header">
                 <div>
@@ -1014,15 +1095,13 @@ export default function DashboardPage() {
             <div className="inv-wallet">
               <header className="inv-wallet__header">
                 <div>
-                  <h3 className="inv-wallet__title">Portefeuille Parrainage</h3>
+                  <h3 className="inv-wallet__title">Parrainage</h3>
                   <p className="inv-wallet__lead">
-                    Commissions créditées au tampon légal, retirables selon les règles finance.
+                    Retraits soumis aux règles finance (après tampon légal).
                   </p>
                   {!showAmbassadorCard && (
-                    <p
-                      className="inv-wallet__lead inv-wallet__lead--muted"
-                    >
-                      Reliez votre profil client pour activer le parrainage
+                    <p className="inv-wallet__lead inv-wallet__lead--muted">
+                      Reliez votre profil client pour activer l’accès.
                     </p>
                   )}
                 </div>
@@ -1039,7 +1118,18 @@ export default function DashboardPage() {
               </header>
 
               {showAmbassadorCard && referralLoading && !referralHasError ? (
-                <p className="inv-wallet__loading">Chargement du portefeuille…</p>
+                <div className="inv-wallet__loading-wrap" role="status" aria-live="polite" aria-busy="true">
+                  <span className="inv-wallet__spinner" aria-hidden="true" />
+                  <div className="inv-wallet__loading-copy">
+                    <span className="inv-wallet__loading-title">Chargement du portefeuille</span>
+                    <span className="inv-wallet__loading-dots" aria-hidden>
+                      <span className="inv-wallet__dot" />
+                      <span className="inv-wallet__dot" />
+                      <span className="inv-wallet__dot" />
+                    </span>
+                    <span className="inv-wallet__loading-shimmer" aria-hidden />
+                  </div>
+                </div>
               ) : showAmbassadorCard && referralHasError ? (
                 /* Plan 04 §3.1 step 5 — uniform ErrorPanel replaces the
                    bespoke alert+button block. Retry re-fires the RPC. */
@@ -1050,58 +1140,54 @@ export default function DashboardPage() {
                 />
               ) : (
                   <>
-                    <div className="inv-wallet__hero">
-                      <span className="inv-wallet__hero-label">Disponible au retrait</span>
-                      <strong className="inv-wallet__hero-amount">
-                        {(showAmbassadorCard ? (referralSummary?.walletBalance ?? 0) : 0).toLocaleString('fr-FR', {
-                          minimumFractionDigits: 0,
-                          maximumFractionDigits: 2,
-                        })}{' '}
-                        <span className="inv-wallet__hero-currency">DT</span>
-                      </strong>
-                      <span className="inv-wallet__hero-meta">
-                        Retrait min. {showAmbassadorCard ? (referralSummary?.minPayoutAmount ?? 0) : 0} DT · virement traité par la finance
-                      </span>
-                    </div>
-
-                    <div className="inv-wallet__phases">
-                      <div className="inv-wallet__phase">
-                        <span className="inv-wallet__phase-label">Gains en attente</span>
-                        <span className="inv-wallet__phase-value">
-                          {(showAmbassadorCard ? (referralSummary?.gainsAccrued ?? 0) : 0).toLocaleString('fr-FR', {
+                    <div className="inv-wallet__panel">
+                      <div className="inv-wallet__hero">
+                        <span className="inv-wallet__hero-label">Disponible au retrait</span>
+                        <strong className="inv-wallet__hero-amount">
+                          {(showAmbassadorCard ? (referralSummary?.walletBalance ?? 0) : 0).toLocaleString('fr-FR', {
                             minimumFractionDigits: 0,
                             maximumFractionDigits: 2,
                           })}{' '}
-                          DT
+                          <span className="inv-wallet__hero-currency">DT</span>
+                        </strong>
+                        <span className="inv-wallet__hero-meta">
+                          Retrait min. {showAmbassadorCard ? (referralSummary?.minPayoutAmount ?? 0) : 0} DT · virement validé par la finance
                         </span>
-                        <span className="inv-wallet__phase-hint">Avant tampon (vente non terminée)</span>
                       </div>
-                      <div className="inv-wallet__phase">
-                        <span className="inv-wallet__phase-label">Crédit légal</span>
-                        <span className="inv-wallet__phase-value">
-                          {(showAmbassadorCard ? (referralSummary?.commissionsReleased ?? 0) : 0).toLocaleString('fr-FR', {
-                            minimumFractionDigits: 0,
-                            maximumFractionDigits: 2,
-                          })}{' '}
-                          DT
-                        </span>
-                        <span className="inv-wallet__phase-hint">Tampon légal · pas encore payé</span>
-                      </div>
-                    </div>
-
-                    <div className="inv-wallet__breakdown">
-                      <div className="inv-wallet__bd-row">
-                        <span className="inv-wallet__bd-label">Commission directe (L1)</span>
-                        <span className="inv-wallet__bd-amount">{(Number(showAmbassadorCard ? referralSummary?.l1Total : 0) || 0).toLocaleString('fr-FR')} <small>DT</small></span>
-                      </div>
-                      <div className="inv-wallet__bd-row">
-                        <span className="inv-wallet__bd-label">Commission indirecte (L2+)</span>
-                        <span className="inv-wallet__bd-amount">{(Number(showAmbassadorCard ? referralSummary?.l2Total : 0) || 0).toLocaleString('fr-FR')} <small>DT</small></span>
+                      <div className="inv-wallet__stats">
+                        <div className="inv-wallet__stat">
+                          <span className="inv-wallet__stat-lbl">En attente</span>
+                          <span className="inv-wallet__stat-val">
+                            {(showAmbassadorCard ? (referralSummary?.gainsAccrued ?? 0) : 0).toLocaleString('fr-FR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} DT
+                          </span>
+                          <span className="inv-wallet__stat-sub">Avant tampon</span>
+                        </div>
+                        <div className="inv-wallet__stat">
+                          <span className="inv-wallet__stat-lbl">Crédit légal</span>
+                          <span className="inv-wallet__stat-val">
+                            {(showAmbassadorCard ? (referralSummary?.commissionsReleased ?? 0) : 0).toLocaleString('fr-FR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} DT
+                          </span>
+                          <span className="inv-wallet__stat-sub">Non versé</span>
+                        </div>
+                        <div className="inv-wallet__stat">
+                          <span className="inv-wallet__stat-lbl">Direct (L1)</span>
+                          <span className="inv-wallet__stat-val">
+                            {(Number(showAmbassadorCard ? referralSummary?.l1Total : 0) || 0).toLocaleString('fr-FR')} DT
+                          </span>
+                        </div>
+                        <div className="inv-wallet__stat">
+                          <span className="inv-wallet__stat-lbl">Indirect (L2+)</span>
+                          <span className="inv-wallet__stat-val">
+                            {(Number(showAmbassadorCard ? referralSummary?.l2Total : 0) || 0).toLocaleString('fr-FR')} DT
+                          </span>
+                        </div>
                       </div>
                     </div>
 
                     {parrainageForecast && (
-                      <section className="inv-forecast" aria-label="Potentiel de parrainage">
+                      <details className="inv-wallet__fold">
+                        <summary className="inv-wallet__fold-summary">Projection avec vos filleuls (optionnel)</summary>
+                        <section className="inv-forecast inv-forecast--in-fold" aria-label="Potentiel de parrainage">
                         <div className="inv-forecast__head">
                           <span className="inv-forecast__kicker">Projection</span>
                           <strong className="inv-forecast__title">Votre potentiel avec vos filleuls actuels</strong>
@@ -1160,15 +1246,16 @@ export default function DashboardPage() {
                           <span><span className="inv-forecast__dot" style={{ background: '#a8cc50' }} /> Actuel</span>
                           <span><span className="inv-forecast__dot" style={{ background: '#7ab020' }} /> Potentiel</span>
                         </div>
-                      </section>
+                        </section>
+                      </details>
                     )}
 
                     {showAmbassadorCard && (
                       <div className="inv-ledger">
                         <div className="inv-ledger__head">
-                          <h4 className="inv-ledger__title">D'où viennent vos commissions</h4>
+                          <h4 className="inv-ledger__title">Historique</h4>
                           <div className="inv-ledger__head-right">
-                            <span className="inv-ledger__count">{myCommissionEvents.length} commission{myCommissionEvents.length !== 1 ? 's' : ''}</span>
+                            <span className="inv-ledger__count">{myCommissionEvents.length} ligne{myCommissionEvents.length !== 1 ? 's' : ''}</span>
                             {myCommissionEvents.length > 0 && (
                               <button
                                 type="button"
@@ -1176,19 +1263,14 @@ export default function DashboardPage() {
                                 onClick={handleExportCommissionsCsv}
                                 aria-label="Exporter les commissions au format CSV"
                               >
-                                Exporter (CSV)
+                                CSV
                               </button>
                             )}
                           </div>
                         </div>
-                        <div className="inv-ledger__explainer">
-                          <div className="inv-ledger__explainer-row"><span className="inv-ledger__explainer-dot" style={{ background: '#2563eb' }} />
-                            <strong>Commission directe</strong> — vous avez vendu vous-même.
-                          </div>
-                          <div className="inv-ledger__explainer-row"><span className="inv-ledger__explainer-dot" style={{ background: '#f59e0b' }} />
-                            <strong>Commission indirecte</strong> — quelqu'un que vous avez parrainé (ou dans votre ligne) a vendu.
-                          </div>
-                        </div>
+                        <p className="inv-ledger__hint">
+                          L1 = votre vente · L2+ = vente dans votre ligne de parrainage.
+                        </p>
                         <RenderDataGate
                           loading={ledgerLoading && myCommissionEvents.length === 0}
                           data={myCommissionEvents}
@@ -1197,7 +1279,7 @@ export default function DashboardPage() {
                           empty={
                             <EmptyState
                               title="Aucune commission"
-                              description="Vos gains apparaîtront ici dès qu'une de vos ventes (ou une vente de votre ligne) passe chez le notaire."
+                              description="Les montants s’affichent après clôture notaire des ventes concernées."
                             />
                           }
                         >
@@ -1332,9 +1414,6 @@ export default function DashboardPage() {
                     && (referralSummary?.gainsAccrued ?? 0) === 0
                     && (referralSummary?.commissionsReleased ?? 0) === 0 && (
                     <>
-                      <p className="inv-wallet__alert inv-wallet__alert--warn">
-                        Aucune commission pour le moment — elles apparaîtront dès la clôture notaire des ventes liées à votre code parrain.
-                      </p>
                       {referralSummary?.diagnostics && (() => {
                         const d = referralSummary.diagnostics
                         const notEligible =
@@ -1350,7 +1429,7 @@ export default function DashboardPage() {
                               : "Un rattachement existe mais aucune ligne commission n'a été créée — contactez le support."
                         return (
                           <details className="inv-diagnostic">
-                            <summary className="inv-diagnostic__summary">Pourquoi 0 DT ? (diagnostic)</summary>
+                            <summary className="inv-diagnostic__summary">Pourquoi tout est à 0 ?</summary>
                             <div className="inv-diagnostic__body">
                               <div className="inv-diagnostic__hint">{hint}</div>
                               <div className="inv-diagnostic__mono">
@@ -1395,23 +1474,37 @@ export default function DashboardPage() {
                   )}
 
                   <div className="inv-wallet__actions">
-                    <button
-                      type="button"
-                      className="inv-wallet__btn"
-                      disabled={
+                    {(() => {
+                      const bal = Number(referralSummary?.walletBalance ?? 0)
+                      const min = Number(referralSummary?.minPayoutAmount ?? 0)
+                      const disabled =
                         payoutBusy
                         || referralLoading
                         || referralVerificationBlocked
-                        || (referralSummary?.walletBalance ?? 0) < (referralSummary?.minPayoutAmount ?? 0)
-                        || (referralSummary?.walletBalance ?? 0) <= 0
-                      }
-                      onClick={() => { setPayoutError(''); setPayoutConfirmOpen(true) }}
-                    >
-                      {payoutBusy ? 'Traitement…' : 'Retirer les gains'}
-                    </button>
-                    <p className="inv-wallet__actions-note">
-                      Le virement bancaire reste soumis à validation interne.
-                    </p>
+                        || bal < min
+                        || bal <= 0
+                      let reason = ''
+                      if (referralLoading) reason = 'Chargement du portefeuille…'
+                      else if (referralVerificationBlocked) reason = "Vérification d'identité requise."
+                      else if (bal <= 0) reason = 'Aucun gain disponible à retirer pour le moment.'
+                      else if (bal < min) reason = `Seuil minimum non atteint (${min.toLocaleString('fr-FR')} DT).`
+                      return (
+                        <>
+                          <button
+                            type="button"
+                            className="inv-wallet__btn"
+                            disabled={disabled}
+                            onClick={() => { setPayoutError(''); setPayoutConfirmOpen(true) }}
+                            title={reason || undefined}
+                          >
+                            {payoutBusy ? 'Traitement…' : 'Retirer les gains'}
+                          </button>
+                          <p className="inv-wallet__actions-note">
+                            {reason || 'Validation interne avant virement.'}
+                          </p>
+                        </>
+                      )
+                    })()}
                   </div>
 
                   {payoutConfirmOpen && (() => {
@@ -1468,17 +1561,6 @@ export default function DashboardPage() {
                 </>
               )}
 
-              {showAmbassadorCard && clientProfile?.referralCode && (
-                <footer className="inv-wallet__code">
-                  <span className="inv-wallet__code-label">Votre code parrain</span>
-                  <code className="inv-wallet__code-value" dir="ltr">
-                    {clientProfile.referralCode}
-                  </code>
-                  <span className="inv-wallet__code-hint">
-                    Partagez ce code pour lier un nouveau dossier client.
-                  </span>
-                </footer>
-              )}
             </div>
           </>
         )}

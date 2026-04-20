@@ -109,6 +109,30 @@ export function computeInstallmentSaleMetrics(sale, plan) {
   }
 }
 
+/**
+ * Index of the next installment needing attention (rejected → pending → submitted → first non-approved).
+ */
+export function getNextDuePaymentIndex(payments) {
+  const list = Array.isArray(payments) ? payments : []
+  if (!list.length) return -1
+  const idx = list.findIndex((p) => p.status === 'rejected')
+  if (idx >= 0) return idx
+  const i = list.findIndex((p) => p.status === 'pending')
+  if (i >= 0) return i
+  const j = list.findIndex((p) => p.status === 'submitted')
+  if (j >= 0) return j
+  return list.findIndex((p) => p.status !== 'approved')
+}
+
+/** 1-based page number containing that installment (for paginated lists). */
+export function getPaymentPageForNextDue(payments, perPage) {
+  const list = payments || []
+  if (!list.length || perPage < 1) return 1
+  const k = getNextDuePaymentIndex(list)
+  if (k < 0) return 1
+  return Math.floor(k / perPage) + 1
+}
+
 /** French currency format helper (kept here so every consumer renders the same way). */
 export function formatMoneyTnd(n) {
   return `${(Number(n) || 0).toLocaleString('fr-FR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} DT`

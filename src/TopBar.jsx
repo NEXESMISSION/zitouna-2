@@ -63,16 +63,23 @@ export default function TopBar() {
 
           <button
             type="button"
-            className={`portfolio-nav-btn icon-action${onDashboard ? ' portfolio-nav-btn--explore' : ''}`}
-            title={onDashboard ? 'Explorer' : 'Mon espace'}
-            aria-label={onDashboard ? 'Explorer' : 'Mon espace'}
+            className={`portfolio-nav-btn icon-action${onDashboard ? ' portfolio-nav-btn--home' : ' portfolio-nav-btn--profile'}`}
+            title={onDashboard ? 'Accueil catalogue' : 'Mon espace'}
+            aria-label={onDashboard ? "Aller à l'accueil catalogue" : 'Ouvrir mon espace client'}
             onClick={portfolioMobileNavigate}
           >
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M3 10.5 12 3l9 7.5" />
-              <path d="M5 9.5V21h14V9.5" />
-              <path d="M10 21v-6h4v6" />
-            </svg>
+            {onDashboard ? (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M3 10.5 12 3l9 7.5" />
+                <path d="M5 9.5V21h14V9.5" />
+                <path d="M10 21v-6h4v6" />
+              </svg>
+            ) : (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <circle cx="12" cy="8" r="4" />
+                <path d="M6 20.5v-.5a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v.5" />
+              </svg>
+            )}
           </button>
         </div>
       </div>

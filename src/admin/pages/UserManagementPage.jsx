@@ -40,6 +40,65 @@ function fmtDate(iso) {
   }
 }
 
+/**
+ * @param {Array<{ items: Array<{ key: string }> }>} groupedPieceGroups
+ * @param {string[]} poolKeys keys eligible to pick from
+ * @param {'adjacent' | 'random'} mode
+ */
+function pickPieceKeysQuick(groupedPieceGroups, poolKeys, mode, n) {
+  const poolSet = new Set(poolKeys)
+  if (!poolKeys.length || n <= 0) return { keys: [], partial: false }
+  const nClamped = Math.min(n, poolKeys.length)
+  if (mode === 'random') {
+    const shuffled = [...poolKeys]
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      const t = shuffled[i]
+      shuffled[i] = shuffled[j]
+      shuffled[j] = t
+    }
+    return { keys: shuffled.slice(0, nClamped), partial: false }
+  }
+  const windows = []
+  for (const g of groupedPieceGroups) {
+    const rows = g.items
+      .filter((it) => poolSet.has(it.key))
+      .map((it) => {
+        const pidStr = String(it.key).split(':')[1]
+        return { key: it.key, pid: Number(pidStr) }
+      })
+      .filter((r) => Number.isFinite(r.pid))
+      .sort((a, b) => a.pid - b.pid)
+    for (let i = 0; i + nClamped <= rows.length; i++) {
+      let ok = true
+      for (let k = 1; k < nClamped; k++) {
+        if (rows[i + k].pid !== rows[i + k - 1].pid + 1) {
+          ok = false
+          break
+        }
+      }
+      if (ok) windows.push(rows.slice(i, i + nClamped).map((r) => r.key))
+    }
+  }
+  if (windows.length > 0) {
+    return { keys: windows[Math.floor(Math.random() * windows.length)], partial: false }
+  }
+  for (const g of groupedPieceGroups) {
+    const rows = g.items
+      .filter((it) => poolSet.has(it.key))
+      .map((it) => {
+        const pidStr = String(it.key).split(':')[1]
+        return { key: it.key, pid: Number(pidStr) }
+      })
+      .filter((r) => Number.isFinite(r.pid))
+      .sort((a, b) => a.pid - b.pid)
+    if (rows.length === 0) continue
+    const partial = rows.length < nClamped
+    return { keys: rows.slice(0, nClamped).map((r) => r.key), partial }
+  }
+  return { keys: [], partial: false }
+}
+
 export default function UserManagementPage() {
   const navigate = useNavigate()
   const { addToast } = useToast()
@@ -66,6 +125,14 @@ export default function UserManagementPage() {
   const [clientAssignments, setClientAssignments] = useState([])
   const [clientAssignmentsLoading, setClientAssignmentsLoading] = useState(false)
   const [clientSaving, setClientSaving] = useState(false)
+
+  const [staffQuickPickOpen, setStaffQuickPickOpen] = useState(false)
+  const [staffQuickPickCount, setStaffQuickPickCount] = useState(1)
+  const [staffQuickPickMode, setStaffQuickPickMode] = useState('adjacent')
+
+  const [clientQuickPickOpen, setClientQuickPickOpen] = useState(false)
+  const [clientQuickPickCount, setClientQuickPickCount] = useState(1)
+  const [clientQuickPickMode, setClientQuickPickMode] = useState('adjacent')
 
   const allPageKeys = useMemo(() => PAGE_OPTIONS.map((p) => p.key), [])
   const allProjectIds = useMemo(() => (projects || []).map((p) => p.id), [projects])
@@ -126,13 +193,29 @@ export default function UserManagementPage() {
   const clientAudit = useMemo(() => {
     if (!clientModal) return []
     const id = String(clientModal.id)
-    return (audit || [])
-      .filter(
-        (a) =>
-          String(a.subjectUserId || '') === id ||
-          (a.entity === 'client' && String(a.entityId) === id),
-      )
-      .slice(0, 40)
+    const raw = (audit || []).filter(
+      (a) =>
+        String(a.subjectUserId || '') === id ||
+        (a.entity === 'client' && String(a.entityId) === id),
+    )
+    // Collapse same-day duplicates for page grants. The manual path (User
+    // Management) writes one audit row and an auto-grant from a notary-signed
+    // checklist writes another — both valid, but the UI shouldn't show the
+    // same page twice for the same client on the same day.
+    const seen = new Set()
+    const deduped = []
+    for (const a of raw) {
+      let key = null
+      if (a.action === 'page_access_granted' || a.action === 'page_access_revoked') {
+        const pageKey = a.metadata?.pageKey || String(a.details || '').replace(/^Grant\s+/i, '').replace(/\s*\(manual\)\s*$/i, '').trim()
+        const day = String(a.createdAt || '').slice(0, 10)
+        key = `${a.action}|${pageKey}|${day}`
+      }
+      if (key && seen.has(key)) continue
+      if (key) seen.add(key)
+      deduped.push(a)
+    }
+    return deduped.slice(0, 40)
   }, [audit, clientModal])
 
   const staffAudit = useMemo(() => {
@@ -176,8 +259,18 @@ export default function UserManagementPage() {
 
   const openClientManage = (c) => {
     setClientModal(c)
-    setClientPagesForm(Array.isArray(c.allowedPages) ? [...c.allowedPages] : allPageKeys)
-    setClientProjectsForm(Array.isArray(c.allowedProjectIds) ? [...c.allowedProjectIds] : allProjectIds)
+    setClientQuickPickOpen(false)
+    setClientQuickPickCount(1)
+    // SEMANTIC FIX: `allowedPages == null` means "no explicit restriction stored"
+    // (which at the app level resolves to full access). Historically we pre-
+    // filled the form with ALL page keys in that case, which made the UI lie:
+    // admins who had granted only `/admin/sell` saw every chip ticked and
+    // couldn't tell what they had actually saved. Default to `[]` instead so
+    // the chips reflect only the explicitly-granted pages. The save path
+    // below still converts an empty form back to `null` so unchanged "default"
+    // access stays as-is.
+    setClientPagesForm(Array.isArray(c.allowedPages) ? [...c.allowedPages] : [])
+    setClientProjectsForm(Array.isArray(c.allowedProjectIds) ? [...c.allowedProjectIds] : [])
     setClientIdentityForm({
       name: c.name || '',
       phone: c.phone || '',
@@ -607,6 +700,11 @@ export default function UserManagementPage() {
     [allParcelKeys, clientProjectsSet],
   )
 
+  const clientUnassignedPieceKeys = useMemo(
+    () => clientScopedPieceOptions.map((it) => it.key).filter((k) => !clientAssignedPieceKeySet.has(k)),
+    [clientScopedPieceOptions, clientAssignedPieceKeySet],
+  )
+
   const groupedClientPieceOptions = useMemo(
     () =>
       (projects || [])
@@ -646,6 +744,89 @@ export default function UserManagementPage() {
     },
     [clientModal, clientAssignedPieceKeySet, addToast],
   )
+
+  const staffQuickPickMax = allVisiblePieceKeys.length
+  const clampedStaffQuickPickCount = Math.max(
+    1,
+    Math.min(staffQuickPickCount, Math.max(1, staffQuickPickMax)),
+  )
+
+  const clientQuickPickMax = clientUnassignedPieceKeys.length
+  const clampedClientQuickPickCount = Math.max(
+    1,
+    Math.min(clientQuickPickCount, Math.max(1, clientQuickPickMax)),
+  )
+
+  const runStaffQuickPick = useCallback(() => {
+    const n = Math.max(1, Math.min(Number(staffQuickPickCount) || 1, staffQuickPickMax))
+    if (staffQuickPickMax === 0) {
+      addToast('Aucune parcelle dans la sélection projet.', 'info')
+      return
+    }
+    const { keys, partial } = pickPieceKeysQuick(
+      groupedPieceOptions,
+      allVisiblePieceKeys,
+      staffQuickPickMode,
+      n,
+    )
+    setForm((f) => ({ ...f, allowedParcelKeys: keys }))
+    setStaffQuickPickOpen(false)
+    if (partial) addToast('Pas assez de parcelles consécutives — sélection partielle.', 'info')
+    if (keys.length > 0) {
+      addToast(
+        `${keys.length} parcelle${keys.length > 1 ? 's' : ''} sélectionnée${keys.length > 1 ? 's' : ''}.`,
+        'success',
+      )
+    }
+  }, [
+    staffQuickPickCount,
+    staffQuickPickMax,
+    staffQuickPickMode,
+    groupedPieceOptions,
+    allVisiblePieceKeys,
+    addToast,
+  ])
+
+  const runClientQuickPick = useCallback(async () => {
+    if (!clientModal) return
+    const n = Math.max(1, Math.min(Number(clientQuickPickCount) || 1, clientQuickPickMax))
+    if (clientQuickPickMax === 0) {
+      addToast('Aucune parcelle à attribuer (toutes sont déjà assignées).', 'info')
+      return
+    }
+    const { keys, partial } = pickPieceKeysQuick(
+      groupedClientPieceOptions,
+      clientUnassignedPieceKeys,
+      clientQuickPickMode,
+      n,
+    )
+    if (keys.length === 0) return
+
+    await runSafeAction(
+      { setBusy: setClientAssignmentsLoading, onError: (m) => addToast(m, 'error'), label: 'Sélection rapide parcelles' },
+      async () => {
+        for (const pieceKey of keys) {
+          const [projectId, parcelIdStr] = String(pieceKey).split(':')
+          const parcelId = Number(parcelIdStr)
+          if (!projectId || !Number.isFinite(parcelId)) continue
+          await assignSellerParcel({ clientId: clientModal.id, projectId, parcelId, note: '' })
+        }
+        const rows = await fetchSellerParcelAssignments(clientModal.id)
+        setClientAssignments(Array.isArray(rows) ? rows : [])
+        setClientQuickPickOpen(false)
+        if (partial) addToast('Pas assez de parcelles consécutives — sélection partielle.', 'info')
+        addToast(`${keys.length} accès parcelle accordé${keys.length > 1 ? 's' : ''}.`, 'success')
+      },
+    )
+  }, [
+    clientModal,
+    clientQuickPickCount,
+    clientQuickPickMax,
+    clientQuickPickMode,
+    groupedClientPieceOptions,
+    clientUnassignedPieceKeys,
+    addToast,
+  ])
 
   const steps = ['identity', 'pages', 'projects', 'pieces']
   const stepLabels = {
@@ -801,7 +982,18 @@ export default function UserManagementPage() {
         ) : (
           pagedList.map((c) => {
             const suspended = isClientSuspended(c)
-            const pagesN = Array.isArray(c.allowedPages) ? c.allowedPages.length : 0
+            const pagesLabel =
+              c.allowedPages == null
+                ? 'Toutes les pages admin'
+                : Array.isArray(c.allowedPages) && c.allowedPages.length === 0
+                  ? 'Aucune page admin'
+                  : `${c.allowedPages.length} page(s) admin`
+            const projectsLabel =
+              c.allowedProjectIds == null
+                ? 'Tous les projets'
+                : Array.isArray(c.allowedProjectIds) && c.allowedProjectIds.length === 0
+                  ? 'Aucun projet'
+                  : `${c.allowedProjectIds.length} projet(s)`
             const selfReg = String(c.id).startsWith('c-reg-')
             const tone = suspended ? 'gray' : 'green'
             const badgeTone = suspended ? 'red' : 'green'
@@ -827,7 +1019,9 @@ export default function UserManagementPage() {
                 </div>
                 <div className="sp-card__body">
                   <div className="sp-card__info">
-                    <span>{pagesN ? `${pagesN} page(s) admin` : 'Aucune page admin'}</span>
+                    <span>{pagesLabel}</span>
+                    <span>·</span>
+                    <span>{projectsLabel}</span>
                     {selfReg ? <span className="sp-badge sp-badge--blue" style={{ fontSize: 9 }}>Auto-inscrit</span> : null}
                   </div>
                   <div className="um-card__side-actions">
@@ -1184,6 +1378,149 @@ export default function UserManagementPage() {
                       </button>
                     </div>
 
+                    <div className="um-quickpick" style={{ marginTop: 2 }}>
+                      <button
+                        type="button"
+                        aria-expanded={staffQuickPickOpen}
+                        aria-controls="um-staff-quickpick-panel"
+                        onClick={() => setStaffQuickPickOpen((v) => !v)}
+                        disabled={staffQuickPickMax === 0}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          padding: '6px 12px',
+                          borderRadius: 8,
+                          border: '1px solid #cbd5e1',
+                          background: staffQuickPickOpen ? '#eff6ff' : '#f8fafc',
+                          color: '#0f172a',
+                          fontSize: 12,
+                          fontWeight: 600,
+                          cursor: staffQuickPickMax === 0 ? 'not-allowed' : 'pointer',
+                          opacity: staffQuickPickMax === 0 ? 0.5 : 1,
+                        }}
+                        title={
+                          staffQuickPickMax === 0
+                            ? 'Aucune parcelle'
+                            : 'Sélectionner plusieurs parcelles en une fois'
+                        }
+                      >
+                        <span aria-hidden>⚡</span>
+                        <span>Sélection rapide</span>
+                      </button>
+                      {staffQuickPickOpen && (
+                        <div
+                          id="um-staff-quickpick-panel"
+                          role="group"
+                          aria-label="Sélection rapide de parcelles"
+                          style={{
+                            marginTop: 8,
+                            padding: 10,
+                            borderRadius: 10,
+                            border: '1px solid #e2e8f0',
+                            background: '#f8fafc',
+                            display: 'grid',
+                            gap: 8,
+                          }}
+                        >
+                          <label
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 8,
+                              fontSize: 12,
+                              fontWeight: 600,
+                              color: '#334155',
+                            }}
+                          >
+                            Combien de parcelles ?
+                            <input
+                              type="number"
+                              min={1}
+                              max={staffQuickPickMax || 1}
+                              value={clampedStaffQuickPickCount}
+                              onChange={(e) =>
+                                setStaffQuickPickCount(
+                                  Math.max(1, Math.min(staffQuickPickMax || 1, Number(e.target.value) || 1)),
+                                )
+                              }
+                              style={{
+                                width: 72,
+                                padding: '4px 8px',
+                                borderRadius: 6,
+                                border: '1px solid #cbd5e1',
+                                fontSize: 13,
+                                fontWeight: 600,
+                                textAlign: 'center',
+                              }}
+                            />
+                            <span style={{ fontWeight: 400, color: '#64748b' }}>/ {staffQuickPickMax} dispo.</span>
+                          </label>
+                          <div
+                            role="radiogroup"
+                            aria-label="Mode de sélection"
+                            style={{ display: 'flex', gap: 12, fontSize: 12, color: '#334155' }}
+                          >
+                            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                              <input
+                                type="radio"
+                                name="um-staff-quickpick-mode"
+                                value="adjacent"
+                                checked={staffQuickPickMode === 'adjacent'}
+                                onChange={() => setStaffQuickPickMode('adjacent')}
+                              />
+                              Adjacentes (côte à côte)
+                            </label>
+                            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                              <input
+                                type="radio"
+                                name="um-staff-quickpick-mode"
+                                value="random"
+                                checked={staffQuickPickMode === 'random'}
+                                onChange={() => setStaffQuickPickMode('random')}
+                              />
+                              Aléatoires
+                            </label>
+                          </div>
+                          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                            <button
+                              type="button"
+                              onClick={() => setStaffQuickPickOpen(false)}
+                              style={{
+                                padding: '5px 10px',
+                                borderRadius: 6,
+                                border: '1px solid #cbd5e1',
+                                background: '#fff',
+                                color: '#475569',
+                                fontSize: 12,
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              Annuler
+                            </button>
+                            <button
+                              type="button"
+                              onClick={runStaffQuickPick}
+                              disabled={staffQuickPickMax === 0}
+                              style={{
+                                padding: '5px 12px',
+                                borderRadius: 6,
+                                border: 'none',
+                                background: '#2563eb',
+                                color: '#fff',
+                                fontSize: 12,
+                                fontWeight: 700,
+                                cursor: staffQuickPickMax === 0 ? 'not-allowed' : 'pointer',
+                              }}
+                            >
+                              Sélectionner
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
                     <div className="um-scroll">
                       {groupedPieceOptions.map((group) => {
                         const projectKeys = group.items.map((it) => it.key)
@@ -1420,6 +1757,39 @@ export default function UserManagementPage() {
             <div className="sp-detail__section">
               <div className="sp-detail__section-title">Pages admin accessibles</div>
               <div className="um-hint">Droits pour la navigation admin / garde d’accès.</div>
+              {clientPagesForm.length === 0 ? (
+                <div
+                  className="um-note"
+                  style={{
+                    marginBottom: 8,
+                    padding: '8px 10px',
+                    borderRadius: 8,
+                    background: '#fef3c7',
+                    border: '1px solid #fcd34d',
+                    color: '#92400e',
+                    fontSize: 12,
+                    fontWeight: 600,
+                  }}
+                >
+                  ⚠ Aucune page cochée = accès complet par défaut. Cochez au moins une page pour restreindre.
+                </div>
+              ) : (
+                <div
+                  className="um-note"
+                  style={{
+                    marginBottom: 8,
+                    padding: '8px 10px',
+                    borderRadius: 8,
+                    background: '#dbeafe',
+                    border: '1px solid #93c5fd',
+                    color: '#1e3a8a',
+                    fontSize: 12,
+                    fontWeight: 600,
+                  }}
+                >
+                  ✓ Accès restreint à {clientPagesForm.length} page{clientPagesForm.length > 1 ? 's' : ''}.
+                </div>
+              )}
               <div className="um-chips">
                 {PAGE_OPTIONS.map((p) => {
                   const on = clientPagesForm.includes(p.key)
@@ -1439,7 +1809,11 @@ export default function UserManagementPage() {
 
             <div className="sp-detail__section">
               <div className="sp-detail__section-title">Projets accessibles</div>
-              <div className="um-hint">Sélectionnez les projets qui déverrouillent les parcelles du client.</div>
+              <div className="um-hint">
+                Contrôle la liste des projets sur la page <strong>Ventes</strong> pour les vendeurs partenaires.
+                Les cases parcelles ci‑dessous créent des assignations précises&nbsp;; sans case cochée, la vente utilise
+                uniquement les projets sélectionnés ici.
+              </div>
               {projects.length === 0 ? (
                 <div className="um-note um-note--muted">Aucun projet disponible.</div>
               ) : (
@@ -1463,6 +1837,157 @@ export default function UserManagementPage() {
 
             <div className="sp-detail__section">
               <div className="sp-detail__section-title">Parcelles</div>
+              {!clientAssignmentsLoading &&
+              clientProjectsForm.length > 0 &&
+              groupedClientPieceOptions.length > 0 ? (
+                <div className="um-quickpick" style={{ marginBottom: 10 }}>
+                  <button
+                    type="button"
+                    aria-expanded={clientQuickPickOpen}
+                    aria-controls="um-client-quickpick-panel"
+                    onClick={() => setClientQuickPickOpen((v) => !v)}
+                    disabled={clientQuickPickMax === 0 || clientSaving}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      padding: '6px 12px',
+                      borderRadius: 8,
+                      border: '1px solid #cbd5e1',
+                      background: clientQuickPickOpen ? '#eff6ff' : '#f8fafc',
+                      color: '#0f172a',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor:
+                        clientQuickPickMax === 0 || clientSaving ? 'not-allowed' : 'pointer',
+                      opacity: clientQuickPickMax === 0 ? 0.5 : 1,
+                    }}
+                    title={
+                      clientQuickPickMax === 0
+                        ? 'Toutes les parcelles sont déjà assignées'
+                        : 'Attribuer plusieurs parcelles en une fois'
+                    }
+                  >
+                    <span aria-hidden>⚡</span>
+                    <span>Sélection rapide</span>
+                  </button>
+                  {clientQuickPickOpen && (
+                    <div
+                      id="um-client-quickpick-panel"
+                      role="group"
+                      aria-label="Sélection rapide de parcelles"
+                      style={{
+                        marginTop: 8,
+                        padding: 10,
+                        borderRadius: 10,
+                        border: '1px solid #e2e8f0',
+                        background: '#f8fafc',
+                        display: 'grid',
+                        gap: 8,
+                      }}
+                    >
+                      <label
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          fontSize: 12,
+                          fontWeight: 600,
+                          color: '#334155',
+                        }}
+                      >
+                        Combien de parcelles ?
+                        <input
+                          type="number"
+                          min={1}
+                          max={clientQuickPickMax || 1}
+                          value={clampedClientQuickPickCount}
+                          onChange={(e) =>
+                            setClientQuickPickCount(
+                              Math.max(1, Math.min(clientQuickPickMax || 1, Number(e.target.value) || 1)),
+                            )
+                          }
+                          disabled={clientSaving}
+                          style={{
+                            width: 72,
+                            padding: '4px 8px',
+                            borderRadius: 6,
+                            border: '1px solid #cbd5e1',
+                            fontSize: 13,
+                            fontWeight: 600,
+                            textAlign: 'center',
+                          }}
+                        />
+                        <span style={{ fontWeight: 400, color: '#64748b' }}>/ {clientQuickPickMax} dispo.</span>
+                      </label>
+                      <div
+                        role="radiogroup"
+                        aria-label="Mode de sélection"
+                        style={{ display: 'flex', gap: 12, fontSize: 12, color: '#334155' }}
+                      >
+                        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                          <input
+                            type="radio"
+                            name="um-client-quickpick-mode"
+                            value="adjacent"
+                            checked={clientQuickPickMode === 'adjacent'}
+                            onChange={() => setClientQuickPickMode('adjacent')}
+                            disabled={clientSaving}
+                          />
+                          Adjacentes (côte à côte)
+                        </label>
+                        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                          <input
+                            type="radio"
+                            name="um-client-quickpick-mode"
+                            value="random"
+                            checked={clientQuickPickMode === 'random'}
+                            onChange={() => setClientQuickPickMode('random')}
+                            disabled={clientSaving}
+                          />
+                          Aléatoires
+                        </label>
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                        <button
+                          type="button"
+                          onClick={() => setClientQuickPickOpen(false)}
+                          disabled={clientSaving}
+                          style={{
+                            padding: '5px 10px',
+                            borderRadius: 6,
+                            border: '1px solid #cbd5e1',
+                            background: '#fff',
+                            color: '#475569',
+                            fontSize: 12,
+                            fontWeight: 600,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Annuler
+                        </button>
+                        <button
+                          type="button"
+                          onClick={runClientQuickPick}
+                          disabled={clientQuickPickMax === 0 || clientSaving}
+                          style={{
+                            padding: '5px 12px',
+                            borderRadius: 6,
+                            border: 'none',
+                            background: '#2563eb',
+                            color: '#fff',
+                            fontSize: 12,
+                            fontWeight: 700,
+                            cursor: clientQuickPickMax === 0 || clientSaving ? 'not-allowed' : 'pointer',
+                          }}
+                        >
+                          Sélectionner
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : null}
               {clientAssignmentsLoading ? (
                 <div className="um-hint">Chargement des parcelles…</div>
               ) : null}

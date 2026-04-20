@@ -4,6 +4,7 @@ import { ensureCurrentClientProfile, fetchAuthAdminProfile, fetchAuthClientProfi
 import {
   canAccessAdminPath,
   canClientAccessAdminPath,
+  hasFullPageAccess,
   isClientSuspended,
   isStaffSuspended,
 } from './adminAccess.js'
@@ -1043,22 +1044,35 @@ export function AuthProvider({ children }) {
     const clientHasAdminPages = Boolean(
       clientProfile &&
       !isClientSuspended(clientProfile) &&
-      Array.isArray(clientProfile.allowedPages) &&
-      clientProfile.allowedPages.length > 0,
+      (hasFullPageAccess(clientProfile.allowedPages) ||
+        (Array.isArray(clientProfile.allowedPages) && clientProfile.allowedPages.length > 0)),
     )
     const hasAdminAccess = canAccessAdmin || clientHasAdminPages
     const adminTarget = canAccessAdmin
       ? '/admin'
       : clientHasAdminPages
-        ? (canClientAccessAdminPath(sellPath, clientProfile) ? sellPath : clientProfile.allowedPages[0])
+        ? (canClientAccessAdminPath(sellPath, clientProfile)
+          ? sellPath
+          : (Array.isArray(clientProfile.allowedPages) && clientProfile.allowedPages.length > 0
+            ? clientProfile.allowedPages[0]
+            : '/admin'))
         : '/admin'
+
+    // Without this, `adminUser?.allowedPages ?? null` leaked `null` into the
+    // admin shell for clients with limited page access — nav rendered EVERY
+    // module instead of the two the client was actually granted.
+    const effectiveAllowedPages = adminUser
+      ? (adminUser.allowedPages ?? null)
+      : clientProfile
+        ? (clientProfile.allowedPages ?? null)
+        : []
 
     return {
       loading,
       ready: !loading,
       user,
       adminUser,
-      allowedPages: adminUser?.allowedPages ?? null,
+      allowedPages: effectiveAllowedPages,
       clientProfile,
       isAuthenticated,
       adminReady: Boolean(adminUser),

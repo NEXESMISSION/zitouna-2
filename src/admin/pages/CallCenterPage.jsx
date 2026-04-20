@@ -158,40 +158,57 @@ export default function CallCenterPage() {
 
   return (
     <div className="sell-field" dir="ltr">
-      <button type="button" className="sp-back-btn" onClick={() => navigate('/admin')}>
-        <span className="sp-back-btn__icon-wrap" aria-hidden>←</span>
-        <span>Retour</span>
-      </button>
-
-      <header className="sp-hero cc-hero">
-        <div className="sp-hero__avatar cc-hero__icon" aria-hidden><span>📞</span></div>
-        <div className="sp-hero__info">
-          <h1 className="sp-hero__name">Centre d'appels</h1>
-          <p className="sp-hero__role">Qualifiez puis planifiez la visite</p>
+      <header className="sp2-topbar">
+        <button type="button" className="sp2-back" onClick={() => navigate('/admin')} aria-label="Retour">
+          <span aria-hidden>←</span>
+        </button>
+        <div className="sp2-topbar__id">
+          <div className="sp2-topbar__avatar cc-topbar__emoji" aria-hidden>📞</div>
+          <div className="sp2-topbar__info">
+            <span className="sp2-topbar__name">Centre d'appels</span>
+            <span className="sp2-topbar__role">Qualifiez puis planifiez la visite</span>
+          </div>
         </div>
-        <div className="sp-hero__kpis">
-          <span className="sp-hero__kpi-num">
+        <div className="sp2-topbar__today" aria-label={`${stats.today} aujourd'hui`}>
+          <span className="sp2-topbar__today-num">
             {showSkeletons ? <span className="sk-num sk-num--wide" /> : stats.today}
           </span>
-          <span className="sp-hero__kpi-label">aujourd'hui</span>
+          <span className="sp2-topbar__today-lbl">aujourd'hui</span>
         </div>
       </header>
 
-      <button type="button" className="sp-cta-btn" onClick={() => setShowForm(true)}>
-        <span className="sp-cta-btn__icon">+</span>
-        <span className="sp-cta-btn__text">Ajouter un appel</span>
-        <span className="sp-cta-btn__arrow">→</span>
+      <button
+        type="button"
+        className="sp2-cta"
+        onClick={() => setShowForm(true)}
+        aria-label="Ajouter un appel"
+      >
+        <span className="sp2-cta__plus" aria-hidden>+</span>
+        <span className="sp2-cta__text">Ajouter un appel</span>
+        <span className="sp2-cta__arrow" aria-hidden>→</span>
       </button>
 
       <div className="sp-cat-bar">
-        <div className="sp-cat-stats cc-cat-stats">
-          <strong>{showSkeletons ? <span className="sk-num" /> : stats.total}</strong> total
-          <span className="sp-cat-stat-dot" />
-          <strong>{showSkeletons ? <span className="sk-num" /> : stats.today}</strong> aujourd'hui
-          <span className="sp-cat-stat-dot" />
-          <strong>{showSkeletons ? <span className="sk-num" /> : stats.motorise}</strong> motorisés
-          <span className="sp-cat-stat-dot" />
-          <strong>{showSkeletons ? <span className="sk-num" /> : stats.nonMotorise}</strong> navette
+        <div className="sp2-kpis" aria-label="Synthèse des appels">
+          <div className="sp2-kpi">
+            <span className="sp2-kpi__num">{showSkeletons ? <span className="sk-num" /> : stats.total}</span>
+            <span className="sp2-kpi__lbl">Total</span>
+          </div>
+          <span className="sp2-kpi__sep" aria-hidden />
+          <div className="sp2-kpi">
+            <span className="sp2-kpi__num">{showSkeletons ? <span className="sk-num" /> : stats.today}</span>
+            <span className="sp2-kpi__lbl">Aujourd'hui</span>
+          </div>
+          <span className="sp2-kpi__sep" aria-hidden />
+          <div className="sp2-kpi">
+            <span className="sp2-kpi__num">{showSkeletons ? <span className="sk-num" /> : stats.motorise}</span>
+            <span className="sp2-kpi__lbl">Motorisés</span>
+          </div>
+          <span className="sp2-kpi__sep" aria-hidden />
+          <div className="sp2-kpi">
+            <span className="sp2-kpi__num">{showSkeletons ? <span className="sk-num" /> : stats.nonMotorise}</span>
+            <span className="sp2-kpi__lbl">Navette</span>
+          </div>
         </div>
         <div className="sp-cat-filters">
           <input

@@ -6,14 +6,11 @@
 --
 -- What it does:
 --   1) Wipes auth users + business/catalog data (destructive, guard-gated)
---   2) Seeds 4 projects
---   3) Seeds 20 parcels per project
---   4) Seeds project offers
---   5) Seeds 4 accounts (password 123456 for all)
---      - saifelleuchi1@gmail.com  SUPER_ADMIN
---      - saifelleuchi2@gmail.com  STAFF
---      - saifelleuchi3@gmail.com  CLIENT
---      - saifelleuchi4@gmail.com  CLIENT
+--   2) Seeds 4 projects (workflow, checklist, commission rules, offers, slots)
+--   3) Seeds 20 parcels per project (80 total)
+--   4) Seeds 2 SUPER_ADMIN accounts (password: 123456)
+--      - lassad@gmail.com   SUPER_ADMIN
+--      - saif@gmail.com     SUPER_ADMIN
 --
 -- IMPORTANT:
 --   Run this in the same SQL session after:
@@ -22,9 +19,12 @@
 -- Prerequisite (run once before this script):
 --   02_schema.sql -> 03_functions.sql -> 04_rls.sql -> 07_hardening.sql -> 08_notifications.sql
 --
--- If you run only part of this file (or a fragment), you must execute this SET in the
--- same session before the destructive section:
---   SET app.allow_destructive_reset = 'I_UNDERSTAND_THIS_WIPES_DATA';
+-- NOTE ON PASSWORD:
+--   Supabase GoTrue enforces a minimum password length (default: 6 chars)
+--   on BOTH sign-up and sign-in. Earlier versions of this seed tried
+--   "13456" (5 chars) which made sign-in fail with "Invalid login
+--   credentials" even though the row was in auth.users. Using "134567"
+--   (6 chars) clears that policy.
 -- =============================================================================
 
 SET app.allow_destructive_reset = 'I_UNDERSTAND_THIS_WIPES_DATA';
@@ -180,7 +180,7 @@ values
   ('nabeul', 1, 'fixed', 60, null), ('nabeul', 2, 'fixed', 20, null);
 
 -- -----------------------------------------------------------------------------
--- 3) 20 parcels per project (+ one batch each)
+-- 3) 20 parcels per project (+ one tree batch each)
 -- -----------------------------------------------------------------------------
 
 insert into public.parcels
@@ -226,7 +226,7 @@ values
   ('afternoon-2', '16h00 – 18h00', 'Fin d''après-midi', 4);
 
 -- -----------------------------------------------------------------------------
--- 4) 4 auth accounts (password: 123456) + identities
+-- 4) 2 SUPER_ADMIN auth accounts (password: 13456) + identities
 -- -----------------------------------------------------------------------------
 
 insert into auth.users (
@@ -252,10 +252,8 @@ select
   '',
   ''
 from (values
-  ('saifelleuchi1@gmail.com', 'Saif Elleuchi 1', '+216 20 000 001'),
-  ('saifelleuchi2@gmail.com', 'Saif Elleuchi 2', '+216 20 000 002'),
-  ('saifelleuchi3@gmail.com', 'Saif Elleuchi 3', '+216 20 000 003'),
-  ('saifelleuchi4@gmail.com', 'Saif Elleuchi 4', '+216 20 000 004')
+  ('lassad@gmail.com', 'Lassad', '+216 20 000 001'),
+  ('saif@gmail.com',   'Saif',   '+216 20 000 002')
 ) as t(email, full_name, phone);
 
 insert into auth.identities (
@@ -275,42 +273,20 @@ select
   now(),
   now()
 from (values
-  ('saifelleuchi1@gmail.com'),
-  ('saifelleuchi2@gmail.com'),
-  ('saifelleuchi3@gmail.com'),
-  ('saifelleuchi4@gmail.com')
+  ('lassad@gmail.com'),
+  ('saif@gmail.com')
 ) as t(email);
 
 -- -----------------------------------------------------------------------------
--- 5) Admin + clients
+-- 5) admin_users rows — both SUPER_ADMIN
 -- -----------------------------------------------------------------------------
 
 insert into public.admin_users (id, code, full_name, email, phone, phone_normalized, role, status)
 values
-  (('00000000-0000-4000-8000-' || substr(md5('saifelleuchi1@gmail.com'),1,12))::uuid,
-   'ADM-SAIF-1', 'Saif Elleuchi 1', 'saifelleuchi1@gmail.com', '+216 20 000 001', '+21620000001', 'SUPER_ADMIN', 'active'),
-  (('00000000-0000-4000-8000-' || substr(md5('saifelleuchi2@gmail.com'),1,12))::uuid,
-   'ADM-SAIF-2', 'Saif Elleuchi 2', 'saifelleuchi2@gmail.com', '+216 20 000 002', '+21620000002', 'STAFF', 'active');
-
-insert into public.clients
-  (code, full_name, email, phone, phone_normalized, referral_code, auth_user_id, seller_enabled, seller_parcel_quota)
-values
-  ('CLI-SAIF-3', 'Saif Elleuchi 3', 'saifelleuchi3@gmail.com', '+216 20 000 003', '+21620000003', 'REF-SAIF-3',
-   ('00000000-0000-4000-8000-' || substr(md5('saifelleuchi3@gmail.com'),1,12))::uuid, true, 30),
-  ('CLI-SAIF-4', 'Saif Elleuchi 4', 'saifelleuchi4@gmail.com', '+216 20 000 004', '+21620000004', 'REF-SAIF-4',
-   ('00000000-0000-4000-8000-' || substr(md5('saifelleuchi4@gmail.com'),1,12))::uuid, false, 0);
-
-insert into public.client_phone_identities
-  (country_code, phone_local, phone_canonical, client_id, auth_user_id, verification_status)
-select
-  '+216',
-  right(c.phone_normalized, 8),
-  c.phone_normalized,
-  c.id,
-  c.auth_user_id,
-  'verified'
-from public.clients c
-where c.email in ('saifelleuchi3@gmail.com', 'saifelleuchi4@gmail.com');
+  (('00000000-0000-4000-8000-' || substr(md5('lassad@gmail.com'),1,12))::uuid,
+   'ADM-LASSAD', 'Lassad', 'lassad@gmail.com', '+216 20 000 001', '+21620000001', 'SUPER_ADMIN', 'active'),
+  (('00000000-0000-4000-8000-' || substr(md5('saif@gmail.com'),1,12))::uuid,
+   'ADM-SAIF',   'Saif',   'saif@gmail.com',   '+216 20 000 002', '+21620000002', 'SUPER_ADMIN', 'active');
 
 -- Recreate auth auto-link triggers for future account creation
 do $recreate_auth_trg$
@@ -335,8 +311,9 @@ $recreate_auth_trg$;
 -- Final sanity report
 select
   'Dev reset+seed complete' as result,
-  (select count(*) from public.projects) as projects,
-  (select count(*) from public.parcels) as parcels,
-  (select count(*) from auth.users) as auth_users,
+  (select count(*) from public.projects)    as projects,
+  (select count(*) from public.parcels)     as parcels,
+  (select count(*) from public.project_offers) as offers,
+  (select count(*) from auth.users)         as auth_users,
   (select count(*) from public.admin_users) as admin_users,
-  (select count(*) from public.clients) as clients;
+  (select count(*) from public.clients)     as clients;

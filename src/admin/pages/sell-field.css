@@ -42,6 +42,12 @@
   padding: 0 !important;
 }
 
+/* Sell-field pages ship their own back affordance (e.g. sp-back-btn). Hide the
+   global layout control to avoid “← Dashboard” + “← Retour” stacked twice. */
+.adm-shell:has(.sell-field) .adm-page-back-btn {
+  display: none !important;
+}
+
 /* ── Override admin styles inside sell page ── */
 .sell-field .adm-btn--primary {
   background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%) !important;
@@ -298,26 +304,151 @@
 .sp-hero__kpi-label { font-size: 11px; color: rgba(255,255,255,0.60); font-weight: 500; }
 
 /* ══════════════════════════════════════════════════════════════
-   CTA BUTTON
+   CTA — nouvelle vente (high-visibility primary action)
    ══════════════════════════════════════════════════════════════ */
 .sp-cta-btn {
-  width: 100%; display: flex; align-items: center; gap: 12px;
-  padding: 14px 16px; margin-bottom: 20px; border: none; border-radius: 14px;
-  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
-  color: #fff; cursor: pointer;
-  box-shadow: 0 4px 12px rgba(37,99,235,0.20);
-  transition: transform 0.15s, box-shadow 0.15s;
+  position: relative;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  margin-bottom: 20px;
+  border: none;
+  border-radius: 16px;
+  cursor: pointer;
+  text-align: left;
+  color: #fff;
+  overflow: hidden;
+  background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 38%, #059669 100%);
+  box-shadow:
+    0 4px 6px rgba(15, 23, 42, 0.08),
+    0 12px 28px rgba(37, 99, 235, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
 }
-.sp-cta-btn:hover { box-shadow: 0 8px 20px rgba(37,99,235,0.30); transform: translateY(-1px); }
-.sp-cta-btn:active { transform: scale(0.99); box-shadow: 0 2px 6px rgba(37,99,235,0.15); }
-.sp-cta-btn__icon {
-  width: 34px; height: 34px; border-radius: 10px; flex-shrink: 0;
-  background: rgba(255,255,255,0.18);
-  display: flex; align-items: center; justify-content: center;
-  font-size: 20px; font-weight: 900; color: #fff;
+.sp-cta-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse 120% 80% at 20% 0%, rgba(255, 255, 255, 0.18), transparent 55%);
+  pointer-events: none;
 }
-.sp-cta-btn__text { flex: 1; font-size: 14px; font-weight: 700; letter-spacing: -0.01em; text-align: left; }
-.sp-cta-btn__arrow { font-size: 16px; opacity: 0.60; }
+.sp-cta-btn:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 8px 12px rgba(15, 23, 42, 0.1),
+    0 18px 40px rgba(37, 99, 235, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16);
+}
+.sp-cta-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.28);
+}
+.sp-cta-btn__badge {
+  position: relative;
+  z-index: 1;
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  color: #fff;
+}
+.sp-cta-btn__copy {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sp-cta-btn__title {
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+.sp-cta-btn__sub {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.88);
+  opacity: 0.95;
+}
+.sp-cta-btn__go {
+  position: relative;
+  z-index: 1;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+.sp-cta-btn__go-text {
+  display: none;
+}
+@media (min-width: 400px) {
+  .sp-cta-btn__go-text {
+    display: inline;
+  }
+}
+.sp-cta-btn:hover .sp-cta-btn__go {
+  background: rgba(255, 255, 255, 0.18);
+  border-color: rgba(255, 255, 255, 0.45);
+}
+.sp-cta-btn:hover .sp-cta-btn__go svg {
+  transform: translateX(3px);
+}
+.sp-cta-btn__go svg {
+  transition: transform 0.18s ease;
+}
+
+/* Legacy CTA layout (Call center, etc.) — same gradient shell, classic + / text / → */
+.sp-cta-btn > .sp-cta-btn__icon {
+  position: relative;
+  z-index: 1;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: 900;
+  color: #fff;
+}
+.sp-cta-btn > .sp-cta-btn__text {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  text-align: left;
+}
+.sp-cta-btn > .sp-cta-btn__arrow {
+  position: relative;
+  z-index: 1;
+  font-size: 16px;
+  opacity: 0.85;
+}
 
 /* ══════════════════════════════════════════════════════════════
    SECTION HEADING
@@ -477,15 +608,91 @@
    CATALOG BAR (search + filter)
    ══════════════════════════════════════════════════════════════ */
 .sp-cat-bar { margin-bottom: 12px; display: flex; flex-direction: column; gap: 10px; }
+
+/* Stat strip — ligne bleue (Clients, Call center, …) */
 .sp-cat-stats {
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  padding: 10px 14px; border-radius: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  border-radius: 12px;
   background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
-  font-size: 12px; color: rgba(255,255,255,0.75); font-weight: 500;
-  box-shadow: 0 2px 8px rgba(37,99,235,0.20);
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.75);
+  font-weight: 500;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.2);
 }
-.sp-cat-stats strong { color: #fff; font-weight: 800; }
-.sp-cat-stat-dot { width: 3px; height: 3px; border-radius: 50%; background: rgba(255,255,255,0.35); flex-shrink: 0; }
+.sp-cat-stats strong {
+  color: #fff;
+  font-weight: 800;
+}
+.sp-cat-stat-dot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.35);
+  flex-shrink: 0;
+}
+
+/* Sell — 3 mini-cartes (Total / Actives / Volume TND) */
+.sp-cat-stats--sell {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+  font-size: inherit;
+  font-weight: inherit;
+  color: inherit;
+}
+.sp-cat-stats--sell strong {
+  color: inherit;
+  font-weight: inherit;
+}
+.sp-stat-mini {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 12px 8px;
+  border-radius: 12px;
+  background: var(--sp-white);
+  border: 1px solid var(--sp-200);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+.sp-stat-mini__val {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--sp-900);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+.sp-stat-mini__lbl {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--sp-500);
+}
+.sp-stat-mini--money .sp-stat-mini__money-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 4px;
+  line-height: 1;
+}
+.sp-stat-mini--money .sp-stat-mini__val {
+  font-size: 17px;
+}
+.sp-stat-mini__cur {
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--sp-500);
+}
 .sp-cat-filters { display: flex; gap: 8px; }
 .sp-cat-search {
   flex: 1; background: var(--sp-white); border: 1.5px solid var(--sp-200);
@@ -974,6 +1181,64 @@
 .sp-edit__banner-title { margin: 0 0 2px; font-size: 15px; font-weight: 800; }
 .sp-edit__banner-sub   { margin: 0; font-size: 12px; color: rgba(255,255,255,0.65); }
 
+.sp-edit__context {
+  grid-column: 1 / -1;
+  padding: 0 !important;
+  min-height: 0;
+}
+.sp-edit__meta-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  padding: 10px 14px;
+  background: #f8fafc;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+}
+.sp-edit__meta-date { font-size: 11px; color: #64748b; margin-left: auto; }
+.sp-edit__meta-code {
+  font-size: 11px;
+  font-weight: 700;
+  font-family: ui-monospace, monospace;
+  color: #0f172a;
+  background: #e2e8f0;
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+.sp-edit__ttl { font-size: 11px; font-weight: 600; color: #64748b; }
+.sp-edit__ttl--urgent { color: #b45309; font-weight: 700; }
+.sp-edit__lock-hint {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #92400e;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 10px;
+}
+.sp-edit__ledger-wrap {
+  grid-column: 1 / -1;
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #fafafa;
+}
+.sp-edit__ledger-cap {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #475569;
+  background: linear-gradient(180deg, #f1f5f9 0%, #eef2f7 100%);
+  border-bottom: 1px solid #e2e8f0;
+}
+
 .sp-edit__body {
   display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
   padding: 14px 16px;
@@ -1068,4 +1333,218 @@
   .sp-hero { padding: 20px; border-radius: 20px; }
   .sp-wizard__panel { padding: 16px; }
   .sp-wizard__footer { padding: 12px 4px 4px; }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   SIMPLIFIED SELL HEADER (sp2-*) — replaces sp-back-btn + sp-hero
+   on this page only. Shared classes above remain intact for other
+   admin pages that still rely on them.
+   ══════════════════════════════════════════════════════════════ */
+.sp2-topbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0 12px;
+  padding: 10px 12px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+.sp2-back {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #1e40af;
+  font-size: 17px;
+  font-weight: 800;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s, border-color 0.15s, transform 0.12s;
+}
+.sp2-back:hover {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  transform: translateX(-1px);
+}
+.sp2-topbar__id {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+.sp2-topbar__avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  background: #eff6ff;
+  display: block;
+}
+.sp2-topbar__info {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+.sp2-topbar__name {
+  font-size: 14px;
+  font-weight: 800;
+  color: #0f172a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: -0.01em;
+}
+.sp2-topbar__role {
+  font-size: 11px;
+  color: #64748b;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 1px;
+}
+.sp2-topbar__today {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  flex-shrink: 0;
+  padding-left: 10px;
+  border-left: 1px solid #e2e8f0;
+}
+.sp2-topbar__today-num {
+  font-size: 17px;
+  font-weight: 800;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+.sp2-topbar__today-unit {
+  font-size: 10px;
+  font-weight: 800;
+  color: #2563eb;
+}
+.sp2-topbar__today-lbl {
+  font-size: 11px;
+  color: #94a3b8;
+  font-weight: 500;
+  margin-left: 4px;
+}
+@media (max-width: 480px) {
+  .sp2-topbar__today-lbl { display: none; }
+  .sp2-topbar__role { font-size: 10.5px; }
+}
+@media (max-width: 360px) {
+  .sp2-topbar__today { padding-left: 6px; }
+  .sp2-topbar__name { font-size: 13px; }
+}
+
+/* ── Simplified "Nouvelle vente" CTA ─────────────────────────── */
+.sp2-cta {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+  border: none;
+  border-radius: 14px;
+  color: #fff;
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  box-shadow: 0 6px 18px rgba(37, 99, 235, 0.32);
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  text-align: left;
+}
+.sp2-cta:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.42);
+}
+.sp2-cta:active { transform: translateY(0); }
+.sp2-cta__plus {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.22);
+  font-size: 18px;
+  font-weight: 900;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.sp2-cta__text {
+  flex: 1;
+  min-width: 0;
+}
+.sp2-cta__arrow {
+  font-size: 18px;
+  opacity: 0.9;
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+.sp2-cta:hover .sp2-cta__arrow { transform: translateX(3px); }
+
+/* ── Simplified KPI strip — Total / Actives / Volume ─────────── */
+.sp2-kpis {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  gap: 6px;
+  padding: 10px 14px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+.sp2-kpi {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+.sp2-kpi__num {
+  font-size: 18px;
+  font-weight: 800;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+.sp2-kpi__lbl {
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.sp2-kpi__cur {
+  font-size: 11px;
+  font-weight: 800;
+  color: #2563eb;
+}
+.sp2-kpi--money .sp2-kpi__num { color: #1d4ed8; }
+.sp2-kpi__sep {
+  width: 1px;
+  align-self: stretch;
+  background: #e2e8f0;
+  margin: 2px 0;
+  flex-shrink: 0;
+}
+@media (max-width: 380px) {
+  .sp2-kpis { padding: 9px 10px; }
+  .sp2-kpi__num { font-size: 16px; }
+  .sp2-kpi__lbl { font-size: 10px; }
 }
