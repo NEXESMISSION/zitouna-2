@@ -62,8 +62,15 @@ export function computeInstallmentSaleMetrics(sale, plan) {
   rejectedAmount = round2(rejectedAmount)
   pendingAmount = round2(pendingAmount)
 
-  // Strict = terrain deposit + admin-validated installments only.
-  const cashValidatedStrict = round2(terrainDeposit + approvedAmount)
+  // An installment plan only exists after the sale is closed by the notary,
+  // which means Finance has already validated the 1st installment
+  // (downPaymentPlanned, of which terrainDeposit was an advance). So the
+  // down payment is counted as validated cash from day 1; each approved
+  // monthly installment adds to it.
+  //
+  // Strict = full 1st installment (= terrainDeposit + financeBalanceAtSale)
+  //        + admin-validated monthly installments.
+  const cashValidatedStrict = round2(Math.max(terrainDeposit, downPaymentPlanned) + approvedAmount)
   // Operational = strict + receipts awaiting validation.
   const cashReceivedOperational = round2(cashValidatedStrict + submittedAmount)
 

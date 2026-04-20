@@ -24,6 +24,7 @@ export const NAV_ITEMS = [
   // Clients & paiements
   { to: '/admin/clients', label: 'Clients', icon: 'users' },
   { to: '/admin/recouvrement', label: 'Echeanciers & recouvrement', icon: 'credit-card' },
+  { to: '/admin/recouvrement2', label: 'Recouvrement 2+ mois', icon: 'alert-triangle' },
   { to: '/admin/cash-sales', label: 'Paiements cash', icon: 'dollar-sign' },
 
   // Acquisition commerciale

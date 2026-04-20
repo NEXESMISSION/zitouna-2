@@ -164,7 +164,7 @@ function SaleLedgerPanel({ sale, previewWorkflow, variant = 'wizard' }) {
     <div className={wrapClass}>
       <div className={titleClass}>{preview ? 'Aperçu règles projet (figées à la création)' : 'Carnet & snapshots (immuable)'}</div>
       {preview ? (
-        <p className="sp-wizard__helper" style={{ marginTop: 0 }}>
+        <p className="sp-wizard__helper sp-wizard__helper--mt0">
           Montants et listes issus du workflow projet au moment de la validation.
         </p>
       ) : null}
@@ -409,10 +409,26 @@ export default function SellPage() {
   const [page, setPage] = useState(1)
   const SALES_PER_PAGE = 10
 
-  const blankForm = { projectId: '', plotIds: [], clientId: '', offerId: '', notes: '', paymentType: 'installments', deposit: '' }
+  const blankForm = { projectId: '', plotIds: [], clientId: '', offerId: '', notes: '', paymentType: 'installments', deposit: '', useCustomPrice: false, overridePrices: {} }
+
+  // FE-M2 — track which auth user the persisted draft was written under.
+  // When the auth user changes (sign out + sign in as someone else), we
+  // wipe the draft so the new user never sees the previous seller's
+  // in-progress wizard state.
+  const FORM_OWNER_KEY = 'sell_wizard_form_owner'
 
   const [form, setFormRaw] = useState(() => {
     try {
+      const owner = sessionStorage.getItem(FORM_OWNER_KEY)
+      const currentUid = user?.id || ''
+      if (owner && currentUid && owner !== currentUid) {
+        sessionStorage.removeItem(FORM_STORAGE_KEY)
+        sessionStorage.removeItem(STEP_STORAGE_KEY)
+        sessionStorage.removeItem(DRAWER_STORAGE_KEY)
+        sessionStorage.setItem(FORM_OWNER_KEY, currentUid)
+        return blankForm
+      }
+      if (currentUid && !owner) sessionStorage.setItem(FORM_OWNER_KEY, currentUid)
       const saved = sessionStorage.getItem(FORM_STORAGE_KEY)
       if (saved) return { ...blankForm, ...JSON.parse(saved) }
     } catch { /* ignore */ }
@@ -421,16 +437,44 @@ export default function SellPage() {
   const setForm = useCallback((updater) => {
     setFormRaw(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater
-      try { sessionStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(next)) } catch { /* ignore */ }
+      try {
+        sessionStorage.setItem(FORM_STORAGE_KEY, JSON.stringify(next))
+        if (user?.id) sessionStorage.setItem(FORM_OWNER_KEY, user.id)
+      } catch { /* ignore */ }
       return next
     })
-  }, [])
+  }, [user?.id])
+
+  // FE-M2 — react to in-tab user change by wiping the wizard immediately
+  // (covers the rare staff-sudo / fast-user-switch case). The check above
+  // handles cold-mount; this handles live transitions.
+  useEffect(() => {
+    if (!user?.id) return
+    let owner = null
+    try { owner = sessionStorage.getItem(FORM_OWNER_KEY) } catch { /* ignore */ }
+    if (owner && owner !== user.id) {
+      try {
+        sessionStorage.removeItem(FORM_STORAGE_KEY)
+        sessionStorage.removeItem(STEP_STORAGE_KEY)
+        sessionStorage.removeItem(DRAWER_STORAGE_KEY)
+        sessionStorage.setItem(FORM_OWNER_KEY, user.id)
+      } catch { /* ignore */ }
+      setFormRaw(blankForm)
+      setSaleWizardStepRaw(1)
+      setDrawerRaw(null)
+    } else if (!owner) {
+      try { sessionStorage.setItem(FORM_OWNER_KEY, user.id) } catch { /* ignore */ }
+    }
+  // setForm helpers are stable; only re-run on user change.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id])
   const { workflow: sellFormProjectWorkflow } = useProjectWorkflow(form.projectId || '')
   const [editId, setEditId] = useState(null)
 
   const [clientModal, setClientModal] = useState(false)
   const [clientForm, setClientForm] = useState({ name: '', phone: '', phoneCc: '+216', cin: '', city: '' })
   const [clientSaving, setClientSaving] = useState(false)
+  const [saleSaving, setSaleSaving] = useState(false)
   const [cinLookup, setCinLookup] = useState('')
   const [cinLookupResult, setCinLookupResult] = useState(null)
   const [actionModal, setActionModal] = useState(null)
@@ -569,8 +613,22 @@ export default function SellPage() {
       .filter(Boolean)
   }, [form.plotIds, allProjectPlots])
 
+  // Computed per-parcel price coming from the project data (tree batches rolled
+  // up into p.totalPrice upstream). The override map (form.overridePrices) is
+  // only applied when the staff explicitly opted in via the checkbox.
+  const computedPlotPrice = useCallback((pl) => Number(pl?.totalPrice) || 0, [])
+  const effectivePlotPrice = useCallback((pl) => {
+    if (!pl) return 0
+    const base = computedPlotPrice(pl)
+    if (!form.useCustomPrice) return base
+    const raw = form.overridePrices?.[String(pl.id)]
+    if (raw === undefined || raw === null || raw === '') return base
+    const num = Number(String(raw).replace(/\s/g, '').replace(',', '.'))
+    return Number.isFinite(num) && num >= 0 ? num : base
+  }, [form.useCustomPrice, form.overridePrices, computedPlotPrice])
+
   const totalArea = selectedPlots.reduce((s, p) => s + (p.area || 0), 0)
-  const totalPlotPrice = selectedPlots.reduce((s, p) => s + (p.totalPrice || 0), 0)
+  const totalPlotPrice = selectedPlots.reduce((s, p) => s + effectivePlotPrice(p), 0)
 
   const filtered = useMemo(() => salesForList.filter(s => {
     if (filterStatus && s.status !== filterStatus) return false
@@ -631,7 +689,7 @@ export default function SellPage() {
       selectedPlots.length > 0
     ) {
       const o = projectOffers[Number(form.offerId)]
-      const price = o.price ? o.price * selectedPlots.length : totalPlotPrice
+      const price = (!form.useCustomPrice && o.price) ? o.price * selectedPlots.length : totalPlotPrice
       const down = Math.round((price * o.downPayment) / 100)
       const remaining = price - down
       const monthly = Math.round(remaining / o.duration)
@@ -651,7 +709,7 @@ export default function SellPage() {
       }
     }
     return { kind: 'incomplete' }
-  }, [form.deposit, form.paymentType, form.offerId, selectedPlots, totalPlotPrice, projectOffers])
+  }, [form.deposit, form.paymentType, form.offerId, form.useCustomPrice, selectedPlots, totalPlotPrice, projectOffers])
 
   const saleBeingEdited = useMemo(
     () => (editId ? sales.find((s) => String(s.id) === String(editId)) : null),
@@ -720,6 +778,16 @@ export default function SellPage() {
         addToast('Sélectionnez au moins une parcelle.', 'error')
         return
       }
+      if (form.useCustomPrice) {
+        for (const pl of selectedPlots) {
+          const raw = form.overridePrices?.[String(pl.id)]
+          const num = Number(String(raw ?? '').replace(/\s/g, '').replace(',', '.'))
+          if (!Number.isFinite(num) || num <= 0) {
+            addToast(`Saisissez un prix personnalisé valide pour la parcelle #${pl.label ?? pl.id}.`, 'error')
+            return
+          }
+        }
+      }
     }
     if (saleWizardStep === 3) {
       if (!form.clientId) {
@@ -741,7 +809,7 @@ export default function SellPage() {
       }
     }
     setSaleWizardStep(s => Math.min(SALE_WIZARD_STEP_COUNT, s + 1))
-  }, [saleWizardStep, form, projectOffers.length, addToast, cinLookup.length, cinLookupResult])
+  }, [saleWizardStep, form, projectOffers.length, addToast, cinLookup.length, cinLookupResult, selectedPlots])
 
   const plotIdEquals = useCallback((a, b) => {
     if (a == null || b == null) return false
@@ -769,7 +837,66 @@ export default function SellPage() {
     [allProjectPlots]
   )
 
+  // ── "Sélection rapide" panel state (step 2). Lets the staff auto-pick N
+  // adjacent or random available parcels instead of clicking each tile.
+  const [quickPickOpen, setQuickPickOpen] = useState(false)
+  const [quickPickCount, setQuickPickCount] = useState(1)
+  const [quickPickMode, setQuickPickMode] = useState('adjacent') // 'adjacent' | 'random'
+
+  const sortedAvailablePlots = useMemo(
+    () => sortedProjectPlots.filter(isPlotAvailable),
+    [sortedProjectPlots, isPlotAvailable]
+  )
+  const quickPickMax = sortedAvailablePlots.length
+
+  const runQuickPick = useCallback(() => {
+    const n = Math.max(1, Math.min(Number(quickPickCount) || 1, quickPickMax))
+    if (quickPickMax === 0) {
+      addToast("Aucune parcelle disponible pour ce projet.", 'info')
+      return
+    }
+    let chosen = []
+    if (quickPickMode === 'adjacent') {
+      // Find all windows of N consecutive parcel_numbers among available plots.
+      // We use the legacy integer id (pl.id) for adjacency — label is cosmetic.
+      const windows = []
+      const list = sortedAvailablePlots
+      for (let i = 0; i + n <= list.length; i++) {
+        let ok = true
+        for (let k = 1; k < n; k++) {
+          if (Number(list[i + k].id) !== Number(list[i + k - 1].id) + 1) { ok = false; break }
+        }
+        if (ok) windows.push(list.slice(i, i + n))
+      }
+      if (windows.length > 0) {
+        chosen = windows[Math.floor(Math.random() * windows.length)]
+      } else {
+        chosen = list.slice(0, n)
+        addToast('Pas assez de parcelles consécutives — sélection partielle.', 'info')
+      }
+    } else {
+      // Random: pick N distinct available plots (Fisher-Yates partial shuffle).
+      const pool = [...sortedAvailablePlots]
+      for (let i = pool.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1))
+        const t = pool[i]; pool[i] = pool[j]; pool[j] = t
+      }
+      chosen = pool.slice(0, n)
+    }
+    const ids = chosen.map(pl => {
+      const num = Number(pl.id)
+      return Number.isFinite(num) ? num : String(pl.id)
+    })
+    setForm(f => ({ ...f, plotIds: ids }))
+    setQuickPickOpen(false)
+    addToast(`${ids.length} parcelle${ids.length > 1 ? 's' : ''} sélectionnée${ids.length > 1 ? 's' : ''}.`, 'success')
+  }, [quickPickCount, quickPickMax, quickPickMode, sortedAvailablePlots, setForm, addToast])
+
+  // Derived clamp for the "combien" input — avoids a set-state-in-effect.
+  const clampedQuickPickCount = Math.max(1, Math.min(quickPickCount, Math.max(1, quickPickMax)))
+
   const handleSave = useCallback(async () => {
+    if (saleSaving) return
     // cinLookupResult is the last successful phone lookup / RPC-created row;
     // the useClients hook may not have refreshed yet, so fall back to it when
     // the local list doesn't contain form.clientId.
@@ -792,8 +919,12 @@ export default function SellPage() {
     const isInstallments = form.paymentType === 'installments' && form.offerId !== ''
     const offer = isInstallments ? (projectOffers[Number(form.offerId)] || null) : null
 
-    const plotsTotalPrice = plots.reduce((s, p) => s + (p.totalPrice || 0), 0)
-    const price = (offer && offer.price) ? (offer.price * plots.length) : plotsTotalPrice
+    const plotsTotalPrice = plots.reduce((s, p) => s + effectivePlotPrice(p), 0)
+    // When the user manually overrides per-parcel prices, their total is
+    // authoritative and supersedes the offer's flat-price multiplication.
+    const price = (!form.useCustomPrice && offer && offer.price)
+      ? (offer.price * plots.length)
+      : plotsTotalPrice
     // Arabon (terrain) is controlled only by project settings (project arabonDefault).
     // Never allow editing from this screen.
     const depositAmount = Number(arabonForProject(form.projectId)) || 0
@@ -816,6 +947,13 @@ export default function SellPage() {
       return
     }
 
+    setSaleSaving(true)
+    let watchdogFired = false
+    const watchdog = window.setTimeout(() => {
+      watchdogFired = true
+      setSaleSaving(false)
+      addToast("La création n'a pas répondu à temps (30 s). Vérifiez votre connexion et réessayez.", 'error')
+    }, 30000)
     try {
       if (editId) {
         const prevSale = sales.find(s => s.id === editId)
@@ -906,7 +1044,7 @@ export default function SellPage() {
           addToast("Client manquant : sélectionnez ou créez une fiche avant de soumettre la vente.", 'error')
           return
         }
-        const created = await salesCreate({
+        await salesCreate({
           projectId: form.projectId,
           projectTitle: project?.title || '',
           parcelId: plotDbIds[0],
@@ -950,29 +1088,20 @@ export default function SellPage() {
           reservationStatus: 'active',
           ...saleAttribution(role, adminUser),
         })
-        try {
-          const sid = created?.sellerClientId || myClientId || null
-          if (sid) {
-            const sellerClient = clients.find((c) => String(c.id) === String(sid))
-            const pid = sellerClient?.referredByClientId || ''
-            if (pid && String(pid) !== String(sid)) {
-              await db.upsertSellerRelation({
-                childClientId: sid,
-                parentClientId: pid,
-                sourceSaleId: created.id,
-              })
-            }
-          }
-        } catch (e) {
-          console.warn('seller_upline_autolink', e)
-        }
+        // Pyramid links are now established at NOTARY COMPLETION (not sale
+        // creation) — see NotaryDashboardPage.completeSale. A sale-creation
+        // link would pollute the graph with cancelled/expired reservations
+        // that never actually moved money.
         for (const p of plots) {
           if (p.dbId) await updateParcelStatus(p.dbId, 'reserved')
         }
       }
-      addToast(editId ? 'Vente mise à jour' : `Vente créée — ${plots.length} parcelle(s)`)
-      closeSaleDrawer()
+      if (!watchdogFired) {
+        addToast(editId ? 'Vente mise à jour' : `Vente créée — ${plots.length} parcelle(s)`)
+        closeSaleDrawer()
+      }
     } catch (err) {
+      if (watchdogFired) return
       const msg = String(err?.message || err || '')
       const code = String(err?.code || err?.details || '')
       if (/23505|unique|duplicate|already tied|engagée|overlap/i.test(msg) || /23505/.test(code)) {
@@ -985,8 +1114,11 @@ export default function SellPage() {
       } catch {
         /* ignore */
       }
+    } finally {
+      window.clearTimeout(watchdog)
+      if (!watchdogFired) setSaleSaving(false)
     }
-  }, [form, editId, clients, scopedProjects, projectOffers, sales, salesCreate, salesUpdate, updateParcelStatus, addToast, role, adminUser, closeSaleDrawer, refreshSales, sellerMode, sellerAssignedParcelDbIds, myClientId, effectiveSellerClientId, cinLookup, sellerClientRecord?.cin])
+  }, [saleSaving, form, editId, clients, scopedProjects, projectOffers, sales, salesCreate, salesUpdate, updateParcelStatus, addToast, role, adminUser, closeSaleDrawer, refreshSales, sellerMode, sellerAssignedParcelDbIds, myClientId, effectiveSellerClientId, cinLookup, sellerClientRecord?.cin, effectivePlotPrice])
 
   const advanceStatus = useCallback(async (sale) => {
     const flow = STATUS_FLOW[sale.status]
@@ -1217,17 +1349,17 @@ export default function SellPage() {
             <div key={`sk-${i}`} className="sp-card sp-card--skeleton" aria-hidden>
               <div className="sp-card__head">
                 <div className="sp-card__user">
-                  <span className="sp-card__initials sp-sk-box" />
+                  <span className="sp-card__initials sk-box" />
                   <div style={{ flex: 1 }}>
-                    <p className="sp-sk-line sp-sk-line--title" />
-                    <p className="sp-sk-line sp-sk-line--sub" />
+                    <p className="sk-line sk-line--title" />
+                    <p className="sk-line sk-line--sub" />
                   </div>
                 </div>
-                <span className="sp-sk-line sp-sk-line--badge" />
+                <span className="sk-line sk-line--badge" />
               </div>
               <div className="sp-card__body">
-                <span className="sp-sk-line sp-sk-line--price" />
-                <span className="sp-sk-line sp-sk-line--info" />
+                <span className="sk-line sk-line--price" />
+                <span className="sk-line sk-line--info" />
               </div>
             </div>
           ))
@@ -1563,7 +1695,7 @@ export default function SellPage() {
 
               <div className="sp-edit__footer">
                 <button type="button" className="sp-edit__btn sp-edit__btn--cancel" onClick={closeSaleDrawer}>Annuler</button>
-                <button type="button" className="sp-edit__btn sp-edit__btn--save" onClick={handleSave}>Enregistrer</button>
+                <button type="button" className="sp-edit__btn sp-edit__btn--save" onClick={handleSave} disabled={saleSaving}>{saleSaving ? 'Enregistrement…' : 'Enregistrer'}</button>
               </div>
             </div>
           </AdminModal>
@@ -1657,9 +1789,9 @@ export default function SellPage() {
             <option value="">— Choisir un projet —</option>
             {scopedProjects.map(p => <option key={p.id} value={p.id}>{p.title} — {p.city}</option>)}
           </select>
-          <p className="sp-wizard__helper" style={{ marginBottom: 0 }}>Le projet détermine les parcelles, offres et paramètres d'acompte disponibles.</p>
+          <p className="sp-wizard__helper sp-wizard__helper--mb0">Le projet détermine les parcelles, offres et paramètres d'acompte disponibles.</p>
           {scopedProjects.length === 0 && (
-            <div className="sp-empty" style={{ marginTop: 12 }}>
+            <div className="sp-empty sp-empty--mt12">
               <span className="sp-empty__emoji" aria-hidden>🏗️</span>
               <div className="sp-empty__title">Aucun projet accessible</div>
               <div>Contactez un administrateur pour qu'un projet vous soit attribué.</div>
@@ -1670,7 +1802,7 @@ export default function SellPage() {
 
           {saleWizardStep === 2 && form.projectId && (
         <div className="sp-wizard__panel sp-wizard__panel--plots sp-wizard__panel--plots-minimal">
-            <div style={{ padding: '0 4px 10px', borderBottom: '1px solid #e2e8f0', marginBottom: 10 }}>
+            <div className="sp-plot-head">
               <h2 className="sp-panel-title">Choisissez les parcelles</h2>
               <p className="sp-panel-sub">
                 {selectedPlots.length === 0
@@ -1681,6 +1813,97 @@ export default function SellPage() {
                 <span><span className="sp-plot-legend__dot" style={{ background: '#2563eb' }} />Sélectionnée</span>
                 <span><span className="sp-plot-legend__dot" style={{ background: '#f1f5f9', border: '1px solid #cbd5e1' }} />Disponible</span>
                 <span><span className="sp-plot-legend__dot" style={{ background: '#e5e7eb' }} />Indisponible</span>
+              </div>
+              <div className="sp-quickpick" style={{ marginTop: 10 }}>
+                <button
+                  type="button"
+                  className="sp-quickpick__toggle"
+                  aria-expanded={quickPickOpen}
+                  aria-controls="sp-quickpick-panel"
+                  onClick={() => setQuickPickOpen(v => !v)}
+                  disabled={quickPickMax === 0}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    padding: '6px 12px', borderRadius: 8,
+                    border: '1px solid #cbd5e1', background: quickPickOpen ? '#eff6ff' : '#f8fafc',
+                    color: '#0f172a', fontSize: 12, fontWeight: 600,
+                    cursor: quickPickMax === 0 ? 'not-allowed' : 'pointer',
+                    opacity: quickPickMax === 0 ? 0.5 : 1,
+                  }}
+                  title={quickPickMax === 0 ? 'Aucune parcelle disponible' : 'Sélectionner plusieurs parcelles en une fois'}
+                >
+                  <span aria-hidden>⚡</span>
+                  <span>Sélection rapide</span>
+                </button>
+                {quickPickOpen && (
+                  <div
+                    id="sp-quickpick-panel"
+                    className="sp-quickpick__panel"
+                    role="group"
+                    aria-label="Sélection rapide de parcelles"
+                    style={{
+                      marginTop: 8, padding: 10, borderRadius: 10,
+                      border: '1px solid #e2e8f0', background: '#f8fafc',
+                      display: 'grid', gap: 8,
+                    }}
+                  >
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 600, color: '#334155' }}>
+                      Combien de parcelles ?
+                      <input
+                        type="number"
+                        min={1}
+                        max={quickPickMax || 1}
+                        value={clampedQuickPickCount}
+                        onChange={e => setQuickPickCount(Math.max(1, Math.min(quickPickMax || 1, Number(e.target.value) || 1)))}
+                        style={{
+                          width: 72, padding: '4px 8px', borderRadius: 6,
+                          border: '1px solid #cbd5e1', fontSize: 13, fontWeight: 600,
+                          textAlign: 'center',
+                        }}
+                      />
+                      <span style={{ fontWeight: 400, color: '#64748b' }}>/ {quickPickMax} dispo.</span>
+                    </label>
+                    <div role="radiogroup" aria-label="Mode de sélection" style={{ display: 'flex', gap: 12, fontSize: 12, color: '#334155' }}>
+                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                        <input
+                          type="radio"
+                          name="sp-quickpick-mode"
+                          value="adjacent"
+                          checked={quickPickMode === 'adjacent'}
+                          onChange={() => setQuickPickMode('adjacent')}
+                        />
+                        Adjacentes (côte à côte)
+                      </label>
+                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}>
+                        <input
+                          type="radio"
+                          name="sp-quickpick-mode"
+                          value="random"
+                          checked={quickPickMode === 'random'}
+                          onChange={() => setQuickPickMode('random')}
+                        />
+                        Aléatoires
+                      </label>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                      <button
+                        type="button"
+                        onClick={() => setQuickPickOpen(false)}
+                        style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid #cbd5e1', background: '#fff', color: '#475569', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+                      >
+                        Annuler
+                      </button>
+                      <button
+                        type="button"
+                        onClick={runQuickPick}
+                        disabled={quickPickMax === 0}
+                        style={{ padding: '5px 12px', borderRadius: 6, border: 'none', background: '#2563eb', color: '#fff', fontSize: 12, fontWeight: 700, cursor: quickPickMax === 0 ? 'not-allowed' : 'pointer' }}
+                      >
+                        Sélectionner
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
             {allProjectPlots.length === 0 ? (
@@ -1703,12 +1926,13 @@ export default function SellPage() {
                       const numId = Number(pl.id)
                       const selected = form.plotIds.some(pid => Number(pid) === numId || String(pid) === String(pl.id))
                       const available = isPlotAvailable(pl)
+                      const plotPrice = computedPlotPrice(pl)
                       return (
                         <button
                           key={pl.id}
                           type="button"
                           className={
-                            'sp-plot-micro' +
+                            'sp-plot-micro sp-plot-tile' +
                             (selected ? ' sp-plot-micro--selected' : '') +
                             (!available ? ' sp-plot-micro--taken' : '')
                           }
@@ -1722,9 +1946,15 @@ export default function SellPage() {
                             }
                             togglePlotInline(pl)
                           }}
-                          title={available ? `${selected ? 'Retirer' : 'Ajouter'} la parcelle ${pl.id}` : `Parcelle ${pl.id} indisponible`}
+                          title={available ? `${selected ? 'Retirer' : 'Ajouter'} la parcelle ${pl.label ?? pl.id}` : `Parcelle ${pl.label ?? pl.id} indisponible`}
                         >
-                          <span className="sp-plot-micro__num">{pl.id}</span>
+                          <span className="sp-plot-micro__num">#{pl.label ?? pl.id}</span>
+                          {pl.area != null && (
+                            <span className="sp-plot-tile__meta">{Number(pl.area).toLocaleString('fr-FR')} m²</span>
+                          )}
+                          <span className="sp-plot-tile__price">
+                            {plotPrice > 0 ? `${plotPrice.toLocaleString('fr-FR')} TND` : '—'}
+                          </span>
                         </button>
                       )
                     })}
@@ -1738,6 +1968,73 @@ export default function SellPage() {
                 <div>Elles sont réservées, vendues ou liées à une vente en cours. Choisissez un autre projet.</div>
               </div>
             ) : null}
+            {selectedPlots.length > 0 && (
+              <div className="sp-price-override">
+                <label className="sp-price-override__toggle">
+                  <input
+                    type="checkbox"
+                    checked={!!form.useCustomPrice}
+                    onChange={(e) => {
+                      const on = e.target.checked
+                      setForm((f) => {
+                        if (!on) return { ...f, useCustomPrice: false }
+                        // Seed the overrides with the current computed prices so the
+                        // staff edits from a sensible starting point rather than empty.
+                        const seeded = { ...(f.overridePrices || {}) }
+                        for (const pl of selectedPlots) {
+                          const key = String(pl.id)
+                          if (seeded[key] === undefined || seeded[key] === '') {
+                            seeded[key] = String(computedPlotPrice(pl) || '')
+                          }
+                        }
+                        return { ...f, useCustomPrice: true, overridePrices: seeded }
+                      })
+                    }}
+                  />
+                  <span>Utiliser un prix personnalisé par parcelle</span>
+                </label>
+                {form.useCustomPrice && (
+                  <div className="sp-price-override__list" role="group" aria-label="Prix personnalisés par parcelle">
+                    {selectedPlots.map((pl) => {
+                      const key = String(pl.id)
+                      const base = computedPlotPrice(pl)
+                      const raw = form.overridePrices?.[key]
+                      const val = raw === undefined || raw === null ? String(base || '') : String(raw)
+                      return (
+                        <div key={pl.id} className="sp-price-override__row">
+                          <span className="sp-price-override__label">Parcelle #{pl.label ?? pl.id}</span>
+                          <span className="sp-price-override__hint">
+                            {base > 0 ? `Calculé : ${base.toLocaleString('fr-FR')} TND` : 'Aucun prix catalogue'}
+                          </span>
+                          <div className="sp-price-override__input-wrap">
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              className="sp-wizard__input sp-price-override__input"
+                              value={val}
+                              onChange={(e) => {
+                                const next = e.target.value.replace(/[^0-9.,\s]/g, '')
+                                setForm((f) => ({
+                                  ...f,
+                                  overridePrices: { ...(f.overridePrices || {}), [key]: next },
+                                }))
+                              }}
+                              placeholder={String(base || 0)}
+                              aria-label={`Prix personnalisé parcelle ${pl.label ?? pl.id}`}
+                            />
+                            <span className="sp-price-override__unit">TND</span>
+                          </div>
+                        </div>
+                      )
+                    })}
+                    <div className="sp-price-override__total">
+                      <span>Total personnalisé</span>
+                      <strong>{totalPlotPrice.toLocaleString('fr-FR')} TND</strong>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
         </div>
           )}
 
@@ -1932,7 +2229,7 @@ export default function SellPage() {
 
         {form.paymentType === 'installments' && form.offerId !== '' && projectOffers[Number(form.offerId)] && selectedPlots.length > 0 && (() => {
           const o = projectOffers[Number(form.offerId)]
-          const price = o.price ? (o.price * selectedPlots.length) : totalPlotPrice
+          const price = (!form.useCustomPrice && o.price) ? (o.price * selectedPlots.length) : totalPlotPrice
           const down = Math.round(price * o.downPayment / 100)
           const remaining = price - down
           const monthly = Math.round(remaining / o.duration)
@@ -2134,7 +2431,7 @@ export default function SellPage() {
                 <strong>
                   {selectedPlots.length
                     ? selectedPlots
-                        .map((p) => `#${p.id}${p.area != null ? ` · ${p.area} m²` : ''}${p.trees != null ? ` · ${p.trees} arbres` : ''}`)
+                        .map((p) => `#${p.label ?? p.id}${p.area != null ? ` · ${p.area} m²` : ''}${p.trees != null ? ` · ${p.trees} arbres` : ''}`)
                         .join(' · ')
                     : '—'}
                 </strong>
@@ -2239,9 +2536,11 @@ export default function SellPage() {
                   type="button"
                   className="sp-wizard__btn sp-wizard__btn--cta"
                   onClick={handleSave}
-                  disabled={saleFormSubmitBlocked}
+                  disabled={saleFormSubmitBlocked || saleSaving}
                 >
-                  {editId ? 'Enregistrer' : `Créer la vente (${form.plotIds.length} parcelle(s))`}
+                  {saleSaving
+                    ? (editId ? 'Enregistrement…' : 'Création…')
+                    : (editId ? 'Enregistrer' : `Créer la vente (${form.plotIds.length} parcelle(s))`)}
                 </button>
               </>
             )}

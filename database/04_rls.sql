@@ -475,40 +475,17 @@ create policy user_update_own_notifications on public.user_notifications
 
 -- ============================================================================
 -- Baseline grants + default privileges
+--
+-- *** REMOVED *** — see database/09_security_hardening.sql.
+-- The blanket GRANTs and ALTER DEFAULT PRIVILEGES that used to live here
+-- meant every new table was OPEN-by-default to authenticated/anon (audit
+-- ref: 01_SECURITY_FINDINGS.md S-C1). 09 replaces them with explicit
+-- per-table grants + REVOKEs the dangerous defaults. service_role still
+-- gets ALL via 09 since it's the trusted edge-function key.
+--
+-- The few explicit per-function grants below stay here because they are
+-- pre-existing helpers; future per-function grants belong in 09 too.
 -- ============================================================================
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO authenticated;
-GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO authenticated;
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO authenticated;
-
-GRANT SELECT ON ALL TABLES IN SCHEMA public TO anon;
-GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO anon;
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO anon;
-
-GRANT ALL ON ALL TABLES IN SCHEMA public TO service_role;
-GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO service_role;
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO service_role;
-
-DO $$
-BEGIN
-  ALTER DEFAULT PRIVILEGES IN SCHEMA public
-    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO authenticated;
-  ALTER DEFAULT PRIVILEGES IN SCHEMA public
-    GRANT USAGE, SELECT ON SEQUENCES TO authenticated;
-  ALTER DEFAULT PRIVILEGES IN SCHEMA public
-    GRANT EXECUTE ON FUNCTIONS TO authenticated;
-
-  ALTER DEFAULT PRIVILEGES IN SCHEMA public
-    GRANT SELECT ON TABLES TO anon;
-  ALTER DEFAULT PRIVILEGES IN SCHEMA public
-    GRANT USAGE, SELECT ON SEQUENCES TO anon;
-  ALTER DEFAULT PRIVILEGES IN SCHEMA public
-    GRANT EXECUTE ON FUNCTIONS TO anon;
-
-  ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES    TO service_role;
-  ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO service_role;
-  ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO service_role;
-EXCEPTION WHEN insufficient_privilege THEN NULL;
-END $$;
 
 -- Explicit grants for critical helpers/RPCs (idempotent; function must exist).
 GRANT EXECUTE ON FUNCTION public.current_client_id()                              TO authenticated;
@@ -521,58 +498,15 @@ GRANT EXECUTE ON FUNCTION public.request_ambassador_payout(numeric, text)       
 GRANT EXECUTE ON FUNCTION public.increment_ambassador_wallet_balance(uuid, numeric) TO authenticated;
 
 -- ============================================================================
--- Auth ↔ client recovery (safe to re-run): links existing clients to auth.users
--- and creates missing rows + phone identities. Idempotent.
+-- Auth ↔ client recovery
+--
+-- *** MOVED *** — see database/10_one_shot_recovery.sql.
+-- Bundling this into 04_rls.sql meant it ran on every apply, which is
+-- exactly the unattended fuel for the account-hijack vector S-C2 (audit
+-- ref: 01_SECURITY_FINDINGS.md S-H4). The new file is one-shot, gated by
+-- an explicit SET token, requires email_confirmed_at, and audit-logs
+-- every link.
 -- ============================================================================
-UPDATE public.clients c
-SET auth_user_id = au.id, updated_at = now()
-FROM auth.users au
-WHERE c.auth_user_id IS NULL
-  AND c.email IS NOT NULL
-  AND LOWER(c.email) = LOWER(au.email);
-
-INSERT INTO public.clients (code, auth_user_id, full_name, email, phone, status)
-SELECT
-  'CL-' || UPPER(SUBSTRING(REPLACE(au.id::text, '-', '') FROM 1 FOR 10)),
-  au.id,
-  COALESCE(
-    NULLIF(TRIM(CONCAT(au.raw_user_meta_data->>'firstname', ' ', au.raw_user_meta_data->>'lastname')), ''),
-    NULLIF(au.raw_user_meta_data->>'name', ''),
-    NULLIF(split_part(au.email, '@', 1), ''),
-    'Client'
-  ),
-  NULLIF(LOWER(au.email), ''),
-  NULLIF(au.raw_user_meta_data->>'phone', ''),
-  'active'
-FROM auth.users au
-LEFT JOIN public.clients c ON c.auth_user_id = au.id
-WHERE c.id IS NULL
-  AND NOT EXISTS (
-    SELECT 1 FROM public.clients c2
-    WHERE c2.email IS NOT NULL AND LOWER(c2.email) = LOWER(au.email)
-  );
-
-INSERT INTO public.client_phone_identities (
-  country_code, phone_local, phone_canonical, client_id, auth_user_id, verification_status
-)
-SELECT
-  CASE
-    WHEN COALESCE(c.phone, '') ~ '^\s*\+\d+'
-      THEN '+' || COALESCE(NULLIF(SUBSTRING(REGEXP_REPLACE(c.phone, '\D', '', 'g') FROM 1 FOR 3), ''), '216')
-    ELSE '+216'
-  END,
-  REGEXP_REPLACE(COALESCE(c.phone, ''), '\D', '', 'g'),
-  '+' || REGEXP_REPLACE(COALESCE(c.phone, ''), '\D', '', 'g'),
-  c.id,
-  c.auth_user_id,
-  'verified'
-FROM public.clients c
-WHERE COALESCE(REGEXP_REPLACE(COALESCE(c.phone, ''), '\D', '', 'g'), '') <> ''
-ON CONFLICT (phone_canonical) DO UPDATE
-SET
-  client_id    = COALESCE(public.client_phone_identities.client_id,    EXCLUDED.client_id),
-  auth_user_id = COALESCE(public.client_phone_identities.auth_user_id, EXCLUDED.auth_user_id),
-  updated_at   = now();
 
 -- ============================================================================
 -- Delegated seller policies
@@ -587,12 +521,11 @@ SET
 -- These policies are ADDITIVE next to the existing staff_* policies.
 -- ============================================================================
 
--- clients: delegated sellers can SELECT all clients (needed for buyer lookup
--- in the Sell wizard). Writes remain staff-only + the buyer-stub RPC.
+-- *** REMOVED *** — see database/09_security_hardening.sql.
+-- Previous policy let delegated sellers SELECT every client row (mass
+-- PII leak, audit ref: 01_SECURITY_FINDINGS.md S-C3). Replaced by the
+-- narrow `lookup_client_for_sale(query)` RPC defined in 09.
 drop policy if exists delegated_sellers_clients_select on public.clients;
-create policy delegated_sellers_clients_select on public.clients for select
-  to authenticated
-  using (public.is_delegated_seller());
 
 -- sales: INSERT when attributed to themselves; SELECT and UPDATE their own.
 drop policy if exists delegated_sellers_sales_insert on public.sales;

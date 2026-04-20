@@ -16,6 +16,9 @@ import {
 } from '../lib/useSupabase.js'
 import { addInstallmentReceiptRecord, requestAmbassadorPayout, updatePaymentStatus, uploadInstallmentReceipt } from '../lib/db.js'
 import { computeInstallmentSaleMetrics, formatMoneyTnd } from '../domain/installmentMetrics.js'
+import RenderDataGate from '../components/RenderDataGate.jsx'
+import EmptyState from '../components/EmptyState.jsx'
+import ErrorPanel from '../components/ErrorPanel.jsx'
 import './dashboard-page.css'
 import './installments-page.css'
 
@@ -70,6 +73,7 @@ export default function DashboardPage() {
   const navigate = useNavigate()
   const {
     user,
+    ready,
     adminUser,
     clientProfile,
     logout,
@@ -78,43 +82,23 @@ export default function DashboardPage() {
 
   const displayName = adminUser?.name || user?.firstname || user?.name || 'Investisseur'
 
-  const clientId = clientProfile?.id || null
-
-  // Self-heal on mount: if the logged-in user has no clientProfile yet but
-  // DOES have an auth.uid, call heal_my_client_profile_now() which links any
-  // orphan clients row (stub created by a delegated seller + buyer email
-  // matches the auth user). Silent if already linked. This replaces the
-  // "you must log out and log back in for the link to take effect" behavior.
-  const healedRef = useRef(false)
-  useEffect(() => {
-    if (healedRef.current) return
-    if (!user?.id) return
-    if (clientProfile?.id) return
-    healedRef.current = true
-    ;(async () => {
-      try {
-        const { data, error } = await supabase.rpc('heal_my_client_profile_now')
-        if (error) {
-          console.warn('[Dashboard] heal_my_client_profile_now error:', error.message)
-          return
-        }
-        if (data?.linked > 0 || (data?.ok && data?.clientId)) {
-          console.info('[Dashboard] profile healed:', data)
-          refreshAuth?.()
-        }
-      } catch (e) {
-        console.warn('[Dashboard] heal failed:', e?.message || e)
-      }
-    })()
-  }, [user?.id, clientProfile?.id, refreshAuth])
+  // Plan 04 §3.1 — pass the resolved clientId into every scoped hook.
+  // `ready && clientProfile?.id` ensures we never fire fetches while
+  // AuthContext is still resolving, and the hooks' null-guards short
+  // circuit (loading=false + empty) when `clientId` is null so no
+  // section is ever pinned on an initial-mount spinner. The in-component
+  // `heal_my_client_profile_now` effect has been removed — heal is now
+  // owned by RequireCustomerAuth + AuthContext (plan 04 §3.3 / §5).
+  const clientId = (ready && clientProfile?.id) ? clientProfile.id : null
 
   const { sales: mySalesRaw, loading: salesLoading } = useSalesScoped({ clientId })
-  const { plans: myPlans, refresh: refreshPlans } = useInstallmentsScoped({ clientId })
+  const { plans: myPlans, loading: plansLoadingRaw, refresh: refreshPlans } = useInstallmentsScoped({ clientId })
   const { sales: ambassadorSales } = useSalesBySellerClientId(clientId || '')
   const showAmbassadorCard = Boolean(clientId)
   const { summary: referralSummary, loading: referralLoading, refresh: refreshReferralSummary } =
     useAmbassadorReferralSummary(showAmbassadorCard)
-  const { events: myCommissionEvents, loading: ledgerLoading, refresh: refreshCommissionLedger } = useMyCommissionLedger(clientId || false)
+  // PLAN 02 §14 — migrated from boolean form to canonical {clientId, enabled}.
+  const { events: myCommissionEvents, loading: ledgerLoading, refresh: refreshCommissionLedger } = useMyCommissionLedger({ clientId: clientId || null, enabled: Boolean(clientId) })
   const [referralLoadStale, setReferralLoadStale] = useState(false)
   useEffect(() => {
     if (!referralLoading) {
@@ -163,9 +147,11 @@ export default function DashboardPage() {
     () => [...new Set((mySalesAll || []).map((s) => s.projectId).filter(Boolean))],
     [mySalesAll]
   )
-  const { projects: allProjects, loading: projectsLoading } = useProjectsScoped(scopedProjectIds)
-  // Combined "is the portfolio still loading its primary data?" flag — drives
-  // the skeleton shimmer so the user never stares at an empty page.
+  const { projects: allProjects, loading: projectsLoading, refresh: refreshProjects } = useProjectsScoped(scopedProjectIds)
+  // Plan 04 §3.1 — the old `portfolioLoading` aggregate boolean has been
+  // dropped: a single stalled sub-hook no longer pins the whole page.
+  // Each section below owns its own RenderDataGate + watchdog so
+  // independent stores recover independently.
   const portfolioLoading = Boolean(clientId) && (salesLoading || projectsLoading) && mySalesAll.length === 0
 
   const { myPurchases } = useMemo(() => {
@@ -405,6 +391,11 @@ export default function DashboardPage() {
   }, [myCommissionEvents])
 
   const [focusedPlanId, setFocusedPlanId] = useState(null)
+  // Pagination for the focused plan's payments list. Reset to page 1 when
+  // switching plans so the user isn't stranded on page 3 of a short plan.
+  const IP_PAYMENTS_PER_PAGE = 5
+  const [ipPaymentPage, setIpPaymentPage] = useState(1)
+  useEffect(() => { setIpPaymentPage(1) }, [focusedPlanId])
   const [ipPayTarget, setIpPayTarget] = useState(null)
   const [ipReceiptName, setIpReceiptName] = useState('')
   const [ipReceiptFile, setIpReceiptFile] = useState(null)
@@ -554,7 +545,7 @@ export default function DashboardPage() {
                 alt={displayName}
               />
             </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="inv-header__meta">
               <h2 className="inv-header__name">Bonjour, {displayName}</h2>
               <p className="inv-header__subtitle">Votre portefeuille d&apos;oliviers</p>
             </div>
@@ -646,28 +637,28 @@ export default function DashboardPage() {
             <div className="inv-kpi-strip" aria-live="polite">
               <div className="inv-kpi">
                 <span className="inv-kpi__value inv-kpi__value--green">
-                  {salesLoading ? <span className="inv-sk inv-sk--num" /> : Math.round(animTrees).toLocaleString('fr-FR')}
+                  {salesLoading ? <span className="sk sk-num" /> : Math.round(animTrees).toLocaleString('fr-FR')}
                 </span>
                 <span className="inv-kpi__label">Oliviers</span>
               </div>
               <div className="inv-kpi-sep" />
               <div className="inv-kpi">
                 <span className="inv-kpi__value">
-                  {salesLoading ? <span className="inv-sk inv-sk--num" /> : Math.round(animInvested).toLocaleString('fr-FR')}
+                  {salesLoading ? <span className="sk sk-num" /> : Math.round(animInvested).toLocaleString('fr-FR')}
                 </span>
                 <span className="inv-kpi__label">TND investis</span>
               </div>
               <div className="inv-kpi-sep" />
               <div className="inv-kpi">
                 <span className="inv-kpi__value inv-kpi__value--green">
-                  {salesLoading ? <span className="inv-sk inv-sk--num" /> : Math.round(animRevenue).toLocaleString('fr-FR')}
+                  {salesLoading ? <span className="sk sk-num" /> : Math.round(animRevenue).toLocaleString('fr-FR')}
                 </span>
                 <span className="inv-kpi__label">TND / an</span>
               </div>
               <div className="inv-kpi-sep" />
               <div className="inv-kpi">
                 <span className="inv-kpi__value inv-kpi__value--blue">
-                  {salesLoading ? <span className="inv-sk inv-sk--num" /> : `${animRoi.toFixed(1)}%`}
+                  {salesLoading ? <span className="sk sk-num" /> : `${animRoi.toFixed(1)}%`}
                 </span>
                 <span className="inv-kpi__label">ROI</span>
               </div>
@@ -675,42 +666,53 @@ export default function DashboardPage() {
 
             <h3 className="inv-section-title">Mes parcelles</h3>
 
-            {salesLoading && myPurchases.length === 0 && mySalesInProgress.length === 0 && (
-              <div className="inv-parcels" aria-busy="true" aria-live="polite">
-                {[0, 1, 2].map((i) => (
-                  <div key={i} className="inv-parcel-card inv-parcel-card--sk">
-                    <div className="inv-sk inv-sk--map" />
-                    <div className="inv-parcel-card__body">
-                      <div className="inv-sk inv-sk--title" />
-                      <div className="inv-sk inv-sk--line" />
-                      <div className="inv-sk inv-sk--line" style={{ width: '60%' }} />
-                      <div className="inv-sk inv-sk--line" style={{ width: '45%' }} />
+            {/* Plan 04 §3.1 — portfolio section gated by RenderDataGate.
+                A stalled sales/projects fetch no longer pins the whole
+                Dashboard; the skeleton shimmer upgrades to the stuck
+                banner after the watchdog and the rest of the page stays
+                interactive. */}
+            <RenderDataGate
+              loading={portfolioLoading}
+              error={null}
+              data={myPurchases}
+              skeleton={() => (
+                <div className="inv-parcels" aria-busy="true" aria-live="polite">
+                  {[0, 1, 2].map((i) => (
+                    <div key={i} className="inv-parcel-card">
+                      <div className="sk sk-map" />
+                      <div className="inv-parcel-card__body">
+                        <div className="sk sk-line sk-line--title" />
+                        <div className="sk sk-line" />
+                        <div className="sk sk-line" style={{ width: '60%' }} />
+                        <div className="sk sk-line" style={{ width: '45%' }} />
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {!salesLoading && myPurchases.length === 0 && mySalesInProgress.length > 0 && (
-              <div className="inv-progress-notice">
-                Vous avez {mySalesInProgress.length} achat{mySalesInProgress.length !== 1 ? 's' : ''} en cours de finalisation.
-                Les parcelles s&apos;affichent ici uniquement après <strong>finalisation notaire</strong>.
-              </div>
-            )}
-
-            {!salesLoading && myPurchases.length === 0 && mySalesInProgress.length === 0 && (
-              <div className="inv-empty">
-                <strong>Aucune parcelle</strong>
-                <p>Vous ne possédez pas encore de parcelles.</p>
-                <button type="button" className="inv-empty__btn" onClick={() => navigate('/browse')}>
-                  Explorer les projets
-                </button>
-              </div>
-            )}
-
-            {myPurchases.length > 0 && (
-              <div className="inv-parcels">
-                {myPurchases.map((parcel) => {
+                  ))}
+                </div>
+              )}
+              onRetry={() => {
+                try { refreshPlans?.() } catch { /* ignore */ }
+                try { refreshProjects?.() } catch { /* ignore */ }
+              }}
+              empty={mySalesInProgress.length > 0 ? (
+                <div className="inv-progress-notice">
+                  Vous avez {mySalesInProgress.length} achat{mySalesInProgress.length !== 1 ? 's' : ''} en cours de finalisation.
+                  Les parcelles s&apos;affichent ici uniquement après <strong>finalisation notaire</strong>.
+                </div>
+              ) : (
+                <EmptyState
+                  className="inv-empty-portfolio"
+                  icon="🌿"
+                  title="Aucune parcelle"
+                  description="Vous ne possédez pas encore de parcelles."
+                  action={{ label: 'Explorer les projets', onClick: () => navigate('/browse') }}
+                  secondary={{ label: 'Se déconnecter', onClick: handleLogout }}
+                />
+              )}
+            >
+              {(purchases) => (
+                <div className="inv-parcels">
+                  {purchases.map((parcel) => {
                   const proj = allProjects.find((p) => p.id === parcel.projectId)
                   const plotForMap = proj?.plots?.find(
                     (pl) => pl.id === parcel.plotId || pl.id === Number(parcel.plotId),
@@ -771,8 +773,9 @@ export default function DashboardPage() {
                     </div>
                   )
                 })}
-              </div>
-            )}
+                </div>
+              )}
+            </RenderDataGate>
           </>
         )}
 
@@ -808,7 +811,7 @@ export default function DashboardPage() {
                         <div className="ip-metric ip-metric--ok">
                           <div className="ip-metric__label">Validé</div>
                           <div className="ip-metric__value">{formatMoneyTnd(m.cashValidatedStrict)}</div>
-                          <div className="ip-metric__hint">Araboun + mensualités confirmées</div>
+                          <div className="ip-metric__hint">1er versement + mensualités confirmées</div>
                         </div>
                         <div className="ip-metric ip-metric--review">
                           <div className="ip-metric__label">En révision</div>
@@ -832,56 +835,83 @@ export default function DashboardPage() {
                 <div className="ip__detail-hint">
                   <strong>Mode d&apos;emploi :</strong> En attente / Rejeté = envoyez ou corrigez un reçu. En révision = attente validation. Confirmé = rien à faire.
                 </div>
-                <div className="ip__payments">
-                  {focusedPlan.payments.map(p => {
-                    const meta = ipStatusMeta(p.status)
-                    const receipt = lastReceipt(p)
-                    const receiptIsImage = receipt && isImageUrl(receipt.url)
-                    return (
-                      <div key={`${focusedPlan.id}:${p.month}`} className="ip__pay-card">
-                        <div className="ip__pay-top">
-                          <span className="ip__pay-month">Facilité {p.month}</span>
-                          <span className="ip__pay-due">{fmtDate(p.dueDate)}</span>
-                        </div>
-                        <div className="ip__pay-mid">
-                          <span className="ip__pay-amount">{p.amount.toLocaleString()} <small>DT</small></span>
-                          <span className={`ip__status ip__status--${meta.tone}`}>{meta.label}</span>
-                        </div>
-                        <div className="ip__pay-hint">{meta.hint}</div>
-                        {p.status === 'rejected' && p.rejectedNote && <div className="ip__pay-reject">⚠ {p.rejectedNote}</div>}
-                        {receipt && (
-                          <div className="ip__receipt">
-                            {receiptIsImage
-                              ? <img src={receipt.url} alt="Reçu" className="ip__receipt-thumb" />
-                              : <div className="ip__receipt-file-icon">📄</div>}
-                            <div className="ip__receipt-info">
-                              <div className="ip__receipt-name">{receipt.name}</div>
-                              {receipt.date && <div className="ip__receipt-date">{fmtDate(receipt.date)}</div>}
+                {(() => {
+                  const all = focusedPlan.payments || []
+                  const totalPages = Math.max(1, Math.ceil(all.length / IP_PAYMENTS_PER_PAGE))
+                  const page = Math.min(Math.max(1, ipPaymentPage), totalPages)
+                  const start = (page - 1) * IP_PAYMENTS_PER_PAGE
+                  const slice = all.slice(start, start + IP_PAYMENTS_PER_PAGE)
+                  return (
+                    <>
+                      <div className="ip__payments">
+                        {slice.map(p => {
+                          const meta = ipStatusMeta(p.status)
+                          const receipt = lastReceipt(p)
+                          const receiptIsImage = receipt && isImageUrl(receipt.url)
+                          return (
+                            <div key={`${focusedPlan.id}:${p.month}`} className="ip__pay-card">
+                              <div className="ip__pay-top">
+                                <span className="ip__pay-month">Facilité {p.month}</span>
+                                <span className="ip__pay-due">{fmtDate(p.dueDate)}</span>
+                              </div>
+                              <div className="ip__pay-mid">
+                                <span className="ip__pay-amount">{p.amount.toLocaleString()} <small>DT</small></span>
+                                <span className={`ip__status ip__status--${meta.tone}`}>{meta.label}</span>
+                              </div>
+                              <div className="ip__pay-hint">{meta.hint}</div>
+                              {p.status === 'rejected' && p.rejectedNote && <div className="ip__pay-reject">⚠ {p.rejectedNote}</div>}
+                              {receipt && (
+                                <div className="ip__receipt">
+                                  {receiptIsImage
+                                    ? <img src={receipt.url} alt="Reçu" className="ip__receipt-thumb" />
+                                    : <div className="ip__receipt-file-icon">📄</div>}
+                                  <div className="ip__receipt-info">
+                                    <div className="ip__receipt-name">{receipt.name}</div>
+                                    {receipt.date && <div className="ip__receipt-date">{fmtDate(receipt.date)}</div>}
+                                  </div>
+                                  <a href={receipt.url} target="_blank" rel="noreferrer" className="ip__receipt-link">Voir</a>
+                                </div>
+                              )}
+                              {isPayable(p.status) && (
+                                <button type="button" className={`ip__pay-btn${p.status === 'submitted' ? ' ip__pay-btn--correct' : ''}`} onClick={() => ipOpenPay(focusedPlan, p)}>
+                                  {p.status === 'submitted' ? '📝 Corriger le reçu' : '📤 Envoyer un reçu'}
+                                </button>
+                              )}
                             </div>
-                            <a href={receipt.url} target="_blank" rel="noreferrer" className="ip__receipt-link">Voir</a>
-                          </div>
-                        )}
-                        {isPayable(p.status) && (
-                          <button type="button" className={`ip__pay-btn${p.status === 'submitted' ? ' ip__pay-btn--correct' : ''}`} onClick={() => ipOpenPay(focusedPlan, p)}>
-                            {p.status === 'submitted' ? '📝 Corriger le reçu' : '📤 Envoyer un reçu'}
-                          </button>
-                        )}
+                          )
+                        })}
                       </div>
-                    )
-                  })}
-                </div>
+                      {totalPages > 1 && (
+                        <nav className="ip__pager" aria-label="Pagination des facilités">
+                          <button type="button" className="ip__pager-btn ip__pager-btn--nav" onClick={() => setIpPaymentPage(v => Math.max(1, v - 1))} disabled={page <= 1} aria-label="Page précédente">‹</button>
+                          {Array.from({ length: totalPages }, (_, i) => i + 1).map((n) => (
+                            <button key={n} type="button" className={`ip__pager-btn${n === page ? ' ip__pager-btn--active' : ''}`} onClick={() => setIpPaymentPage(n)} aria-current={n === page ? 'page' : undefined}>{n}</button>
+                          ))}
+                          <button type="button" className="ip__pager-btn ip__pager-btn--nav" onClick={() => setIpPaymentPage(v => Math.min(totalPages, v + 1))} disabled={page >= totalPages} aria-label="Page suivante">›</button>
+                          <span className="ip__pager-hint">Facilités {start + 1}–{Math.min(start + IP_PAYMENTS_PER_PAGE, all.length)} / {all.length}</span>
+                        </nav>
+                      )}
+                    </>
+                  )
+                })()}
               </>
             ) : (
               /* ── List view: all plans ── */
-              <>
-                {myPlans.length === 0 ? (
-                  <div className="ip__empty">
-                    <strong>Aucun plan d&apos;échéances</strong>
-                    Vos plans apparaîtront ici après finalisation de votre achat.
-                  </div>
-                ) : (
+              <RenderDataGate
+                loading={plansLoadingRaw}
+                data={myPlans}
+                skeleton="table"
+                onRetry={refreshPlans}
+                empty={
+                  <EmptyState
+                    title="Aucun plan d'échéances"
+                    description="Vos plans apparaîtront ici après finalisation de votre achat."
+                  />
+                }
+              >
+                {(list) => (
                   <div className="ip__plan-list">
-                    {myPlans.map(plan => {
+                    {list.map(plan => {
                       const sale = (mySalesRaw || []).find((s) => String(s.id) === String(plan.saleId)) || {}
                       const metrics = computeInstallmentSaleMetrics(sale, plan)
                       const progress = metrics.approvedPct
@@ -917,7 +947,7 @@ export default function DashboardPage() {
                     })}
                   </div>
                 )}
-              </>
+              </RenderDataGate>
             )}
           </div>
         )}
@@ -990,8 +1020,7 @@ export default function DashboardPage() {
                   </p>
                   {!showAmbassadorCard && (
                     <p
-                      className="inv-wallet__lead"
-                      style={{ marginTop: 4, opacity: 0.7, fontStyle: 'italic' }}
+                      className="inv-wallet__lead inv-wallet__lead--muted"
                     >
                       Reliez votre profil client pour activer le parrainage
                     </p>
@@ -1012,18 +1041,13 @@ export default function DashboardPage() {
               {showAmbassadorCard && referralLoading && !referralHasError ? (
                 <p className="inv-wallet__loading">Chargement du portefeuille…</p>
               ) : showAmbassadorCard && referralHasError ? (
-                <div className="inv-wallet__alert inv-wallet__alert--error">
-                  <p style={{ margin: 0, marginBottom: 6 }}>
-                    Impossible de charger le portefeuille. Vérifiez votre connexion puis réessayez.
-                  </p>
-                  <button
-                    type="button"
-                    className="inv-wallet__btn"
-                    onClick={() => refreshReferralSummary()}
-                  >
-                    Réessayer
-                  </button>
-                </div>
+                /* Plan 04 §3.1 step 5 — uniform ErrorPanel replaces the
+                   bespoke alert+button block. Retry re-fires the RPC. */
+                <ErrorPanel
+                  title="Impossible de charger le portefeuille"
+                  hint="Vérifiez votre connexion puis réessayez."
+                  onRetry={() => refreshReferralSummary()}
+                />
               ) : (
                   <>
                     <div className="inv-wallet__hero">
@@ -1165,15 +1189,21 @@ export default function DashboardPage() {
                             <strong>Commission indirecte</strong> — quelqu'un que vous avez parrainé (ou dans votre ligne) a vendu.
                           </div>
                         </div>
-                        {ledgerLoading && myCommissionEvents.length === 0 ? (
-                          <div className="inv-ledger__empty">Chargement…</div>
-                        ) : myCommissionEvents.length === 0 ? (
-                          <div className="inv-ledger__empty">
-                            Aucune commission pour l'instant. Vos gains apparaîtront ici dès qu'une de vos ventes (ou une vente de votre ligne) passe chez le notaire.
-                          </div>
-                        ) : (() => {
-                          const commissionOnly = myCommissionEvents.filter((e) => e.kind !== 'payout')
-                          const payoutsOnly = myCommissionEvents.filter((e) => e.kind === 'payout')
+                        <RenderDataGate
+                          loading={ledgerLoading && myCommissionEvents.length === 0}
+                          data={myCommissionEvents}
+                          skeleton="table"
+                          onRetry={refreshCommissionLedger}
+                          empty={
+                            <EmptyState
+                              title="Aucune commission"
+                              description="Vos gains apparaîtront ici dès qu'une de vos ventes (ou une vente de votre ligne) passe chez le notaire."
+                            />
+                          }
+                        >
+                          {(events) => (() => {
+                          const commissionOnly = events.filter((e) => e.kind !== 'payout')
+                          const payoutsOnly = events.filter((e) => e.kind === 'payout')
                           const directEvents = commissionOnly.filter((e) => (e.level || 0) === 1)
                           const indirectEvents = commissionOnly.filter((e) => (e.level || 0) >= 2)
                           const statusMap = {
@@ -1281,6 +1311,7 @@ export default function DashboardPage() {
                             </>
                           )
                         })()}
+                        </RenderDataGate>
                       </div>
                     )}
                   </>
@@ -1318,34 +1349,34 @@ export default function DashboardPage() {
                               ? "Vos ventes ne sont pas encore notariées. Les commissions apparaîtront après validation notaire."
                               : "Un rattachement existe mais aucune ligne commission n'a été créée — contactez le support."
                         return (
-                          <details style={{ fontSize: 11, marginTop: 8, opacity: 0.85 }}>
-                            <summary style={{ cursor: 'pointer' }}>Pourquoi 0 DT ? (diagnostic)</summary>
-                            <div style={{ marginTop: 6, padding: '8px 10px', background: 'rgba(255,255,255,0.04)', borderRadius: 6 }}>
-                              <div style={{ marginBottom: 6 }}>{hint}</div>
-                              <div style={{ fontFamily: 'monospace', fontSize: 10, lineHeight: 1.5 }}>
+                          <details className="inv-diagnostic">
+                            <summary className="inv-diagnostic__summary">Pourquoi 0 DT ? (diagnostic)</summary>
+                            <div className="inv-diagnostic__body">
+                              <div className="inv-diagnostic__hint">{hint}</div>
+                              <div className="inv-diagnostic__mono">
                                 {`acheteur=${d.linkedAsBuyer ?? 0}  vendeur=${d.linkedAsSeller ?? 0}  parrain=${d.linkedAsAmbassador ?? 0}  agent=${d.linkedAsAgent ?? 0}`}
                                 <br />
                                 {`notariées=${d.notaryCompleteTotal ?? 0}  commission_events=${d.commissionEventCount ?? 0}`}
                               </div>
                               {Array.isArray(d.latestSales) && d.latestSales.length > 0 && (
-                                <table style={{ marginTop: 8, fontSize: 10, borderCollapse: 'collapse', width: '100%' }}>
+                                <table className="inv-diagnostic__table">
                                   <thead>
-                                    <tr style={{ opacity: 0.6 }}>
-                                      <th style={{ textAlign: 'left', padding: '2px 6px' }}>Code</th>
-                                      <th style={{ textAlign: 'left', padding: '2px 6px' }}>Rôle</th>
-                                      <th style={{ textAlign: 'left', padding: '2px 6px' }}>Notaire</th>
-                                      <th style={{ textAlign: 'right', padding: '2px 6px' }}>Prix</th>
+                                    <tr className="inv-diagnostic__head-row">
+                                      <th className="inv-diagnostic__th">Code</th>
+                                      <th className="inv-diagnostic__th">Rôle</th>
+                                      <th className="inv-diagnostic__th">Notaire</th>
+                                      <th className="inv-diagnostic__th inv-diagnostic__th--right">Prix</th>
                                     </tr>
                                   </thead>
                                   <tbody>
                                     {d.latestSales.map((s) => (
                                       <tr key={s.id}>
-                                        <td style={{ padding: '2px 6px', fontFamily: 'monospace' }}>{s.code || s.id.slice(0, 8)}</td>
-                                        <td style={{ padding: '2px 6px' }}>
+                                        <td className="inv-diagnostic__td inv-diagnostic__td--mono">{s.code || s.id.slice(0, 8)}</td>
+                                        <td className="inv-diagnostic__td">
                                           {[s.as_buyer && 'acheteur', s.as_seller && 'vendeur', s.as_ambassador && 'parrain'].filter(Boolean).join(', ') || '—'}
                                         </td>
-                                        <td style={{ padding: '2px 6px' }}>{s.notary_done ? '✓' : '—'}</td>
-                                        <td style={{ padding: '2px 6px', textAlign: 'right' }}>{Number(s.agreed_price || 0).toLocaleString('fr-FR')}</td>
+                                        <td className="inv-diagnostic__td">{s.notary_done ? '✓' : '—'}</td>
+                                        <td className="inv-diagnostic__td inv-diagnostic__td--right">{Number(s.agreed_price || 0).toLocaleString('fr-FR')}</td>
                                       </tr>
                                     ))}
                                   </tbody>

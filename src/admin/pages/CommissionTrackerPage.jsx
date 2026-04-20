@@ -4,6 +4,8 @@ import { useCommissionTracker } from '../lib/useCommissionTracker.js'
 import CommissionOrgChart from '../components/CommissionOrgChart.jsx'
 import CommissionDetailPanel from '../components/CommissionDetailPanel.jsx'
 import CommissionOverrideModal from '../components/CommissionOverrideModal.jsx'
+import RenderDataGate from '../../components/RenderDataGate.jsx'
+import EmptyState from '../../components/EmptyState.jsx'
 import { useAuth } from '../../lib/AuthContext.jsx'
 import './zitouna-admin-page.css'
 import './commission-tracker.css'
@@ -30,7 +32,10 @@ function normalizeStatus(e) {
 // -- page --------------------------------------------------------------------
 export default function CommissionTrackerPage() {
   const navigate = useNavigate()
-  const { data, error, refresh } = useCommissionTracker()
+  // Plan 03 §4.5: previously destructured `{ data, error, refresh }` and
+  // ignored loading — a blank page with no affordance (Pattern D). We now
+  // consume loading too and route it through <RenderDataGate>.
+  const { data, loading, error, refresh } = useCommissionTracker()
   const { adminUser } = useAuth()
 
   const [selectedClientId, setSelectedClientId] = useState(null)
@@ -130,19 +135,33 @@ export default function CommissionTrackerPage() {
         </button>
       </header>
 
-      {error ? (
-        <div className="ct-topbar__error" role="alert">
-          Erreur de chargement : {error.message || 'inconnue'}
-        </div>
-      ) : null}
-
-      {/* org chart — takes all remaining space; panel overlays on the right */}
+      {/* Plan 03 §4.5: four-state gate replaces the inline error banner and
+          unconditional <CommissionOrgChart> render. Empty tree now shows an
+          explicit EmptyState; stuck loads surface a Retry affordance. */}
       <div className={`ct-graph-host ${hasSelection ? 'ct-graph-host--with-panel' : ''}`}>
-        <CommissionOrgChart
+        <RenderDataGate
+          loading={loading}
+          error={error}
           data={cleanData}
-          selectedClientId={selectedClientId}
-          onNodeClick={(id) => setSelectedClientId(id || null)}
-        />
+          onRetry={() => refresh().catch(() => {})}
+          skeleton="tree"
+          isEmpty={(d) => !d || (Array.isArray(d.commissionEvents) && d.commissionEvents.length === 0)}
+          empty={
+            <EmptyState
+              icon="🌳"
+              title="Aucune commission enregistrée"
+              description="Le réseau s'affichera dès qu'un événement de commission sera généré."
+            />
+          }
+        >
+          {() => (
+            <CommissionOrgChart
+              data={cleanData}
+              selectedClientId={selectedClientId}
+              onNodeClick={(id) => setSelectedClientId(id || null)}
+            />
+          )}
+        </RenderDataGate>
       </div>
 
       {/* right-side detail panel */}

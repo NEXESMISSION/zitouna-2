@@ -1,0 +1,54 @@
+.cli-hero { background: linear-gradient(135deg, #eff6ff 0%, #f8fafc 100%); border: 1px solid #e2e8f0; border-radius: 14px; padding: 18px 20px; margin-top: 8px; display: flex; align-items: center; gap: 14px; }
+.cli-hero__badge { width: 44px; height: 44px; border-radius: 12px; background: #1d4ed8; color: #fff; font-size: 22px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.cli-hero__title { font-size: 20px; font-weight: 700; color: #0f172a; margin: 0; line-height: 1.2; }
+.cli-hero__subtitle { font-size: 13px; color: #475569; margin: 4px 0 0; }
+.cli-hero__actions { margin-left: auto; display: flex; gap: 8px; }
+.cli-hero__btn { padding: 8px 14px; border-radius: 10px; border: 1px solid #cbd5e1; background: #fff; color: #0f172a; font-size: 13px; font-weight: 600; cursor: pointer; }
+.cli-hero__btn:hover { background: #f1f5f9; }
+
+.cli-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 12px 0 6px; }
+.cli-stat { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px 14px; }
+.cli-stat__label { font-size: 12px; color: #64748b; font-weight: 500; }
+.cli-stat__value { font-size: 22px; font-weight: 700; color: #0f172a; margin-top: 4px; line-height: 1; }
+.cli-stat--info .cli-stat__value { color: #1d4ed8; }
+.cli-stat--good .cli-stat__value { color: #166534; }
+.cli-stat--warn .cli-stat__value { color: #b45309; }
+@media (max-width: 760px) { .cli-stats { grid-template-columns: repeat(2, 1fr); } }
+
+.ca-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+@media (max-width: 900px) { .ca-grid { grid-template-columns: 1fr; } }
+
+.ca-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 16px 18px; }
+.ca-card--top-gap { margin-top: 12px; }
+.ca-card--full { grid-column: 1 / -1; }
+.ca-card__title { font-size: 14px; font-weight: 700; color: #0f172a; margin: 0 0 10px; }
+.ca-card__subtitle { font-size: 12px; color: #64748b; margin: 0 0 12px; }
+.ca-chart { width: 100%; height: 220px; }
+.ca-axis { fill: #94a3b8; font-size: 10px; }
+.ca-grid-line { stroke: #e2e8f0; stroke-width: 1; }
+.ca-line { fill: none; stroke: #1d4ed8; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.ca-area { fill: rgba(29, 78, 216, 0.12); }
+.ca-dot { fill: #1d4ed8; }
+
+.ca-hbar-row { display: grid; grid-template-columns: 80px 1fr 110px; align-items: center; gap: 10px; padding: 6px 0; }
+.ca-hbar-label { font-size: 13px; font-weight: 600; color: #0f172a; }
+.ca-hbar-track { position: relative; height: 14px; border-radius: 7px; background: #f1f5f9; overflow: hidden; }
+.ca-hbar-fill { position: absolute; top: 0; left: 0; bottom: 0; border-radius: 7px; transition: width 200ms ease; }
+.ca-hbar-amount { font-size: 12px; color: #475569; text-align: right; font-variant-numeric: tabular-nums; }
+
+.ca-bene-row { grid-template-columns: 200px 1fr 130px; }
+@media (max-width: 640px) { .ca-bene-row { grid-template-columns: 140px 1fr 110px; } }
+.ca-bene-name { font-size: 13px; font-weight: 600; color: #0f172a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ca-bene-code { font-size: 11px; color: #64748b; margin-top: 1px; }
+
+.ca-donut-wrap { display: grid; grid-template-columns: 220px 1fr; gap: 16px; align-items: center; }
+@media (max-width: 640px) { .ca-donut-wrap { grid-template-columns: 1fr; justify-items: center; } }
+.ca-legend { display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
+.ca-legend-row { display: grid; grid-template-columns: 14px 1fr auto; align-items: center; gap: 8px; }
+.ca-legend-swatch { width: 12px; height: 12px; border-radius: 3px; }
+.ca-legend-label { color: #0f172a; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ca-legend-value { color: #475569; font-variant-numeric: tabular-nums; }
+
+.ca-empty { font-size: 13px; color: #64748b; padding: 24px; text-align: center; }
+.ca-seed-link { color: #1d4ed8; font-weight: 600; text-decoration: none; }
+.ca-seed-link:hover { text-decoration: underline; }

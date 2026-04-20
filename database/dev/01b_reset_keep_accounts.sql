@@ -1,5 +1,5 @@
 -- =============================================================================
--- ZITOUNA — 01b_reset_keep_accounts.sql
+-- ZITOUNA — 01b_reset_keep_accounts.sql  (dev/ — DESTRUCTIVE)
 -- Soft reset: wipes all business data (sales, installments, commissions,
 -- catalogue, audit) but preserves:
 --   - auth.users
@@ -8,7 +8,22 @@
 --
 -- After running, re-seed the catalogue with 05_seed.sql if needed.
 -- Does NOT touch Supabase Storage (clear buckets from the dashboard).
+--
+-- Audit ref: docs/AUDIT/01_SECURITY_FINDINGS.md S-M7.
 -- =============================================================================
+
+DO $reset_guard$
+DECLARE v_token text;
+BEGIN
+  v_token := current_setting('app.allow_destructive_reset', true);
+  IF v_token IS DISTINCT FROM 'I_UNDERSTAND_THIS_WIPES_DATA' THEN
+    RAISE EXCEPTION
+      'Soft reset blocked. To proceed, run in the same session: '
+      'SET app.allow_destructive_reset = ''I_UNDERSTAND_THIS_WIPES_DATA''; '
+      'then re-run this file. NEVER run this against production.';
+  END IF;
+END;
+$reset_guard$;
 
 -- 1) Commission / payouts (FK order)
 DELETE FROM public.commission_payout_request_items;

@@ -3,9 +3,12 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../lib/AuthContext.jsx'
 import { getSaleSnapshotAuditRows } from '../../lib/saleSnapshotAudit.js'
 import { useAdminUsers, useSales } from '../../lib/useSupabase.js'
+import { runSafeAction } from '../../lib/runSafeAction.js'
 import AdminModal from '../components/AdminModal.jsx'
-import './finance-dashboard.css'
+import RenderDataGate from '../../components/RenderDataGate.jsx'
+import { getPagerPages } from './pager-util.js'
 import './sell-field.css'
+import './finance-dashboard.css'
 
 const PER_PAGE = 10
 
@@ -24,12 +27,6 @@ function feeRatesFromSale(sale) {
   }
 }
 function fmtMoney(v) { return `${(Number(v) || 0).toLocaleString('fr-FR')} TND` }
-function fmtMoneyShort(v) {
-  const n = Number(v) || 0
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 10_000) return `${Math.round(n / 1000)}k`
-  return `${n.toLocaleString('fr-FR', { maximumFractionDigits: 0 })}`
-}
 function fmtDate(iso) {
   if (!iso) return '—'
   try { return new Date(iso).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' }) }
@@ -72,17 +69,6 @@ function saleDateKey(sale) {
   const iso = sale?.createdAt || ''
   return iso ? iso.slice(0, 10) : ''
 }
-function getPagerPages(current, total) {
-  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1)
-  const out = [1]
-  const left = Math.max(2, current - 1)
-  const right = Math.min(total - 1, current + 1)
-  if (left > 2) out.push('…')
-  for (let i = left; i <= right; i++) out.push(i)
-  if (right < total - 1) out.push('…')
-  out.push(total)
-  return out
-}
 
 // ---------------------------------------------------------------------------
 // Page
@@ -90,7 +76,7 @@ function getPagerPages(current, total) {
 export default function FinanceDashboardPage() {
   const navigate = useNavigate()
   const { adminUser } = useAuth()
-  const { sales, update: salesUpdate } = useSales()
+  const { sales, loading: salesLoading, update: salesUpdate } = useSales()
   const { adminUsers } = useAdminUsers()
 
   const [view, setView] = useState('list')
@@ -98,6 +84,7 @@ export default function FinanceDashboardPage() {
   const [detailSaleId, setDetailSaleId] = useState(null)
   const [confirmPayment, setConfirmPayment] = useState(null)
   const [toast, setToast] = useState(null)
+  const [approving, setApproving] = useState(false)
   const [page, setPage] = useState(1)
   const [monthAnchor, setMonthAnchor] = useState(() => startOfMonth(new Date()))
   const [selectedDate, setSelectedDate] = useState(() => toIsoDate(new Date()))
@@ -140,9 +127,10 @@ export default function FinanceDashboardPage() {
 
   // ---- Pager --------------------------------------------------------------
   const pageCount = Math.max(1, Math.ceil(pendingSales.length / PER_PAGE))
+  const safePage = Math.min(Math.max(1, page), pageCount)
   const pagedSales = useMemo(
-    () => pendingSales.slice((page - 1) * PER_PAGE, page * PER_PAGE),
-    [pendingSales, page],
+    () => pendingSales.slice((safePage - 1) * PER_PAGE, safePage * PER_PAGE),
+    [pendingSales, safePage],
   )
 
   // ---- Calendar -----------------------------------------------------------
@@ -160,10 +148,17 @@ export default function FinanceDashboardPage() {
   const dayAgenda = useMemo(() => salesByDate.get(selectedDate) || [], [salesByDate, selectedDate])
   const monthLabel = monthAnchor.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
 
+  const showSkeletons = salesLoading && pendingSales.length === 0
+
   // ---- Actions -------------------------------------------------------------
   async function approveSale(sale) {
+    if (approving) return
     const now = new Date().toISOString()
-    try {
+    const res = await runSafeAction({
+      setBusy: setApproving,
+      onError: (msg) => showToast(msg, false),
+      label: 'Valider le paiement',
+    }, async () => {
       await salesUpdate(sale.id, {
         status: 'pending_legal',
         pipelineStatus: 'pending_legal',
@@ -173,158 +168,202 @@ export default function FinanceDashboardPage() {
         paymentMethod: sale.paymentMethod || 'bank_transfer',
         notes: sale.notes || '',
       })
+    })
+    if (res.ok) {
       showToast('Paiement validé. Dossier envoyé au notaire.')
       setDetailSaleId(null)
-    } catch (e) {
-      console.error('approveSale', e)
-      showToast('Erreur lors de la validation', false)
     }
+  }
+
+  const onQueryChange = (e) => { setQuery(e.target.value); setPage(1) }
+
+  const renderSaleCard = (sale) => {
+    const seller = sellerById.get(String(sale.agentId || sale.managerId || ''))
+    const plotLabel = normalizePlotIds(sale).map((id) => `#${id}`).join(', ') || '—'
+    return (
+      <button
+        key={sale.id}
+        type="button"
+        className="sp-card sp-card--orange"
+        onClick={() => setDetailSaleId(sale.id)}
+        aria-label={`Ouvrir le dossier de ${sale.clientName || 'client'}`}
+      >
+        <div className="sp-card__head">
+          <div className="sp-card__user">
+            <span className="sp-card__initials">{initials(sale.clientName)}</span>
+            <div style={{ minWidth: 0 }}>
+              <p className="sp-card__name">{sale.clientName || 'Client'}</p>
+              <p className="sp-card__sub">
+                {sale.projectTitle || 'Projet'} · Parcelle {plotLabel}
+              </p>
+            </div>
+          </div>
+          <span className="sp-badge sp-badge--orange">À valider</span>
+        </div>
+
+        <div className="sp-card__body">
+          <div className="sp-card__price">
+            <span className="sp-card__amount">{(Number(sale.agreedPrice) || 0).toLocaleString('fr-FR')}</span>
+            <span className="sp-card__currency">TND</span>
+          </div>
+          <div className="sp-card__info">
+            <span>{sale.paymentType === 'installments' ? 'Échelonné' : 'Comptant'}</span>
+            <span> · Vendeur : {seller?.name || 'Commercial'}</span>
+          </div>
+        </div>
+      </button>
+    )
   }
 
   // ---- Render --------------------------------------------------------------
   return (
-    <div className="sell-field fin-v3" dir="ltr">
+    <div className="sell-field" dir="ltr">
       <button type="button" className="sp-back-btn" onClick={() => navigate(-1)}>
         <span className="sp-back-btn__icon-wrap" aria-hidden>←</span>
         <span>Retour</span>
       </button>
 
-      {/* ── Topbar ─────────────────────────────────────────────── */}
-      <header className="fv-topbar">
-        <div className="fv-topbar__title">
-          <h1 className="fv-topbar__h1">Validation finance</h1>
-          <p className="fv-topbar__sub">Vérifier, encaisser et transmettre au notaire.</p>
+      <header className="sp-hero fv-hero">
+        <div className="sp-hero__avatar fv-hero__icon" aria-hidden>
+          <span>💰</span>
         </div>
-        <div className="fv-topbar__kpis">
-          <span className="fv-kpi-pill" title="Dossiers en attente">
-            <strong>{kpis.count}</strong><span>dossier{kpis.count > 1 ? 's' : ''}</span>
+        <div className="sp-hero__info">
+          <h1 className="sp-hero__name">Finance</h1>
+          <p className="sp-hero__role">Vérifier, encaisser et transmettre au notaire</p>
+        </div>
+        <div className="sp-hero__kpis">
+          <span className="sp-hero__kpi-num">
+            {showSkeletons ? <span className="sk-num sk-num--wide" /> : kpis.count}
           </span>
-          <span className="fv-kpi-pill fv-kpi-pill--info" title="Valeur totale">
-            <strong>{fmtMoneyShort(kpis.total)}</strong><span>TND total</span>
-          </span>
-          <span className="fv-kpi-pill fv-kpi-pill--good" title="Avances déjà reçues">
-            <strong>{fmtMoneyShort(kpis.advance)}</strong><span>avance</span>
-          </span>
+          <span className="sp-hero__kpi-label">à valider</span>
         </div>
       </header>
 
-      {/* ── Tabs ──────────────────────────────────────────────── */}
-      <div className="fv-tabs" role="tablist">
-        <button
-          type="button" role="tab" aria-selected={view === 'list'}
-          className={`fv-tab${view === 'list' ? ' fv-tab--on' : ''}`}
-          onClick={() => setView('list')}
-        >
-          Liste
-          <span className="fv-tab__count">{pendingSales.length}</span>
-        </button>
-        <button
-          type="button" role="tab" aria-selected={view === 'calendar'}
-          className={`fv-tab${view === 'calendar' ? ' fv-tab--on' : ''}`}
-          onClick={() => setView('calendar')}
-        >
-          Calendrier
-        </button>
+      <div className="sp-cat-bar">
+        <div className="sp-cat-stats">
+          <strong>{showSkeletons ? <span className="sk-num" /> : kpis.count}</strong> dossier{kpis.count > 1 ? 's' : ''}
+          <span className="sp-cat-stat-dot" />
+          <strong>{showSkeletons ? <span className="sk-num sk-num--wide" /> : kpis.total.toLocaleString('fr-FR')}</strong> TND total
+          <span className="sp-cat-stat-dot" />
+          <strong>{showSkeletons ? <span className="sk-num sk-num--wide" /> : kpis.advance.toLocaleString('fr-FR')}</strong> TND avance
+        </div>
+        <div className="sp-cat-filters">
+          <input
+            className="sp-cat-search"
+            placeholder="Rechercher un client, projet, code ou parcelle…"
+            aria-label="Rechercher un dossier"
+            value={query}
+            onChange={onQueryChange}
+          />
+        </div>
+        <div className="fv-chips" role="tablist" aria-label="Vue">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === 'list'}
+            className={`fv-chip${view === 'list' ? ' fv-chip--active' : ''}`}
+            onClick={() => setView('list')}
+          >
+            Liste
+            <span className="fv-chip__count">{pendingSales.length}</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === 'calendar'}
+            className={`fv-chip${view === 'calendar' ? ' fv-chip--active' : ''}`}
+            onClick={() => setView('calendar')}
+          >
+            Calendrier
+          </button>
+        </div>
       </div>
 
       {view === 'list' && (
         <>
-          <div className="fv-search">
-            <input
-              type="search" value={query}
-              onChange={(e) => { setQuery(e.target.value); setPage(1) }}
-              placeholder="Rechercher un client, projet, code ou parcelle…"
-              aria-label="Rechercher un dossier"
-            />
+          <div className="sp-cards">
+            <RenderDataGate
+              loading={showSkeletons}
+              error={null}
+              data={pagedSales}
+              isEmpty={() => pendingSales.length === 0}
+              skeleton={
+                <>
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <div key={`sk-${i}`} className="sp-card sp-card--skeleton" aria-hidden>
+                      <div className="sp-card__head">
+                        <div className="sp-card__user">
+                          <span className="sp-card__initials sk-box" />
+                          <div style={{ flex: 1 }}>
+                            <p className="sk-line sk-line--title" />
+                            <p className="sk-line sk-line--sub" />
+                          </div>
+                        </div>
+                        <span className="sk-line sk-line--badge" />
+                      </div>
+                      <div className="sp-card__body">
+                        <span className="sk-line sk-line--price" />
+                        <span className="sk-line sk-line--info" />
+                      </div>
+                    </div>
+                  ))}
+                </>
+              }
+              empty={
+                <div className="sp-empty">
+                  <span className="sp-empty__emoji" aria-hidden>{query ? '🔍' : '✅'}</span>
+                  <div className="sp-empty__title">
+                    {query ? 'Aucun résultat.' : 'Aucun dossier à valider.'}
+                  </div>
+                  <p className="fv-empty__text">
+                    {query
+                      ? 'Essayez un autre mot-clé.'
+                      : 'Les ventes envoyées par la coordination apparaîtront ici.'}
+                  </p>
+                </div>
+              }
+            >
+              {(rows) => rows.map((sale) => renderSaleCard(sale))}
+            </RenderDataGate>
           </div>
 
-          <section className="sp-cards fv-queue">
-            {pendingSales.length === 0 ? (
-              <div className="sp-empty">
-                <span className="sp-empty__emoji" aria-hidden>✅</span>
-                <div className="sp-empty__title">
-                  {query ? 'Aucun résultat' : 'Aucun dossier à valider'}
-                </div>
-                <p style={{ margin: '4px 0 0', fontSize: 12, color: '#64748b' }}>
-                  {query
-                    ? 'Essayez un autre mot-clé.'
-                    : 'Les ventes envoyées par la coordination apparaîtront ici.'}
-                </p>
-              </div>
-            ) : (
-              pagedSales.map((sale) => {
-                const seller = sellerById.get(String(sale.agentId || sale.managerId || ''))
-                const plotLabel = normalizePlotIds(sale).map((id) => `#${id}`).join(', ') || '—'
-                return (
-                  <article
-                    key={sale.id}
-                    className="sp-card fv-card"
-                    role="button" tabIndex={0}
-                    onClick={() => setDetailSaleId(sale.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault()
-                        setDetailSaleId(sale.id)
-                      }
-                    }}
-                  >
-                    <div className="sp-card__head">
-                      <div className="sp-card__user">
-                        <span className="sp-card__initials" aria-hidden>{initials(sale.clientName)}</span>
-                        <div>
-                          <p className="sp-card__name">{sale.clientName || 'Client'}</p>
-                          <p className="sp-card__sub">{sale.projectTitle || 'Projet'} · Parcelle {plotLabel}</p>
-                        </div>
-                      </div>
-                      <span className="sp-badge sp-badge--orange">À valider</span>
-                    </div>
-
-                    <div className="fv-card__amount-row">
-                      <div className="fv-card__amount">
-                        <span className="fv-card__amount-num">{fmtMoney(sale.agreedPrice)}</span>
-                        <span className="fv-card__amount-type">
-                          {sale.paymentType === 'installments' ? 'Échelonné' : 'Comptant'}
-                        </span>
-                      </div>
-                      <div className="fv-card__meta">
-                        <span>Avance : <strong>{fmtMoney(sale.deposit)}</strong></span>
-                        <span>Vendeur : {seller?.name || 'Commercial'}</span>
-                      </div>
-                    </div>
-                  </article>
-                )
-              })
-            )}
-          </section>
-
-          {pendingSales.length > PER_PAGE && (
+          {!showSkeletons && pendingSales.length > PER_PAGE && (
             <div className="sp-pager" role="navigation" aria-label="Pagination">
               <button
-                type="button" className="sp-pager__btn"
-                disabled={page <= 1}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                type="button"
+                className="sp-pager__btn sp-pager__btn--nav"
+                disabled={safePage <= 1}
+                onClick={() => setPage(Math.max(1, safePage - 1))}
                 aria-label="Page précédente"
-              >‹</button>
-              {getPagerPages(page, pageCount).map((p, i) =>
+              >
+                ‹
+              </button>
+              {getPagerPages(safePage, pageCount).map((p, i) =>
                 p === '…' ? (
-                  <span key={`d-${i}`} className="sp-pager__ellipsis" aria-hidden>…</span>
+                  <span key={`dots-${i}`} className="sp-pager__ellipsis" aria-hidden>…</span>
                 ) : (
                   <button
-                    key={p} type="button"
-                    className={`sp-pager__btn${p === page ? ' sp-pager__btn--active' : ''}`}
+                    key={p}
+                    type="button"
+                    className={`sp-pager__btn${p === safePage ? ' sp-pager__btn--active' : ''}`}
                     onClick={() => setPage(p)}
-                    aria-current={p === page ? 'page' : undefined}
-                  >{p}</button>
+                    aria-current={p === safePage ? 'page' : undefined}
+                  >
+                    {p}
+                  </button>
                 ),
               )}
               <button
-                type="button" className="sp-pager__btn"
-                disabled={page >= pageCount}
-                onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+                type="button"
+                className="sp-pager__btn sp-pager__btn--nav"
+                disabled={safePage >= pageCount}
+                onClick={() => setPage(Math.min(pageCount, safePage + 1))}
                 aria-label="Page suivante"
-              >›</button>
+              >
+                ›
+              </button>
               <span className="sp-pager__info">
-                {(page - 1) * PER_PAGE + 1}–{Math.min(page * PER_PAGE, pendingSales.length)} / {pendingSales.length}
+                {(safePage - 1) * PER_PAGE + 1}–{Math.min(safePage * PER_PAGE, pendingSales.length)} / {pendingSales.length}
               </span>
             </div>
           )}
@@ -334,9 +373,9 @@ export default function FinanceDashboardPage() {
       {view === 'calendar' && (
         <section className="fv-cal">
           <div className="fv-cal__nav">
-            <button type="button" className="fv-cal__nav-btn" onClick={() => setMonthAnchor((d) => addMonths(d, -1))}>‹</button>
+            <button type="button" className="fv-cal__nav-btn" onClick={() => setMonthAnchor((d) => addMonths(d, -1))} aria-label="Mois précédent">‹</button>
             <span className="fv-cal__month">{monthLabel}</span>
-            <button type="button" className="fv-cal__nav-btn" onClick={() => setMonthAnchor((d) => addMonths(d, 1))}>›</button>
+            <button type="button" className="fv-cal__nav-btn" onClick={() => setMonthAnchor((d) => addMonths(d, 1))} aria-label="Mois suivant">›</button>
           </div>
           <div className="fv-cal__week">
             {['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'].map((d) => (
@@ -364,38 +403,14 @@ export default function FinanceDashboardPage() {
           <div className="fv-cal__agenda">
             <div className="fv-cal__agenda-head">{fmtDate(selectedDate)}</div>
             {dayAgenda.length === 0 ? (
-              <div className="fv-cal__agenda-empty">Aucun dossier ce jour.</div>
+              <div className="sp-empty" style={{ marginTop: 8 }}>
+                <span className="sp-empty__emoji" aria-hidden>📭</span>
+                <div className="sp-empty__title">Aucun dossier ce jour.</div>
+              </div>
             ) : (
-              dayAgenda.map((sale) => {
-                const seller = sellerById.get(String(sale.agentId || sale.managerId || ''))
-                const plotLabel = normalizePlotIds(sale).map((id) => `#${id}`).join(', ') || '—'
-                return (
-                  <article
-                    key={sale.id} className="sp-card fv-card fv-card--agenda"
-                    role="button" tabIndex={0}
-                    onClick={() => setDetailSaleId(sale.id)}
-                  >
-                    <div className="sp-card__head">
-                      <div className="sp-card__user">
-                        <span className="sp-card__initials">{initials(sale.clientName)}</span>
-                        <div>
-                          <p className="sp-card__name">{sale.clientName || 'Client'}</p>
-                          <p className="sp-card__sub">{sale.projectTitle || 'Projet'} · Parcelle {plotLabel}</p>
-                        </div>
-                      </div>
-                      <span className="sp-badge sp-badge--orange">À valider</span>
-                    </div>
-                    <div className="fv-card__amount-row">
-                      <div className="fv-card__amount">
-                        <span className="fv-card__amount-num">{fmtMoney(sale.agreedPrice)}</span>
-                      </div>
-                      <div className="fv-card__meta">
-                        <span>Vendeur : {seller?.name || 'Commercial'}</span>
-                      </div>
-                    </div>
-                  </article>
-                )
-              })
+              <div className="sp-cards">
+                {dayAgenda.map((sale) => renderSaleCard(sale))}
+              </div>
             )}
           </div>
         </section>
@@ -405,7 +420,7 @@ export default function FinanceDashboardPage() {
       <AdminModal
         open={Boolean(detailSale)}
         onClose={() => setDetailSaleId(null)}
-        title="Dossier à valider"
+        title=""
         width={560}
       >
         {detailSale && (() => {
@@ -417,89 +432,118 @@ export default function FinanceDashboardPage() {
           const { companyPct, notaryPct, company: cr, notary: nr } = feeRatesFromSale(s)
           const companyFee = Math.round(agreed * cr)
           const notaryFee = Math.round(agreed * nr)
-          const due = Math.max(0, agreed - advance)
+          const isInst = s.paymentType === 'installments'
+          const downPct = Number(s.offerDownPayment) || 0
+          const firstInstallment = isInst && downPct > 0 ? Math.round(agreed * downPct / 100) : agreed
+          const due = Math.max(0, firstInstallment - advance)
           const net = Math.max(0, due - companyFee - notaryFee)
           return (
-            <div className="fv-detail">
-              <div className="fv-detail__head">
-                <div>
-                  <div className="fv-detail__name">{s.clientName || 'Client'}</div>
-                  <div className="fv-detail__code">Réf : <code>{s.code || s.id}</code></div>
+            <div className="sp-detail fv-detail">
+              <div className="sp-detail__banner">
+                <div className="sp-detail__banner-top">
+                  <span className="sp-badge sp-badge--orange">À valider</span>
+                  <span className="sp-detail__date">{fmtDate(s.createdAt)}</span>
                 </div>
-                <span className="sp-badge sp-badge--orange">À valider</span>
+                <div className="sp-detail__price">
+                  <span className="sp-detail__price-num">{due.toLocaleString('fr-FR')}</span>
+                  <span className="sp-detail__price-cur">TND</span>
+                </div>
+                <p className="sp-detail__banner-sub">
+                  {s.clientName || 'Client'} · Réf. {s.code || s.id}
+                </p>
               </div>
 
-              {/* Money bar — the ONE big number to anchor the eye. */}
-              <div className="fv-detail__money">
-                <div className="fv-detail__money-row">
-                  <span className="fv-detail__money-lbl">Montant à encaisser</span>
-                  <span className="fv-detail__money-val">{fmtMoney(due)}</span>
-                </div>
-                <div className="fv-detail__money-sub">
-                  Prix {fmtMoney(agreed)} · Avance {fmtMoney(advance)} · Net après frais {fmtMoney(net)}
-                </div>
+              <div className="sp-detail__section">
+                <div className="sp-detail__section-title">Acheteur</div>
+                <div className="sp-detail__row"><span>Nom</span><strong>{s.clientName || '—'}</strong></div>
+                <div className="sp-detail__row"><span>Téléphone</span><strong style={{ direction: 'ltr' }}>{s.clientPhone || s.buyerPhoneClaim || s.buyerPhoneNormalized || '—'}</strong></div>
+                {s.clientEmail && (
+                  <div className="sp-detail__row"><span>Email</span><strong style={{ wordBreak: 'break-all' }}>{s.clientEmail}</strong></div>
+                )}
+                <div className="sp-detail__row"><span>CIN</span><strong style={{ direction: 'ltr' }}>{s.clientCin || '—'}</strong></div>
               </div>
 
-              <DetailBlock title="Acheteur">
-                <Row k="Nom" v={s.clientName || '—'} />
-                <Row k="Téléphone" v={s.clientPhone || s.buyerPhoneClaim || s.buyerPhoneNormalized || '—'} />
-                <Row k="Email" v={s.clientEmail || '—'} />
-                <Row k="CIN" v={s.clientCin || '—'} mono />
-              </DetailBlock>
+              <div className="sp-detail__section">
+                <div className="sp-detail__section-title">Vendeur</div>
+                <div className="sp-detail__row"><span>Nom</span><strong>{seller?.name || 'Commercial'}</strong></div>
+                <div className="sp-detail__row"><span>Email</span><strong style={{ wordBreak: 'break-all' }}>{seller?.email || '—'}</strong></div>
+                <div className="sp-detail__row"><span>Téléphone</span><strong style={{ direction: 'ltr' }}>{seller?.phone || '—'}</strong></div>
+              </div>
 
-              <DetailBlock title="Vendeur">
-                <Row k="Nom" v={seller?.name || 'Commercial'} />
-                <Row k="Email" v={seller?.email || '—'} />
-                <Row k="Téléphone" v={seller?.phone || '—'} />
-              </DetailBlock>
+              <div className="sp-detail__section">
+                <div className="sp-detail__section-title">Vente</div>
+                <div className="sp-detail__row"><span>Projet</span><strong>{s.projectTitle || '—'}</strong></div>
+                <div className="sp-detail__row"><span>Parcelle(s)</span><strong>{plotLabel}</strong></div>
+                <div className="sp-detail__row"><span>Offre</span><strong>{s.offerName || (s.paymentType === 'installments' ? 'Échelonné' : 'Comptant')}</strong></div>
+                <div className="sp-detail__row"><span>Mode paiement</span><strong>{s.paymentType === 'installments' ? 'Échelonné' : 'Comptant'}</strong></div>
+                <div className="sp-detail__row"><span>Date création</span><strong>{fmtDate(s.createdAt)}</strong></div>
+              </div>
 
-              <DetailBlock title="Vente">
-                <Row k="Projet" v={s.projectTitle || '—'} />
-                <Row k="Parcelle(s)" v={plotLabel} />
-                <Row k="Offre" v={s.offerName || (s.paymentType === 'installments' ? 'Échelonné' : 'Comptant')} />
-                <Row k="Mode paiement" v={s.paymentType === 'installments' ? 'Échelonné' : 'Comptant'} />
-                <Row k="Date création" v={fmtDate(s.createdAt)} />
-              </DetailBlock>
-
-              <DetailBlock title="Coordination">
-                <Row k="RDV Finance" v={fmtDateTime(s.coordinationFinanceAt)} />
-                <Row k="RDV Juridique" v={fmtDateTime(s.coordinationJuridiqueAt)} />
+              <div className="sp-detail__section">
+                <div className="sp-detail__section-title">Coordination</div>
+                <div className="sp-detail__row"><span>RDV Finance</span><strong>{fmtDateTime(s.coordinationFinanceAt)}</strong></div>
+                <div className="sp-detail__row"><span>RDV Juridique</span><strong>{fmtDateTime(s.coordinationJuridiqueAt)}</strong></div>
                 {s.coordinationNotes ? (
-                  <div className="fv-detail__notes">{s.coordinationNotes}</div>
+                  <p className="fv-detail__notes">{s.coordinationNotes}</p>
                 ) : null}
-              </DetailBlock>
+              </div>
 
-              <DetailBlock title="Détail financier">
-                <Row k="Prix de vente" v={fmtMoney(agreed)} />
-                <Row k="Acompte reçu" v={fmtMoney(advance)} />
-                <Row k={`Frais société (${companyPct}%)`} v={fmtMoney(companyFee)} />
-                <Row k={`Frais notaire (${notaryPct}%)`} v={fmtMoney(notaryFee)} />
-                <Row k="À encaisser" v={fmtMoney(due)} strong />
-                <Row k="Net après frais" v={fmtMoney(net)} strong />
-                {s.reservationStatus
-                  ? <Row k="Réservation" v={`${s.reservationStatus}${s.reservationExpiresAt ? ` · exp. ${fmtDate(s.reservationExpiresAt)}` : ''}`} />
-                  : null}
-              </DetailBlock>
-
-              <details className="fv-detail__audit">
-                <summary>Snapshots figés (audit)</summary>
-                <div className="fv-detail__audit-body">
-                  {getSaleSnapshotAuditRows(s).map((row) => (
-                    <div key={row.key} className="fv-detail__audit-row">
-                      <span>{row.label}</span>
-                      <strong>{row.value}</strong>
+              <div className="sp-detail__section">
+                <div className="sp-detail__section-title">Détail financier</div>
+                <div className="sp-detail__row"><span>Prix de vente</span><strong>{fmtMoney(agreed)}</strong></div>
+                {isInst && downPct > 0 && (
+                  <>
+                    <div className="sp-detail__row">
+                      <span>1er versement ({downPct}%)</span>
+                      <strong>{fmtMoney(firstInstallment)}</strong>
                     </div>
-                  ))}
+                    <div className="sp-detail__row">
+                      <span>Capital restant</span>
+                      <strong>{fmtMoney(Math.max(0, agreed - firstInstallment))}</strong>
+                    </div>
+                  </>
+                )}
+                <div className="sp-detail__row"><span>Acompte reçu</span><strong>{fmtMoney(advance)}</strong></div>
+                <div className="sp-detail__row"><span>Frais société ({companyPct}%)</span><strong>{fmtMoney(companyFee)}</strong></div>
+                <div className="sp-detail__row"><span>Frais notaire ({notaryPct}%)</span><strong>{fmtMoney(notaryFee)}</strong></div>
+                <div className="sp-detail__row sp-detail__row--highlight">
+                  <span>À encaisser{isInst && downPct > 0 ? ' (1er versement)' : ''}</span>
+                  <strong>{fmtMoney(due)}</strong>
                 </div>
-              </details>
+                <div className="sp-detail__row"><span>Net après frais</span><strong>{fmtMoney(net)}</strong></div>
+                {s.reservationStatus ? (
+                  <div className="sp-detail__row">
+                    <span>Réservation</span>
+                    <strong>{s.reservationStatus}{s.reservationExpiresAt ? ` · exp. ${fmtDate(s.reservationExpiresAt)}` : ''}</strong>
+                  </div>
+                ) : null}
+              </div>
 
-              <div className="fv-detail__footer">
+              <div className="sp-detail__section">
+                <details className="fv-audit">
+                  <summary>Snapshots figés (audit)</summary>
+                  <div className="fv-audit__body">
+                    {getSaleSnapshotAuditRows(s).map((row) => (
+                      <div key={row.key} className="fv-audit__row">
+                        <span>{row.label}</span>
+                        <strong>{row.value}</strong>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              </div>
+
+              <div className="sp-detail__actions">
                 <button
-                  type="button" className="fv-btn fv-btn--ghost"
+                  type="button"
+                  className="sp-detail__btn"
                   onClick={() => setDetailSaleId(null)}
-                >Fermer</button>
+                >
+                  Fermer
+                </button>
                 <button
-                  type="button" className="fv-btn fv-btn--primary"
+                  type="button"
+                  className="sp-detail__btn sp-detail__btn--edit"
                   onClick={() => setConfirmPayment({ sale: s, amount: due })}
                 >
                   ✓ Valider le paiement
@@ -513,32 +557,40 @@ export default function FinanceDashboardPage() {
       {/* ── Confirm payment modal ─────────────────────────────── */}
       <AdminModal
         open={Boolean(confirmPayment)}
-        onClose={() => setConfirmPayment(null)}
+        onClose={() => { if (!approving) setConfirmPayment(null) }}
         title="Confirmer le paiement"
         width={420}
       >
         {confirmPayment && (
-          <div className="fv-confirm">
+          <div className="sp-detail fv-confirm">
             <div className="fv-confirm__icon" aria-hidden>💰</div>
             <div className="fv-confirm__title">Encaisser ce montant ?</div>
             <div className="fv-confirm__amount">{fmtMoney(confirmPayment.amount)}</div>
             <p className="fv-confirm__hint">
               Le dossier passera en statut « En attente juridique » et sera transféré au notaire.
-              Cette action est enregistrée dans l’audit.
+              Cette action est enregistrée dans l'audit.
             </p>
-            <div className="fv-confirm__actions">
+            <div className="sp-detail__actions">
               <button
-                type="button" className="fv-btn fv-btn--ghost"
+                type="button"
+                className="sp-detail__btn"
                 onClick={() => setConfirmPayment(null)}
-              >Annuler</button>
+                disabled={approving}
+              >
+                Annuler
+              </button>
               <button
-                type="button" className="fv-btn fv-btn--primary"
+                type="button"
+                className="sp-detail__btn sp-detail__btn--edit"
                 onClick={async () => {
                   const payload = confirmPayment
                   setConfirmPayment(null)
                   await approveSale(payload.sale)
                 }}
-              >✓ Confirmer</button>
+                disabled={approving}
+              >
+                {approving ? 'Validation…' : '✓ Confirmer'}
+              </button>
             </div>
           </div>
         )}
@@ -555,27 +607,6 @@ export default function FinanceDashboardPage() {
           <span className="fv-toast__msg">{toast.msg}</span>
         </div>
       ) : null}
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Presentational helpers — same as CoordinationPage (copy small & local).
-// ---------------------------------------------------------------------------
-function DetailBlock({ title, children }) {
-  return (
-    <section className="fv-detail__block">
-      <div className="fv-detail__block-title">{title}</div>
-      <div className="fv-detail__block-body">{children}</div>
-    </section>
-  )
-}
-
-function Row({ k, v, mono, strong }) {
-  return (
-    <div className="fv-detail__row">
-      <span className="fv-detail__row-k">{k}</span>
-      <span className={`fv-detail__row-v${mono ? ' fv-detail__row-v--mono' : ''}${strong ? ' fv-detail__row-v--strong' : ''}`}>{v}</span>
     </div>
   )
 }

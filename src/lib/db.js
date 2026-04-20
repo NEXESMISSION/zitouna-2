@@ -143,6 +143,7 @@ export async function fetchProjects() {
       .map(pl => ({
         id: pl.parcel_number,
         dbId: pl.id,
+        label: pl.label || null,
         area: Number(pl.area_m2 || 0),
         trees: Number(pl.tree_count || 0),
         totalPrice: Number(pl.total_price || 0),
@@ -156,20 +157,19 @@ export async function fetchProjects() {
   }))
 }
 
-/** Explorer / browse: all projects and parcels (public, no status filter). */
+/**
+ * Explorer / browse: public catalog. Reads from the `public_parcels` /
+ * `public_parcel_tree_batches` views (granted to anon + authenticated in
+ * 07_hardening.sql §B3). The raw `parcels` table is not readable by anon —
+ * querying it yields "permission denied for table parcels".
+ */
 export async function fetchPublicCatalogProjects() {
   const [projRes, parcelRes] = await Promise.all([
-    db().from('projects').select('*'),
-    db().from('parcels').select('*'),
+    db().from('projects').select('id,title,city,region,area,year_started,description,map_url,arabon_default'),
+    db().from('public_parcels').select('id,project_id,parcel_number,area_m2,tree_count,total_price,price_per_tree,status,map_url'),
   ])
   const projects = throwIfError(projRes, 'projects')
   const parcels = throwIfError(parcelRes, 'parcels')
-  const parcelIds = (parcels || []).map((p) => p.id).filter(Boolean)
-  const batchRes =
-    parcelIds.length > 0
-      ? await db().from('parcel_tree_batches').select('*').in('parcel_id', parcelIds)
-      : { data: [], error: null }
-  const batches = throwIfError(batchRes, 'batches')
 
   return projects
     .map((p) => ({
@@ -187,23 +187,26 @@ export async function fetchPublicCatalogProjects() {
         .map((pl) => ({
           id: pl.parcel_number,
           dbId: pl.id,
+          label: null,
           area: Number(pl.area_m2 || 0),
           trees: Number(pl.tree_count || 0),
           totalPrice: Number(pl.total_price || 0),
           pricePerTree: Number(pl.price_per_tree || 0),
           status: pl.status || 'available',
           mapUrl: pl.map_url || '',
-          treeBatches: batches
-            .filter((b) => b.parcel_id === pl.id)
-            .map((b) => ({ year: b.batch_year, count: b.tree_count })),
+          treeBatches: [],
         })),
     }))
 }
 
-/** Public visitor visit slot options (template list). */
+/**
+ * Public visitor visit slot options (template list). Reads from the
+ * `public_visit_slots` view; the raw `visit_slot_options` table lost its
+ * anon SELECT grant in 07_hardening.sql §B3.
+ */
 export async function fetchPublicVisitSlotOptions() {
   const res = await db()
-    .from('visit_slot_options')
+    .from('public_visit_slots')
     .select('id, label, hint, sort_order')
     .order('sort_order', { ascending: true })
   const rows = throwIfError(res, 'visitSlotOptions')
@@ -215,14 +218,19 @@ export async function fetchPublicVisitSlotOptions() {
   }))
 }
 
-/** Single project for public detail / plot / visite flows — all parcels visible. */
+/**
+ * Single project for public detail / plot / visite flows. Uses the
+ * `public_parcels` view, which exposes only parcels with status='available'
+ * per the 07_hardening.sql tightening. Non-public parcels (reserved / sold)
+ * are hidden from the anon marketing surface by design.
+ */
 export async function fetchPublicProjectById(projectId) {
   const id = String(projectId || '').trim()
   if (!id) return null
 
   const [projRes, parcelRes] = await Promise.all([
     db().from('projects').select('*').eq('id', id).maybeSingle(),
-    db().from('parcels').select('*').eq('project_id', id),
+    db().from('public_parcels').select('*').eq('project_id', id),
   ])
   if (projRes.error) throw new Error(`project: ${projRes.error.message}`)
   const p = projRes.data
@@ -232,7 +240,7 @@ export async function fetchPublicProjectById(projectId) {
   const parcelIds = (parcels || []).map((p) => p.id).filter(Boolean)
   const batchRes =
     parcelIds.length > 0
-      ? await db().from('parcel_tree_batches').select('*').in('parcel_id', parcelIds)
+      ? await db().from('public_parcel_tree_batches').select('*').in('parcel_id', parcelIds)
       : { data: [], error: null }
   const batches = throwIfError(batchRes, 'batches')
 
@@ -467,6 +475,7 @@ export async function fetchProjectsScopedByIds(projectIds = []) {
       .map(pl => ({
         id: pl.parcel_number,
         dbId: pl.id,
+        label: pl.label || null,
         area: Number(pl.area_m2 || 0),
         trees: Number(pl.tree_count || 0),
         totalPrice: Number(pl.total_price || 0),
@@ -501,6 +510,19 @@ async function replaceParcelTreeBatches(parcelDbId, batches) {
 
 /**
  * Crée ou met à jour une parcelle (plot côté UI : id = parcel_number, dbId = id SQL).
+ *
+ * `parcel_number` is the internal integer identifier (unique per project),
+ * kept so existing flows — sell page, plot URLs, logs — keep working.
+ * On CREATE, callers may pass `plotNumber: 0` (or omit it) to let this
+ * helper auto-assign the next integer for the project.
+ *
+ * `plot.label` (optional text) is the user-facing identifier (e.g. "a1",
+ * "B-42"). It is trimmed, stored as NULL when empty, and must be unique
+ * per project (case-insensitive — enforced by ux_parcels_project_label).
+ *
+ * Backward-compat: if the DB has not yet received 10_parcel_labels.sql, the
+ * `label` column does not exist. We detect PostgreSQL error code 42703
+ * (undefined_column) and retry without the column so the UI stays usable.
  */
 export async function upsertParcelForProject(projectId, plot) {
   const trees = Number(plot.trees) || 0
@@ -508,15 +530,78 @@ export async function upsertParcelForProject(projectId, plot) {
   const pricePerTree = trees > 0
     ? Math.round(totalPrice / trees)
     : (Number(plot.pricePerTree) || 0)
+
+  // Normalise the user-facing label. Empty/whitespace becomes null.
+  const rawLabel = typeof plot.label === 'string' ? plot.label.trim() : ''
+  const label = rawLabel ? rawLabel.slice(0, 16) : null
+
   // Accept both `id` (legacy) and `plotNumber` (current UI) — the UI evolved
-  // but the schema column is still `parcel_number`. Either key works.
-  const parcelNumber = Number(plot.plotNumber ?? plot.id)
+  // but the schema column is still `parcel_number`. Either key works. A
+  // missing / zero value on CREATE means "auto-assign next integer".
+  let parcelNumber = Number(plot.plotNumber ?? plot.id)
+  if (!Number.isFinite(parcelNumber)) parcelNumber = 0
+
+  // CREATE path: auto-assign parcel_number if missing, and pre-check the
+  // label for duplicates so we can give a friendly error before the DB
+  // unique-index kicks in with a cryptic 23505.
+  if (!plot.dbId) {
+    if (!parcelNumber || parcelNumber <= 0) {
+      const maxRes = await db()
+        .from('parcels')
+        .select('parcel_number')
+        .eq('project_id', projectId)
+        .order('parcel_number', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      if (maxRes.error && maxRes.error.code !== 'PGRST116') {
+        throwIfError(maxRes, 'nextParcelNumber')
+      }
+      const maxN = Number(maxRes.data?.parcel_number) || 0
+      parcelNumber = maxN + 1
+    }
+    if (label) {
+      const dupRes = await db()
+        .from('parcels')
+        .select('id, label')
+        .eq('project_id', projectId)
+        .ilike('label', label)
+        .limit(1)
+      // If the `label` column doesn't exist yet, skip the duplicate
+      // pre-check — the migration hasn't been applied. We'll still catch
+      // any real duplicate later via 23505 when the index exists.
+      if (dupRes.error && dupRes.error.code !== '42703') {
+        throwIfError(dupRes, 'checkParcelLabel')
+      }
+      if (!dupRes.error && Array.isArray(dupRes.data) && dupRes.data.length > 0) {
+        throw new Error(`L'identifiant « ${label} » est déjà utilisé dans ce projet.`)
+      }
+    }
+  } else if (label) {
+    // UPDATE path: allow same-label on same row; reject if another parcel
+    // in this project already has it.
+    const dupRes = await db()
+      .from('parcels')
+      .select('id, label')
+      .eq('project_id', projectId)
+      .ilike('label', label)
+      .neq('id', plot.dbId)
+      .limit(1)
+    if (dupRes.error && dupRes.error.code !== '42703') {
+      throwIfError(dupRes, 'checkParcelLabel')
+    }
+    if (!dupRes.error && Array.isArray(dupRes.data) && dupRes.data.length > 0) {
+      throw new Error(`L'identifiant « ${label} » est déjà utilisé dans ce projet.`)
+    }
+  }
+
   if (!Number.isFinite(parcelNumber) || parcelNumber <= 0) {
     throw new Error('Numéro de parcelle invalide')
   }
-  const row = {
+
+  const rowWithLabel = {
     project_id: projectId,
     parcel_number: parcelNumber,
+    label,
     area_m2: Number(plot.area) || 0,
     tree_count: trees,
     total_price: totalPrice,
@@ -524,13 +609,36 @@ export async function upsertParcelForProject(projectId, plot) {
     status: plot.status || 'available',
     map_url: (plot.mapUrl || '').trim() || null,
   }
+  // Fallback payload for databases missing the `label` column (pre-migration).
+  const rowNoLabel = { ...rowWithLabel }
+  delete rowNoLabel.label
+
+  // Friendly interpretation of duplicate-label failures from the index.
+  const handleDup = (err) => {
+    const code = err?.code
+    const msg = String(err?.message || '')
+    if (code === '23505' && /ux_parcels_project_label|label/i.test(msg)) {
+      throw new Error(`L'identifiant « ${label || ''} » est déjà utilisé dans ce projet.`)
+    }
+  }
+
   if (plot.dbId) {
-    const res = await db().from('parcels').update(row).eq('id', plot.dbId).select().single()
+    let res = await db().from('parcels').update(rowWithLabel).eq('id', plot.dbId).select().single()
+    if (res.error && res.error.code === '42703') {
+      // Column missing -> pre-migration DB. Retry without `label`.
+      res = await db().from('parcels').update(rowNoLabel).eq('id', plot.dbId).select().single()
+    }
+    if (res.error) handleDup(res.error)
     const data = throwIfError(res, 'updateParcel')
     await replaceParcelTreeBatches(plot.dbId, plot.treeBatches)
     return data
   }
-  const res = await db().from('parcels').insert(row).select().single()
+
+  let res = await db().from('parcels').insert(rowWithLabel).select().single()
+  if (res.error && res.error.code === '42703') {
+    res = await db().from('parcels').insert(rowNoLabel).select().single()
+  }
+  if (res.error) handleDup(res.error)
   const data = throwIfError(res, 'insertParcel')
   await replaceParcelTreeBatches(data.id, plot.treeBatches)
   return data
@@ -582,25 +690,53 @@ export async function fetchOffers() {
       price: Number(o.price || 0),
       downPayment: Number(o.down_payment_pct || 0),
       duration: Number(o.duration_months || 0),
+      // These three may be undefined on old rows (pre-migration) — tolerated.
+      mode: o.mode === 'cash' ? 'cash' : 'installments',
+      cashAmount: Number(o.cash_amount || 0),
+      pricePerSqm: Number(o.price_per_sqm || 0),
+      note: o.note || '',
     })
   })
   return byProject
 }
 
+// Cached probe for optional columns — avoids spamming the network every save
+// if the migration hasn't been applied yet. First write attempts the full row;
+// on a 42703 "column does not exist" error we drop the extras and retry once.
+let _offersExtrasOk = true
+
 export async function upsertOffer(projectId, offer) {
-  const row = {
+  const name = (offer.name ?? offer.label ?? '').toString().trim()
+  if (!name) throw new Error('upsertOffer: name/label is required')
+  const baseRow = {
     project_id: projectId,
-    name: offer.name,
-    price: offer.price || 0,
-    down_payment_pct: offer.downPayment || 0,
-    duration_months: offer.duration || 0,
+    name,
+    price: Number(offer.price ?? 0) || 0,
+    down_payment_pct: Number(offer.downPayment ?? offer.avancePct ?? 0) || 0,
+    duration_months: Number(offer.duration ?? 0) || 0,
   }
-  if (offer.dbId) {
-    const res = await db().from('project_offers').update(row).eq('id', offer.dbId).select().single()
-    return throwIfError(res, 'updateOffer')
+  const extras = {}
+  if (offer.mode != null) extras.mode = offer.mode === 'cash' ? 'cash' : 'installments'
+  if (offer.cashAmount != null) extras.cash_amount = Number(offer.cashAmount) || 0
+  if (offer.pricePerSqm != null) extras.price_per_sqm = Number(offer.pricePerSqm) || 0
+  if (offer.note != null) extras.note = String(offer.note || '')
+
+  const tryWrite = async (row) => {
+    if (offer.dbId) {
+      return db().from('project_offers').update(row).eq('id', offer.dbId).select().single()
+    }
+    return db().from('project_offers').insert(row).select().single()
   }
-  const res = await db().from('project_offers').insert(row).select().single()
-  return throwIfError(res, 'insertOffer')
+
+  const fullRow = _offersExtrasOk ? { ...baseRow, ...extras } : baseRow
+  const res = await tryWrite(fullRow)
+  if (res.error && String(res.error.code || '') === '42703' && _offersExtrasOk) {
+    // One of the optional columns is missing — fall back and remember.
+    _offersExtrasOk = false
+    const retry = await tryWrite(baseRow)
+    return throwIfError(retry, offer.dbId ? 'updateOffer' : 'insertOffer')
+  }
+  return throwIfError(res, offer.dbId ? 'updateOffer' : 'insertOffer')
 }
 
 export async function deleteOffer(offerDbId) {
@@ -1458,26 +1594,27 @@ export async function fetchAuthClientProfile(authUserId) {
     return { __profileError: true, message: res.error.message, code: res.error.code }
   }
   if (!res.data) return null
-  try {
-    await replayPageGrantsFromCompletedSales(res.data.id)
-  } catch (e) {
-    console.warn('replayPageGrantsFromCompletedSales:', e?.message || e)
-  }
-  try {
-    // Best-effort self-heal so buyers never land on “Plan en cours…” when the
-    // notary branch silently dropped plan creation. RLS will block the INSERT
-    // for buyer sessions; the helper tags those as `permission_denied` and
-    // returns cleanly. Effective for staff sessions (admin login).
-    await replayInstallmentPlansFromCompletedSales(res.data.id)
-  } catch (e) {
-    console.warn('replayInstallmentPlansFromCompletedSales:', e?.message || e)
-  }
+
   const c = mapClientFromDb(res.data)
   const grantKeys = await fetchActivePageGrantKeysForClient(c.id)
   const base = Array.isArray(c.allowedPages)
     ? c.allowedPages.map((p) => normalizeAdminPagePath(p)).filter(Boolean)
     : []
   c.allowedPages = [...new Set([...base, ...grantKeys])]
+
+  // Best-effort background heals: page grants from completed sales, and
+  // installment plans that the notary branch may have dropped. These used to
+  // be awaited here — but for regular (non-staff) clients both hit RLS
+  // `permission denied` on `sales`, and PostgREST returns those slowly
+  // enough to blow past our 8s login timeout. Fire-and-forget keeps login
+  // snappy; both helpers only mutate state on staff sessions anyway.
+  void replayPageGrantsFromCompletedSales(res.data.id).catch((e) => {
+    console.warn('replayPageGrantsFromCompletedSales:', e?.message || e)
+  })
+  void replayInstallmentPlansFromCompletedSales(res.data.id).catch((e) => {
+    console.warn('replayInstallmentPlansFromCompletedSales:', e?.message || e)
+  })
+
   return c
 }
 
@@ -1570,6 +1707,27 @@ function roundCommission2(n) {
 }
 
 /**
+ * Compute commission event payloads for a completed sale.
+ *
+ * Sale-based pyramid model: the `seller_relations` graph is built from
+ * NOTARY-COMPLETED sales (child=buyer, parent=seller). A user enters the
+ * pyramid by BUYING from someone; they become eligible to receive indirect
+ * commissions by later SELLING to someone. There is no separate "activation"
+ * field — eligibility is implicit in the graph (you only have descendants if
+ * you've sold to them).
+ *
+ * Chain: walk `seller_relations` from the sale's seller upward. L1 = seller
+ * (direct), L2+ = ancestors (indirect). The buyer is filtered out of the
+ * chain — a reverse sale (Haroun selling back up to his ancestor Me) still
+ * gives Haroun L1 and any intermediate ancestors their levels, but Me (as
+ * the buyer on this transaction) does not earn a commission on a purchase
+ * they are making themselves.
+ *
+ * Sales with no seller, or self-sales (seller == buyer), generate no
+ * commission events. The old buyer-upline fallback was removed — that path
+ * only applied to company-direct sales, which shouldn't credit the referral
+ * tree under the new model.
+ *
  * @param {object} sale App-shaped sale (mapSaleFromDb)
  * @param {object[]} relations DB rows: { child_client_id, parent_client_id }
  * @param {object[]} rules Project / snapshot rules (level, ruleType, value, maxCapAmount)
@@ -1582,43 +1740,37 @@ export function computeCommissionEventPayloads(sale, relations, rules) {
     relByChild.set(String(r.child_client_id), String(r.parent_client_id))
   }
 
-  // A real seller is required to credit L1. If the seller is missing or is the
-  // buyer themselves, skip L1 entirely — never credit the buyer for their own
-  // sale. The upline walk then starts at the buyer's parent (if any), so only
-  // legitimate parrainage earns commissions.
   const buyerId = String(sale.clientId || '')
   const sellerId = String(sale.sellerClientId || '')
-  const hasRealSeller = Boolean(sellerId) && sellerId !== buyerId
 
-  const walkStart = hasRealSeller ? sellerId : buyerId
+  // No seller, or self-sale → no referral-tree credit.
+  if (!sellerId || sellerId === buyerId) return []
+
+  // Walk from the seller up through the graph. Cycle-safe via `seen` set.
   const chain = []
   const seen = new Set()
-  let steps = 0
-  let walkId = walkStart
-  while (walkId && steps < 40) {
+  let walkId = sellerId
+  for (let steps = 0; steps < 40; steps += 1) {
     const key = String(walkId)
-    if (seen.has(key)) break // cycle-safe
+    if (seen.has(key)) break
     seen.add(key)
     chain.push(key)
     const parentId = relByChild.get(key)
     if (!parentId) break
     walkId = parentId
-    steps += 1
   }
 
-  // When no real seller exists we drop the first link of the chain (the buyer)
-  // so upline parrainage kicks in at L1 instead of paying the buyer.
-  const directSeller = hasRealSeller ? sellerId : ''
-  const upline = hasRealSeller
-    ? chain.filter((cid) => cid !== directSeller)
-    : chain.filter((cid) => cid !== buyerId)
-  const ordered = directSeller ? [directSeller, ...upline] : [...upline]
+  // Reverse-sale guard: if the buyer appears somewhere in the seller's upline
+  // (e.g. Haroun sells to Me, and Me is Haroun's great-grandparent), strip
+  // the buyer out — they shouldn't earn a commission on their own purchase.
+  // Everyone else in the chain earns at their level.
+  const ordered = chain.filter((cid) => cid !== buyerId)
   const maxLevel = rules.reduce((m, r) => Math.max(m, Number(r.level) || 0), 0)
 
   const events = []
   ordered.forEach((beneficiaryId, idx) => {
     const level = idx + 1
-    if (maxLevel > 0 && level > maxLevel) return // cap chain depth to configured rule count
+    if (maxLevel > 0 && level > maxLevel) return
     const rule = rules.find((rr) => Number(rr.level) === level) || rules[idx]
     if (!rule || !beneficiaryId) return
     let amt = 0
@@ -1628,8 +1780,6 @@ export function computeCommissionEventPayloads(sale, relations, rules) {
     const cap = rule.maxCapAmount != null ? Number(rule.maxCapAmount) : null
     if (cap != null && Number.isFinite(cap)) amt = Math.min(amt, cap)
     if (amt > 0) {
-      // Diagnostic metadata merged into rule_snapshot so the existing
-      // commission_events column can carry it without a schema change.
       const ruleSnapshot = {
         ...rule,
         meta: {
@@ -1638,12 +1788,7 @@ export function computeCommissionEventPayloads(sale, relations, rules) {
           buyerClientId: buyerId || null,
           level,
           beneficiaryClientId: beneficiaryId,
-          directSeller: directSeller || null,
-          // fallbackFromBuyerUpline is true when no real seller was present and
-          // we walked the buyer's parrainage chain starting at the buyer's
-          // parent. Useful for support when the L1 line is missing but L2+ are
-          // present.
-          fallbackFromBuyerUpline: !hasRealSeller,
+          directSeller: sellerId,
           chainPath: ordered.slice(0, idx + 1),
           computedAmount: amt,
           amountBase,
@@ -1834,6 +1979,194 @@ export async function insertCommissionEventsForCompletedSale(
   })
 
   return data.map(mapCommissionEventFromDb)
+}
+
+/**
+ * One-shot migration to rebuild the seller_relations graph and
+ * commission_events table from notary-completed sales under the new
+ * sale-based pyramid model.
+ *
+ * Destructive — this deletes all existing seller_relations and all
+ * non-locked commission_events, then replays every notary-completed sale
+ * in chronological order (by notary_completed_at ASC), creating the
+ * buyer→seller link and inserting commission events for each sale as it
+ * goes. Commission events that are already `paid` or attached to an
+ * approved payout request are LEFT UNTOUCHED (insertCommissionEvents*
+ * would reject regen on those anyway).
+ *
+ * Returns a summary: { deletedRelations, deletedEvents, replayedSales,
+ * createdLinks, createdEvents, skippedSales }.
+ *
+ * Intended to be called from the admin DangerZone page during testing,
+ * after the old `referredByClientId`-based graph has fallen out of sync
+ * with the new model. Do NOT call in production without a backup.
+ */
+export async function rebuildCommissionGraphFromSalesHistory({ actorUserId = null, actorEmail = '' } = {}) {
+  const summary = {
+    deletedRelations: 0,
+    deletedEvents: 0,
+    replayedSales: 0,
+    createdLinks: 0,
+    createdEvents: 0,
+    skippedSales: [],
+    errors: [],
+  }
+
+  // 1. Fetch existing commission_events and identify which ones are locked
+  //    (paid OR attached to an approved/paid payout request). We only delete
+  //    unlocked ones.
+  const allEventsRes = await db().from('commission_events').select('id, status, sale_id')
+  if (allEventsRes.error) throw new Error(`rebuild: fetch events: ${allEventsRes.error.message}`)
+  const allEvents = allEventsRes.data || []
+  const paidIds = new Set(allEvents.filter((e) => String(e.status) === 'paid').map((e) => e.id))
+  // Map sale_id → [event ids] so the replay loop can detect locked priors.
+  const eventsBySaleId = new Map()
+  for (const e of allEvents) {
+    const sid = String(e.sale_id || '')
+    if (!sid) continue
+    if (!eventsBySaleId.has(sid)) eventsBySaleId.set(sid, [])
+    eventsBySaleId.get(sid).push(e.id)
+  }
+
+  let lockedFromPayouts = new Set()
+  if (allEvents.length) {
+    const lockedRes = await db()
+      .from('commission_payout_request_items')
+      .select('commission_event_id, commission_payout_requests!inner(status)')
+      .in('commission_event_id', allEvents.map((e) => e.id))
+    if (lockedRes.error) throw new Error(`rebuild: fetch locks: ${lockedRes.error.message}`)
+    lockedFromPayouts = new Set(
+      (lockedRes.data || [])
+        .filter((r) => {
+          const st = r.commission_payout_requests?.status
+          return st === 'approved' || st === 'paid'
+        })
+        .map((r) => r.commission_event_id),
+    )
+  }
+
+  const deletableEventIds = allEvents
+    .filter((e) => !paidIds.has(e.id) && !lockedFromPayouts.has(e.id))
+    .map((e) => e.id)
+
+  // 2. Delete unlocked events.
+  if (deletableEventIds.length) {
+    const delEv = await db().from('commission_events').delete().in('id', deletableEventIds)
+    if (delEv.error) throw new Error(`rebuild: delete events: ${delEv.error.message}`)
+    summary.deletedEvents = deletableEventIds.length
+  }
+
+  // 3. Wipe all seller_relations. Safe — this table is fully derived from
+  //    sales history under the new model.
+  const beforeRelRes = await db().from('seller_relations').select('id')
+  if (beforeRelRes.error) throw new Error(`rebuild: count relations: ${beforeRelRes.error.message}`)
+  summary.deletedRelations = (beforeRelRes.data || []).length
+  const delRel = await db().from('seller_relations').delete().neq('id', '00000000-0000-0000-0000-000000000000')
+  if (delRel.error) throw new Error(`rebuild: delete relations: ${delRel.error.message}`)
+
+  // 4. Fetch every notary-completed sale, oldest first. We replay in
+  //    chronological order so the graph grows the same way it would have
+  //    under the new rules.
+  const salesRes = await db()
+    .from('sales')
+    .select('*')
+    .not('notary_completed_at', 'is', null)
+    .order('notary_completed_at', { ascending: true })
+  if (salesRes.error) throw new Error(`rebuild: fetch sales: ${salesRes.error.message}`)
+  const saleRows = salesRes.data || []
+
+  // 5. Replay. For each sale in order:
+  //    a. Compute commission events against the CURRENT graph (relations
+  //       built from previously-replayed sales).
+  //    b. Insert them (unless this sale still has locked/paid events, in
+  //       which case we skip re-insertion to avoid duplicates).
+  //    c. Upsert buyer→seller link for future sales.
+  for (const row of saleRows) {
+    try {
+      const sale = mapSaleFromDb(row)
+
+      // Skip sales whose prior events are locked — we can't reliably
+      // regenerate them and the existing rows are authoritative.
+      const priorEventIds = eventsBySaleId.get(String(sale.id)) || []
+      const hasLockedPrior = priorEventIds.some(
+        (id) => paidIds.has(id) || lockedFromPayouts.has(id),
+      )
+
+      // Resolve rules: prefer snapshot on the sale row, fall back to the
+      // project workflow as of NOW (may differ from historical rules —
+      // acceptable during the testing rebuild per user confirmation).
+      let rules = sale.commissionRuleSnapshot?.levels
+      if (!Array.isArray(rules) || !rules.length) {
+        try {
+          const wf = await fetchProjectWorkflowConfig(String(sale.projectId || ''))
+          rules = wf?.commissionRules || []
+        } catch {
+          rules = []
+        }
+      }
+
+      // Read the live relations graph (built by previous loop iterations).
+      const relsRes = await db().from('seller_relations').select('child_client_id, parent_client_id')
+      if (relsRes.error) throw new Error(`relations fetch: ${relsRes.error.message}`)
+      const relations = relsRes.data || []
+
+      // Compute + insert commission events (if we can).
+      if (!hasLockedPrior) {
+        const payloads = computeCommissionEventPayloads(sale, relations, rules)
+        if (payloads.length) {
+          const payableAt = sale.notaryCompletedAt || new Date().toISOString()
+          const rows = payloads.map((p) => ({
+            sale_id: sale.id,
+            beneficiary_client_id: p.beneficiaryClientId,
+            level: p.level,
+            rule_snapshot: p.ruleSnapshot,
+            amount: p.amount,
+            status: 'payable',
+            payable_at: payableAt,
+          }))
+          const ins = await db().from('commission_events').insert(rows).select('id')
+          if (ins.error) throw new Error(`insert events: ${ins.error.message}`)
+          summary.createdEvents += (ins.data || []).length
+        }
+      } else {
+        summary.skippedSales.push({ saleId: sale.id, reason: 'locked_prior_events' })
+      }
+
+      // Upsert buyer→seller link. Rejected silently if cycle / already linked.
+      const buyerId = sale.clientId
+      const sellerId = sale.sellerClientId
+      if (buyerId && sellerId && String(buyerId) !== String(sellerId)) {
+        const linkRes = await upsertSellerRelation({
+          childClientId: buyerId,
+          parentClientId: sellerId,
+          sourceSaleId: sale.id,
+        })
+        if (linkRes?.ok) summary.createdLinks += 1
+      }
+
+      summary.replayedSales += 1
+    } catch (e) {
+      summary.errors.push({ saleId: row.id, message: String(e?.message || e) })
+    }
+  }
+
+  // 6. Audit trail.
+  try {
+    await appendAuditEntry({
+      action: 'commission_graph_rebuilt',
+      entity: 'system',
+      entityId: 'commission_graph',
+      actorUserId: actorUserId || null,
+      actorEmail: actorEmail || '',
+      details: `Replayed ${summary.replayedSales} sales, created ${summary.createdLinks} links, ${summary.createdEvents} events. Skipped ${summary.skippedSales.length}, errors ${summary.errors.length}.`,
+      metadata: summary,
+    })
+  } catch (e) {
+    // Don't fail the rebuild if audit write fails.
+    console.warn('[rebuildCommissionGraph] audit write failed:', e?.message || e)
+  }
+
+  return summary
 }
 
 /**

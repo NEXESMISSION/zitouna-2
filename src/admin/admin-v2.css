@@ -666,34 +666,6 @@ textarea.zadm-filter__control {
   gap: var(--zadm-space-2);
 }
 
-.zadm-skeleton {
-  position: relative;
-  overflow: hidden;
-  background: var(--zadm-surface-2);
-  border-radius: var(--zadm-r-sm);
-  min-height: 14px;
-}
-.zadm-skeleton::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  transform: translateX(-100%);
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    rgba(255, 255, 255, 0.7) 50%,
-    transparent 100%
-  );
-  animation: zadm-shimmer 1.4s infinite;
-}
-.zadm-skeleton--text { height: 14px; }
-.zadm-skeleton--title { height: 20px; width: 60%; }
-.zadm-skeleton--block { height: 72px; }
-.zadm-skeleton--circle { border-radius: 50%; }
-@keyframes zadm-shimmer {
-  100% { transform: translateX(100%); }
-}
-
 .zadm-loading {
   display: flex;
   align-items: center;
@@ -1074,7 +1046,6 @@ textarea.zadm-filter__control {
   .zadm-drawer,
   .zadm-modal-overlay,
   .zadm-drawer-overlay,
-  .zadm-skeleton::after,
   .zadm-loading__spinner {
     animation: none !important;
   }

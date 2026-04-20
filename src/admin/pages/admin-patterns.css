@@ -1,0 +1,133 @@
+/* ══════════════════════════════════════════════════════════════
+   admin-patterns.css
+   ──────────────────────────────────────────────────────────────
+   Shared, reusable UI primitives for admin pages. Extracted from
+   inline <style> blocks that had drifted into near-duplicates
+   across ClientProfilePage, ClientLinkRepairPage, and
+   CommissionAnomaliesPage.
+
+   Scope: every selector is prefixed `.adm-*`. Safe to use on any
+   admin page — no side effects on the public/dark theme.
+
+   Contents
+   ────────
+   1. Status pills             .adm-pill + variants
+   2. Callout / info boxes     .adm-callout + variants
+   3. Empty-state card         .adm-empty
+   ══════════════════════════════════════════════════════════════ */
+
+/* ── Design tokens (scoped locally) ─────────────────────────── */
+/* Intentionally small — these are the only tokens the shared
+   primitives need. Page-specific pieces keep their own palette. */
+:where(.adm-pill, .adm-callout, .adm-empty) {
+  --adm-ink: #0f172a;
+  --adm-muted: #64748b;
+  --adm-faint: #94a3b8;
+  --adm-line: #e2e8f0;
+  --adm-bg: #f8fafc;
+
+  --adm-ok-50: #ecfdf5;
+  --adm-ok-700: #047857;
+  --adm-warn-50: #fff7ed;
+  --adm-warn-700: #c2410c;
+  --adm-danger-50: #fef2f2;
+  --adm-danger-700: #991b1b;
+  --adm-info-50: #eff6ff;
+  --adm-info-200: #bfdbfe;
+  --adm-info-700: #1e40af;
+  --adm-warn-200: #fed7aa;
+  --adm-warn-border: #fed7aa;
+  --adm-danger-200: #fecaca;
+}
+
+/* ══ 1. STATUS PILLS ═══════════════════════════════════════════ */
+/* Compact inline status indicator. Used next to names, in headers,
+   inside list rows. Replaces the old `.cp2-pill`, page-local
+   `.sp-pill`-style one-offs, and ad-hoc badge spans. */
+
+.adm-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  line-height: 1.4;
+  background: #f1f5f9;
+  color: var(--adm-muted);
+  white-space: nowrap;
+}
+.adm-pill--ok      { background: var(--adm-ok-50);     color: var(--adm-ok-700); }
+.adm-pill--warn    { background: var(--adm-warn-50);   color: var(--adm-warn-700); }
+.adm-pill--danger  { background: var(--adm-danger-50); color: var(--adm-danger-700); }
+.adm-pill--neutral { background: #f1f5f9;              color: var(--adm-muted); }
+
+/* ══ 2. CALLOUT / INFO BOXES ═══════════════════════════════════ */
+/* Rectangular message container used for inline help, pre-action
+   previews, warnings, and errors. Flex row by default — the
+   consumer places text on the left and (optionally) an action
+   button on the right. Replaces `.cp2-callout`, `.lr-preview`,
+   `.lr-warn`, `.can-error`. */
+
+.adm-callout {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 10px;
+  background: #fff;
+  border: 1px solid var(--adm-line);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--adm-ink);
+}
+.adm-callout__main  { flex: 1; min-width: 0; }
+.adm-callout__lead  { font-size: 12px; font-weight: 600; color: var(--adm-ink); }
+.adm-callout__hint  { font-size: 11px; color: var(--adm-muted); margin-top: 2px; }
+.adm-callout__icon  { flex-shrink: 0; font-size: 14px; line-height: 1; }
+
+.adm-callout--info {
+  background: var(--adm-info-50);
+  border-color: var(--adm-info-200);
+  color: var(--adm-info-700);
+}
+.adm-callout--info .adm-callout__lead,
+.adm-callout--info .adm-callout__hint { color: var(--adm-info-700); }
+
+.adm-callout--warn {
+  background: var(--adm-warn-50);
+  border-color: var(--adm-warn-200);
+  color: #92400e;
+}
+
+.adm-callout--danger {
+  background: var(--adm-danger-50);
+  border-color: var(--adm-danger-200);
+  color: var(--adm-danger-700);
+}
+
+/* ══ 3. EMPTY-STATE CARD ═══════════════════════════════════════ */
+/* "Nothing here yet" placeholder. Dashed border keeps it visually
+   distinct from real content cards. Replaces `.cp2-empty` and
+   `.lr-empty`. */
+
+.adm-empty {
+  font-size: 12px;
+  color: var(--adm-muted);
+  background: var(--adm-bg);
+  border: 1px dashed var(--adm-line);
+  border-radius: 10px;
+  padding: 14px;
+  text-align: center;
+  line-height: 1.5;
+}
+.adm-empty strong {
+  display: block;
+  font-size: 13px;
+  color: var(--adm-ink);
+  margin-bottom: 3px;
+  font-weight: 700;
+}

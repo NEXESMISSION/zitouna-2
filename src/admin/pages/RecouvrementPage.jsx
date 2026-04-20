@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useInstallments, useSales, useClients } from '../../lib/useSupabase.js'
+import { runSafeAction } from '../../lib/runSafeAction.js'
 import {
   ensureInstallmentPlanFromSale,
   replayInstallmentPlansFromCompletedSales,
@@ -8,6 +9,9 @@ import {
 } from '../../lib/db.js'
 import { computeInstallmentSaleMetrics, formatMoneyTnd } from '../../domain/installmentMetrics.js'
 import AdminModal from '../components/AdminModal.jsx'
+import RenderDataGate from '../../components/RenderDataGate.jsx'
+import EmptyState from '../../components/EmptyState.jsx'
+import { SkeletonCard } from '../../components/skeletons/index.js'
 import { getPagerPages } from './pager-util.js'
 import './sell-field.css'
 import './recouvrement.css'
@@ -57,6 +61,7 @@ export default function RecouvrementPage() {
   const [rejectTarget, setRejectTarget] = useState(null)
   const [rejectNote, setRejectNote] = useState('')
   const [actionBusy, setActionBusy] = useState(false)
+  const [actionError, setActionError] = useState('')
   const [paymentFilter, setPaymentFilter] = useState('all')
   const [reviewTarget, setReviewTarget] = useState(null)
   const [zoom, setZoom] = useState(1)
@@ -82,11 +87,16 @@ export default function RecouvrementPage() {
   const missingPlanSales = useMemo(
     () => {
       if (plansLoading || salesLoading) return []
-      return (sales || []).filter((s) =>
-        String(s.paymentType || '').toLowerCase() === 'installments'
-        && isCompletedSale(s)
-        && !planBySaleId.has(String(s.id)),
-      )
+      return (sales || []).filter((s) => {
+        if (String(s.paymentType || '').toLowerCase() !== 'installments') return false
+        if (!isCompletedSale(s)) return false
+        if (planBySaleId.has(String(s.id))) return false
+        // Only sales routed to plans (default) should appear — skip sales
+        // explicitly redirected post-notary elsewhere (e.g. cash_sales).
+        const dest = String(s.postNotaryDestination || '').toLowerCase()
+        if (dest && dest !== 'plans') return false
+        return true
+      })
     },
     [sales, planBySaleId, plansLoading, salesLoading],
   )
@@ -180,36 +190,51 @@ export default function RecouvrementPage() {
     return list
   }, [selected, paymentFilter])
 
+  const showActionError = (msg) => {
+    setActionError(msg)
+    window.setTimeout(() => setActionError(''), 6000)
+  }
+
   const approve = async (paymentId) => {
-    setActionBusy(true)
-    try {
+    if (actionBusy) return
+    const res = await runSafeAction({
+      setBusy: setActionBusy,
+      onError: showActionError,
+      label: 'Approuver le paiement',
+    }, async () => {
       await updatePaymentStatus(paymentId, 'approved')
       await refreshPlans({ force: true })
-      setReviewTarget(null)
-    } catch (e) { console.error('approve', e) }
-    finally { setActionBusy(false) }
+    })
+    if (res.ok) setReviewTarget(null)
   }
 
   const resetPayment = async (paymentId, toStatus = 'submitted') => {
-    setActionBusy(true)
-    try {
+    if (actionBusy) return
+    await runSafeAction({
+      setBusy: setActionBusy,
+      onError: showActionError,
+      label: 'Réinitialiser le paiement',
+    }, async () => {
       await updatePaymentStatus(paymentId, toStatus, { rejectedNote: '' })
       await refreshPlans({ force: true })
-    } catch (e) { console.error('resetPayment', e) }
-    finally { setActionBusy(false) }
+    })
   }
 
   const confirmReject = async () => {
-    if (!rejectTarget || !rejectNote.trim()) return
-    setActionBusy(true)
-    try {
+    if (!rejectTarget || !rejectNote.trim() || actionBusy) return
+    const res = await runSafeAction({
+      setBusy: setActionBusy,
+      onError: showActionError,
+      label: 'Rejeter le paiement',
+    }, async () => {
       await updatePaymentStatus(rejectTarget.paymentId, 'rejected', { rejectedNote: rejectNote.trim() })
       await refreshPlans({ force: true })
+    })
+    if (res.ok) {
       setRejectTarget(null)
       setRejectNote('')
       setReviewTarget(null)
-    } catch (e) { console.error('confirmReject', e) }
-    finally { setActionBusy(false) }
+    }
   }
 
   const openReview = useCallback((payment) => {
@@ -343,7 +368,7 @@ export default function RecouvrementPage() {
         </div>
         <div className="sp-hero__kpis">
           <span className="sp-hero__kpi-num">
-            {showSkeletons ? <span className="sp-sk-num sp-sk-num--wide" /> : totalSubmitted}
+            {showSkeletons ? <span className="sk-num sk-num--wide" /> : totalSubmitted}
           </span>
           <span className="sp-hero__kpi-label">à valider</span>
         </div>
@@ -351,11 +376,11 @@ export default function RecouvrementPage() {
 
       <div className="sp-cat-bar">
         <div className="sp-cat-stats rv-cat-stats">
-          <strong>{showSkeletons ? <span className="sp-sk-num" /> : dossiers.length}</strong> dossiers
+          <strong>{showSkeletons ? <span className="sk-num" /> : dossiers.length}</strong> dossiers
           <span className="sp-cat-stat-dot" />
-          <strong>{showSkeletons ? <span className="sp-sk-num" /> : totalSubmitted}</strong> à valider
+          <strong>{showSkeletons ? <span className="sk-num" /> : totalSubmitted}</strong> à valider
           <span className="sp-cat-stat-dot" />
-          <strong>{showSkeletons ? <span className="sp-sk-num" /> : totalOverdue}</strong> impayé{totalOverdue > 1 ? 's' : ''}
+          <strong>{showSkeletons ? <span className="sk-num" /> : totalOverdue}</strong> impayé{totalOverdue > 1 ? 's' : ''}
         </div>
         <div className="sp-cat-filters">
           <input
@@ -409,6 +434,13 @@ export default function RecouvrementPage() {
         </div>
       )}
 
+      {actionError && (
+        <div className="rv-alert rv-alert--info" role="alert" style={{ background: '#fef3c7', borderColor: '#fde68a', color: '#92400e' }}>
+          <span aria-hidden className="rv-alert__icon">⚠️</span>
+          <div className="rv-alert__body"><span>{actionError}</span></div>
+        </div>
+      )}
+
       {totalSubmitted > 0 && (
         <div className="rv-alert rv-alert--ok" role="status">
           <span aria-hidden className="rv-alert__icon">📩</span>
@@ -425,17 +457,17 @@ export default function RecouvrementPage() {
             <div key={`sk-${i}`} className="sp-card sp-card--skeleton" aria-hidden>
               <div className="sp-card__head">
                 <div className="sp-card__user">
-                  <span className="sp-card__initials sp-sk-box" />
+                  <span className="sp-card__initials sk-box" />
                   <div style={{ flex: 1 }}>
-                    <p className="sp-sk-line sp-sk-line--title" />
-                    <p className="sp-sk-line sp-sk-line--sub" />
+                    <p className="sk-line sk-line--title" />
+                    <p className="sk-line sk-line--sub" />
                   </div>
                 </div>
-                <span className="sp-sk-line sp-sk-line--badge" />
+                <span className="sk-line sk-line--badge" />
               </div>
               <div className="sp-card__body">
-                <span className="sp-sk-line sp-sk-line--price" />
-                <span className="sp-sk-line sp-sk-line--info" />
+                <span className="sk-line sk-line--price" />
+                <span className="sk-line sk-line--info" />
               </div>
             </div>
           ))
@@ -618,23 +650,36 @@ export default function RecouvrementPage() {
               <div className="sp-detail__section">
                 <div className="sp-detail__section-title">Résumé</div>
                 <div className="rv-summary">
+                  <div className="rv-summary__card">
+                    <span className="rv-summary__label">Prix total</span>
+                    <span className="rv-summary__value">{formatMoneyTnd(m.saleAgreed)}</span>
+                  </div>
                   <div className="rv-summary__card rv-summary__card--green">
-                    <span className="rv-summary__label">Encaissé validé</span>
+                    <span className="rv-summary__label">Déjà payé</span>
                     <span className="rv-summary__value">{formatMoneyTnd(m.cashValidatedStrict)}</span>
-                  </div>
-                  <div className="rv-summary__card rv-summary__card--blue">
-                    <span className="rv-summary__label">Reçu en cours</span>
-                    <span className="rv-summary__value">{formatMoneyTnd(m.cashReceivedOperational)}</span>
+                    <span className="rv-summary__hint">
+                      {m.terrainDeposit > 0 ? `Araboun ${formatMoneyTnd(m.terrainDeposit)} · ` : ''}
+                      {m.financeBalanceAtSale > 0 ? `Finance ${formatMoneyTnd(m.financeBalanceAtSale)}` : ''}
+                      {m.approvedAmount > 0 ? ` · Mensualités ${formatMoneyTnd(m.approvedAmount)}` : ''}
+                    </span>
                   </div>
                   <div className="rv-summary__card">
-                    <span className="rv-summary__label">Reste (strict)</span>
+                    <span className="rv-summary__label">Reste à payer</span>
                     <span className="rv-summary__value">{formatMoneyTnd(m.remainingStrict)}</span>
-                  </div>
-                  <div className="rv-summary__card">
-                    <span className="rv-summary__label">Reste (op.)</span>
-                    <span className="rv-summary__value">{formatMoneyTnd(m.remainingOperational)}</span>
+                    <span className="rv-summary__hint">
+                      {m.totalMonths > 0 ? `${m.totalMonths - m.approvedCount} mensualité${(m.totalMonths - m.approvedCount) > 1 ? 's' : ''} restante${(m.totalMonths - m.approvedCount) > 1 ? 's' : ''}` : ''}
+                    </span>
                   </div>
                 </div>
+                {(m.cashReceivedOperational - m.cashValidatedStrict) > 0 && (
+                  <div className="rv-summary__note">
+                    <span aria-hidden>📩</span>
+                    <span>
+                      Reçus en attente de validation : <strong>{formatMoneyTnd(m.cashReceivedOperational - m.cashValidatedStrict)}</strong>
+                      {' · '}après validation, reste <strong>{formatMoneyTnd(m.remainingOperational)}</strong>
+                    </span>
+                  </div>
+                )}
               </div>
 
               <div className="sp-detail__section">

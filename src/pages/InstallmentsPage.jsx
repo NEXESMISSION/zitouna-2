@@ -3,6 +3,9 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import TopBar from '../TopBar.jsx'
 import { useAuth } from '../lib/AuthContext.jsx'
 import { useInstallmentsScoped, useSalesScoped } from '../lib/useSupabase.js'
+import RenderDataGate from '../components/RenderDataGate.jsx'
+import EmptyState from '../components/EmptyState.jsx'
+import { runSafeAction } from '../lib/runSafeAction.js'
 import { addInstallmentReceiptRecord, updatePaymentStatus, uploadInstallmentReceipt } from '../lib/db.js'
 import { computeInstallmentSaleMetrics, formatMoneyTnd } from '../domain/installmentMetrics.js'
 import './installments-page.css'
@@ -64,9 +67,14 @@ async function optimizeImageFile(file) {
 export default function InstallmentsPage() {
   const navigate = useNavigate()
   const { state } = useLocation()
-  const { clientProfile } = useAuth()
-  const { plans, loading: plansLoading, refresh } = useInstallmentsScoped({ clientId: clientProfile?.id ?? null })
-  const { sales: mySales } = useSalesScoped({ clientId: clientProfile?.id ?? null })
+  const { clientProfile, ready } = useAuth()
+  // Plan 04 §3.2 — block the scoped fetch until auth has fully resolved
+  // AND the clientId is set. `useInstallmentsScoped` short-circuits on a
+  // null/empty clientId (loading=false + empty plans) so passing `null`
+  // here is safe and no longer produces a stuck skeleton on first mount.
+  const clientId = (ready && clientProfile?.id) ? clientProfile.id : null
+  const { plans, loading: plansLoading, refresh } = useInstallmentsScoped({ clientId })
+  const { sales: mySales } = useSalesScoped({ clientId })
 
   const planSaleIds = useMemo(() => new Set((plans || []).map((p) => String(p.saleId || ''))), [plans])
   const installmentSalesMissingPlan = useMemo(
@@ -105,6 +113,27 @@ export default function InstallmentsPage() {
   const [note, setNote] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+
+  // Pagination for the payments list on the focused plan. Reset to page 1
+  // every time the user opens a different plan.
+  const PAYMENTS_PER_PAGE = 5
+  const [paymentPager, setPaymentPager] = useState({ planId: '', page: 1 })
+  const paymentPage = paymentPager.planId === focusedPlanId ? paymentPager.page : 1
+  const setPaymentPage = useCallback((next) => {
+    setPaymentPager((prev) => {
+      const currentPage = prev.planId === focusedPlanId ? prev.page : 1
+      const resolved = typeof next === 'function' ? next(currentPage) : next
+      return { planId: focusedPlanId, page: resolved }
+    })
+  }, [focusedPlanId])
+  const paymentCount = focusedPlan?.payments?.length || 0
+  const totalPaymentPages = Math.max(1, Math.ceil(paymentCount / PAYMENTS_PER_PAGE))
+  const safePaymentPage = Math.min(Math.max(1, paymentPage), totalPaymentPages)
+  const visiblePayments = useMemo(() => {
+    if (!focusedPlan?.payments) return []
+    const start = (safePaymentPage - 1) * PAYMENTS_PER_PAGE
+    return focusedPlan.payments.slice(start, start + PAYMENTS_PER_PAGE)
+  }, [focusedPlan, safePaymentPage])
 
   const globalStats = useMemo(() => {
     const all = plans.flatMap((p) => p.payments || [])
@@ -152,9 +181,15 @@ export default function InstallmentsPage() {
 
   const submit = useCallback(async () => {
     if (!payTarget || !receiptName || !receiptFile || submitting) return
-    setSubmitting(true)
     setError('')
-    try {
+    // The 4-step upload (storage → record → status → refresh) can get stuck
+    // on any single step if Supabase Storage or the DB stalls. Watchdog
+    // prevents the modal from locking on "Envoi…" forever.
+    const res = await runSafeAction({
+      setBusy: setSubmitting,
+      onError: (msg) => setError(msg),
+      label: 'Envoi du reçu',
+    }, async () => {
       const plan = plans.find((p) => p.id === payTarget.planId)
       const payment = plan?.payments?.find((p) => p.month === payTarget.month)
       if (!payment?.id) throw new Error('Paiement introuvable')
@@ -162,12 +197,8 @@ export default function InstallmentsPage() {
       await addInstallmentReceiptRecord({ paymentId: payment.id, receiptUrl: url || '', fileName: receiptName, note: note || '' })
       await updatePaymentStatus(payment.id, 'submitted', { receiptUrl: url || receiptName })
       await refresh()
-      closePay()
-    } catch (err) {
-      setError(err.message || 'Échec envoi')
-    } finally {
-      setSubmitting(false)
-    }
+    })
+    if (res.ok) closePay()
   }, [payTarget, receiptName, receiptFile, submitting, plans, note, refresh, closePay])
 
   return (
@@ -180,12 +211,6 @@ export default function InstallmentsPage() {
         <div className="ip__hero">
           <h1 className="ip__hero-title">Mes échéances</h1>
           <p className="ip__hero-sub">Suivez vos facilités en temps réel</p>
-          {plansLoading ? (
-            <div className="ip__empty" style={{ marginTop: 12 }}>
-              <div className="app-loader-spinner" style={{ margin: '0 auto 8px' }} />
-              Chargement des plans…
-            </div>
-          ) : null}
           <div className="ip__hero-kpi">
             <div className="ip__kpi"><span className="ip__kpi-value">{globalStats.totalPlans}</span><span className="ip__kpi-label">Plans</span></div>
             <div className="ip__kpi"><span className="ip__kpi-value">{globalStats.submitted}</span><span className="ip__kpi-label">En révision</span></div>
@@ -201,26 +226,26 @@ export default function InstallmentsPage() {
               <div className="ip__detail-ref">{focusedPlan.projectCity} · #{focusedPlan.id}</div>
             </div>
             {focusedMetrics && (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8, marginBottom: 12 }}>
-                <div style={{ padding: '10px 12px', borderRadius: 12, background: '#ecfdf5', border: '1px solid #a7f3d0' }}>
-                  <div style={{ fontSize: 9, fontWeight: 800, color: '#065f46', textTransform: 'uppercase', letterSpacing: '.03em' }}>Validé</div>
-                  <div style={{ fontSize: 15, fontWeight: 800, color: '#065f46' }}>{formatMoneyTnd(focusedMetrics.cashValidatedStrict)}</div>
-                  <div style={{ fontSize: 10, color: '#047857' }}>Araboun + mensualités confirmées</div>
+              <div className="ip__metric-grid">
+                <div className="ip__metric ip__metric--validated">
+                  <span className="ip__metric-kicker">Validé</span>
+                  <span className="ip__metric-value">{formatMoneyTnd(focusedMetrics.cashValidatedStrict)}</span>
+                  <span className="ip__metric-hint">1er versement + mensualités confirmées</span>
                 </div>
-                <div style={{ padding: '10px 12px', borderRadius: 12, background: '#eff6ff', border: '1px solid #bfdbfe' }}>
-                  <div style={{ fontSize: 9, fontWeight: 800, color: '#1e40af', textTransform: 'uppercase', letterSpacing: '.03em' }}>En révision</div>
-                  <div style={{ fontSize: 15, fontWeight: 800, color: '#1e40af' }}>{formatMoneyTnd(focusedMetrics.submittedAmount)}</div>
-                  <div style={{ fontSize: 10, color: '#1d4ed8' }}>Reçus envoyés, en attente</div>
+                <div className="ip__metric ip__metric--review">
+                  <span className="ip__metric-kicker">En révision</span>
+                  <span className="ip__metric-value">{formatMoneyTnd(focusedMetrics.submittedAmount)}</span>
+                  <span className="ip__metric-hint">Reçus envoyés, en attente</span>
                 </div>
-                <div style={{ padding: '10px 12px', borderRadius: 12, background: '#fef2f2', border: '1px solid #fecaca' }}>
-                  <div style={{ fontSize: 9, fontWeight: 800, color: '#991b1b', textTransform: 'uppercase', letterSpacing: '.03em' }}>À corriger</div>
-                  <div style={{ fontSize: 15, fontWeight: 800, color: '#991b1b' }}>{formatMoneyTnd(focusedMetrics.rejectedAmount)}</div>
-                  <div style={{ fontSize: 10, color: '#b91c1c' }}>Reçus refusés à renvoyer</div>
+                <div className="ip__metric ip__metric--rejected">
+                  <span className="ip__metric-kicker">À corriger</span>
+                  <span className="ip__metric-value">{formatMoneyTnd(focusedMetrics.rejectedAmount)}</span>
+                  <span className="ip__metric-hint">Reçus refusés à renvoyer</span>
                 </div>
-                <div style={{ padding: '10px 12px', borderRadius: 12, background: '#fff', border: '1px solid #e2e8f0' }}>
-                  <div style={{ fontSize: 9, fontWeight: 800, color: '#475569', textTransform: 'uppercase', letterSpacing: '.03em' }}>Reste à valider</div>
-                  <div style={{ fontSize: 15, fontWeight: 800, color: '#0f172a' }}>{formatMoneyTnd(focusedMetrics.remainingStrict)}</div>
-                  <div style={{ fontSize: 10, color: '#64748b' }}>Sur un total de {formatMoneyTnd(focusedMetrics.saleAgreed)}</div>
+                <div className="ip__metric ip__metric--remaining">
+                  <span className="ip__metric-kicker">Reste à valider</span>
+                  <span className="ip__metric-value">{formatMoneyTnd(focusedMetrics.remainingStrict)}</span>
+                  <span className="ip__metric-hint">Sur un total de {formatMoneyTnd(focusedMetrics.saleAgreed)}</span>
                 </div>
               </div>
             )}
@@ -228,7 +253,7 @@ export default function InstallmentsPage() {
               <strong>Mode d&apos;emploi :</strong> En attente / Rejeté = envoyez ou corrigez un reçu. En révision = attente validation. Confirmé = rien à faire.
             </div>
             <div className="ip__payments">
-              {focusedPlan.payments.map((p) => {
+              {visiblePayments.map((p) => {
                 const meta = statusMeta(p.status)
                 const receipt = lastReceipt(p)
                 const receiptIsImage = receipt && isImageUrl(receipt.url)
@@ -269,37 +294,80 @@ export default function InstallmentsPage() {
                 )
               })}
             </div>
+            {totalPaymentPages > 1 && (
+              <nav className="ip__pager" aria-label="Pagination des facilités">
+                <button
+                  type="button"
+                  className="ip__pager-btn ip__pager-btn--nav"
+                  onClick={() => setPaymentPage((p) => Math.max(1, p - 1))}
+                  disabled={safePaymentPage <= 1}
+                  aria-label="Page précédente"
+                >
+                  ‹
+                </button>
+                {Array.from({ length: totalPaymentPages }, (_, i) => i + 1).map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    className={`ip__pager-btn${n === safePaymentPage ? ' ip__pager-btn--active' : ''}`}
+                    onClick={() => setPaymentPage(n)}
+                    aria-current={n === safePaymentPage ? 'page' : undefined}
+                  >
+                    {n}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  className="ip__pager-btn ip__pager-btn--nav"
+                  onClick={() => setPaymentPage((p) => Math.min(totalPaymentPages, p + 1))}
+                  disabled={safePaymentPage >= totalPaymentPages}
+                  aria-label="Page suivante"
+                >
+                  ›
+                </button>
+                <span className="ip__pager-hint">
+                  Facilités {(safePaymentPage - 1) * PAYMENTS_PER_PAGE + 1}–
+                  {Math.min(safePaymentPage * PAYMENTS_PER_PAGE, paymentCount)} / {paymentCount}
+                </span>
+              </nav>
+            )}
           </>
         ) : (
-          <>
-            {visiblePlans.length === 0 ? (
-              installmentSalesMissingPlan.length > 0 ? (
-                <div className="ip__empty">
-                  <strong>Plan en cours de génération</strong>
-                  Votre vente à tempérament est clôturée mais l&apos;échéancier n&apos;a pas encore été généré. Une vérification automatique est en cours — contactez le support si cela persiste plus de quelques minutes.
-                  <button
-                    type="button"
-                    className="ip__pay-btn"
-                    style={{ marginTop: 12 }}
-                    onClick={() => refresh()}
-                  >
-                    🔄 Vérifier à nouveau
-                  </button>
-                </div>
-              ) : hasAnyInstallmentSale ? (
-                <div className="ip__empty">
-                  <strong>Finalisation en cours</strong>
-                  Vos échéances apparaîtront ici après la clôture notaire de votre achat à tempérament.
-                </div>
-              ) : (
-                <div className="ip__empty">
-                  <strong>Aucun plan d&apos;échéances</strong>
-                  Vous n&apos;avez pas d&apos;achat à tempérament pour le moment.
-                </div>
+          <RenderDataGate
+            loading={plansLoading}
+            error={null}
+            data={visiblePlans}
+            skeleton="table"
+            onRetry={refresh}
+            empty={(() => {
+              if (installmentSalesMissingPlan.length > 0) {
+                return (
+                  <EmptyState
+                    title="Plan en cours de génération"
+                    description="Votre vente à tempérament est clôturée mais l'échéancier n'a pas encore été généré. Une vérification automatique est en cours — contactez le support si cela persiste plus de quelques minutes."
+                    action={{ label: '🔄 Vérifier à nouveau', onClick: () => refresh() }}
+                  />
+                )
+              }
+              if (hasAnyInstallmentSale) {
+                return (
+                  <EmptyState
+                    title="Finalisation en cours"
+                    description="Vos échéances apparaîtront ici après la clôture notaire de votre achat à tempérament."
+                  />
+                )
+              }
+              return (
+                <EmptyState
+                  title="Aucun plan d'échéances"
+                  description="Vous n'avez pas d'achat à tempérament pour le moment."
+                />
               )
-            ) : (
+            })()}
+          >
+            {(list) => (
               <div className="ip__plan-list">
-                {visiblePlans.map((plan) => {
+                {list.map((plan) => {
                   const metrics = computeInstallmentSaleMetrics(saleForPlan(plan) || {}, plan)
                   const progress = metrics.approvedPct
                   const nextAction = plan.payments.find((p) => p.status === 'rejected' || p.status === 'pending' || p.status === 'submitted')
@@ -337,7 +405,7 @@ export default function InstallmentsPage() {
                 })}
               </div>
             )}
-          </>
+          </RenderDataGate>
         )}
 
         {payTarget && (

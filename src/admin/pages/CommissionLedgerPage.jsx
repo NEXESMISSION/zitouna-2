@@ -2,13 +2,36 @@ import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../lib/AuthContext.jsx'
 import { useClients, useCommissionLedger } from '../../lib/useSupabase.js'
+import { runSafeAction } from '../../lib/runSafeAction.js'
 import { useToast } from '../components/AdminToast.jsx'
+import AdminModal from '../components/AdminModal.jsx'
 import CommissionOverrideModal from '../components/CommissionOverrideModal.jsx'
-import '../admin-v2.css'
-import './zitouna-admin-page.css'
+import RenderDataGate from '../../components/RenderDataGate.jsx'
+import EmptyState from '../../components/EmptyState.jsx'
+import { SkeletonCard } from '../../components/skeletons/index.js'
+import { getPagerPages } from './pager-util.js'
+import './sell-field.css'
+import './commission-ledger.css'
+
+const EVENTS_PER_PAGE = 15
 
 function fmtMoney(v) {
   return `${(Number(v) || 0).toLocaleString('fr-FR')} TND`
+}
+
+function fmtDate(iso) {
+  if (!iso) return '—'
+  try {
+    return new Date(iso).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })
+  } catch {
+    return String(iso)
+  }
+}
+
+function initials(name) {
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return 'CL'
+  return `${parts[0][0] || ''}${parts[1]?.[0] || ''}`.toUpperCase()
 }
 
 function statusLabel(s) {
@@ -23,28 +46,17 @@ function statusLabel(s) {
   return m[s] || s
 }
 
-// Map each commission/request status to a ZADM pill tone — single source of
-// truth so badges stay consistent between the ledger rows and the table.
+// Map status → sp-card/sp-badge tone so badges stay consistent across views.
 function statusTone(s) {
   const m = {
-    pending: 'warn',
-    pending_review: 'warn',
-    payable: 'info',
-    approved: 'primary',
-    paid: 'success',
-    rejected: 'danger',
+    pending: 'orange',
+    pending_review: 'orange',
+    payable: 'blue',
+    approved: 'purple',
+    paid: 'green',
+    rejected: 'red',
   }
-  return m[s] || 'neutral'
-}
-
-function StatusPill({ status }) {
-  const tone = statusTone(status)
-  return (
-    <span className={`zadm-pill zadm-pill--${tone}`}>
-      <span className="zadm-pill__dot" aria-hidden />
-      {statusLabel(status)}
-    </span>
-  )
+  return m[s] || 'gray'
 }
 
 export default function CommissionLedgerPage() {
@@ -52,13 +64,31 @@ export default function CommissionLedgerPage() {
   const { adminUser } = useAuth()
   const { addToast } = useToast()
   const { clients } = useClients()
-  const { commissionEvents, payoutRequests, submitPayoutRequest, reviewPayoutRequest, refresh } =
-    useCommissionLedger()
+  const {
+    commissionEvents,
+    payoutRequests,
+    submitPayoutRequest,
+    reviewPayoutRequest,
+    refresh,
+    loading,
+  } = useCommissionLedger()
+
+  const [tab, setTab] = useState('beneficiaries')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [query, setQuery] = useState('')
+  const [page, setPage] = useState(1)
+
+  // Per-row busy keys: 'submit:<beneficiaryId>' or 'review:<requestId>:<decision>'.
+  // A string (or null) lets us disable the exact button being clicked without a
+  // blanket disabled-everything-while-any-action-is-pending sledgehammer.
+  const [busyKey, setBusyKey] = useState(null)
   const [payRefByReq, setPayRefByReq] = useState({})
   const [rejectReasonByReq, setRejectReasonByReq] = useState({})
   const [editingEvent, setEditingEvent] = useState(null)
-  const [statusFilter, setStatusFilter] = useState('all')
-  const [query, setQuery] = useState('')
+  const [selectedRequest, setSelectedRequest] = useState(null)
+  const [selectedBeneficiary, setSelectedBeneficiary] = useState(null)
+
+  const clientName = (id) => (clients || []).find((c) => String(c.id) === String(id))?.name || id
 
   // Remap the camelCase hook shape back to the snake_case DB shape the override
   // modal and audit log expect. Keeps the modal decoupled from the hook's view.
@@ -73,8 +103,6 @@ export default function CommissionLedgerPage() {
       status: e.status,
     })
   }
-
-  const clientName = (id) => (clients || []).find((c) => String(c.id) === String(id))?.name || id
 
   const eventsByBeneficiary = useMemo(() => {
     const map = new Map()
@@ -118,7 +146,7 @@ export default function CommissionLedgerPage() {
     [payoutRequests],
   )
 
-  // High-level KPIs for the header strip
+  // High-level KPIs for the hero strip
   const totals = useMemo(() => {
     const events = commissionEvents || []
     const reqs = payoutRequests || []
@@ -136,36 +164,54 @@ export default function CommissionLedgerPage() {
   }, [commissionEvents, payoutRequests, claimedEventIds])
 
   const handleSubmit = async (beneficiaryClientId) => {
-    const r = await submitPayoutRequest(beneficiaryClientId, adminUser?.id || null)
-    if (!r.ok) {
-      if (r.reason === 'below_threshold') {
-        addToast(`Seuil minimum ${r.minThresh} TND non atteint (actuel ${r.gross})`, 'error')
-      } else if (r.reason === 'no_payable') {
-        addToast('Aucune ligne payable libre pour ce bénéficiaire', 'error')
-      } else if (r.reason === 'invalid') {
-        addToast('Bénéficiaire invalide', 'error')
-      } else addToast('Impossible de créer la demande', 'error')
-      return
-    }
-    addToast('Demande de paiement créée — en attente de validation')
+    const key = `submit:${beneficiaryClientId}`
+    if (busyKey) return
+    const res = await runSafeAction({
+      setBusy: (v) => setBusyKey(v ? key : null),
+      onError: (msg) => addToast(msg, 'error'),
+      label: 'Créer la demande de paiement',
+    }, async () => {
+      const r = await submitPayoutRequest(beneficiaryClientId, adminUser?.id || null)
+      if (!r.ok) {
+        if (r.reason === 'below_threshold') {
+          throw new Error(`Seuil minimum ${r.minThresh} TND non atteint (actuel ${r.gross})`)
+        } else if (r.reason === 'no_payable') {
+          throw new Error('Aucune ligne payable libre pour ce bénéficiaire')
+        } else if (r.reason === 'invalid') {
+          throw new Error('Bénéficiaire invalide')
+        } else {
+          throw new Error('Impossible de créer la demande')
+        }
+      }
+    })
+    if (res.ok) addToast('Demande de paiement créée — en attente de validation')
   }
 
   const handleReview = async (reqId, decision) => {
-    const opts = { reviewerId: adminUser?.id || null }
-    if (decision === 'rejected') opts.reason = rejectReasonByReq[reqId] || 'Rejeté'
-    if (decision === 'paid') {
-      opts.paymentRef = payRefByReq[reqId] || `REF-${Date.now()}`
+    const key = `review:${reqId}:${decision}`
+    if (busyKey) return
+    const res = await runSafeAction({
+      setBusy: (v) => setBusyKey(v ? key : null),
+      onError: (msg) => addToast(msg, 'error'),
+      label: decision === 'paid'
+        ? 'Marquer payé'
+        : `${decision === 'approved' ? 'Approuver' : 'Rejeter'} la demande`,
+    }, async () => {
+      const opts = { reviewerId: adminUser?.id || null }
+      if (decision === 'rejected') opts.reason = rejectReasonByReq[reqId] || 'Rejeté'
+      if (decision === 'paid') opts.paymentRef = payRefByReq[reqId] || `REF-${Date.now()}`
+      const r = await reviewPayoutRequest(reqId, decision, opts)
+      if (!r.ok) throw new Error('Action impossible sur cette demande')
+    })
+    if (res.ok) {
+      addToast(decision === 'paid' ? 'Paiement enregistré' : 'Demande mise à jour')
+      // Close the detail modal once the action resolved — the caller saw the
+      // toast and the background list updates via the hook refresh.
+      setSelectedRequest(null)
     }
-    const r = await reviewPayoutRequest(reqId, decision, opts)
-    if (!r.ok) {
-      addToast('Action impossible sur cette demande', 'error')
-      return
-    }
-    addToast(decision === 'paid' ? 'Paiement enregistré' : 'Demande mise à jour')
   }
 
-  // Sort + filter the full ledger feed; the filter + search inputs live in the
-  // card toolbar so they stay near the data they drive.
+  // Sort + filter the full ledger feed
   const sortedEvents = useMemo(
     () =>
       [...(commissionEvents || [])].sort((a, b) =>
@@ -184,413 +230,604 @@ export default function CommissionLedgerPage() {
         clientName(e.beneficiaryClientId),
         `n${e.level || ''}`,
         statusLabel(e.status),
-      ]
-        .join(' ')
-        .toLowerCase()
+      ].join(' ').toLowerCase()
       return haystack.includes(q)
     })
-    // clientName is derived from clients, which is captured in scope; lint is fine.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sortedEvents, statusFilter, query, clients])
 
-  return (
-    <div className="zadm-page" dir="ltr">
-      <button
-        type="button"
-        className="zadm-btn zadm-btn--ghost zadm-btn--sm"
-        onClick={() => navigate(-1)}
-        style={{ marginBottom: 12 }}
-      >
-        <span aria-hidden>←</span>
-        <span>Retour</span>
-      </button>
+  const pageCount = Math.max(1, Math.ceil(filteredEvents.length / EVENTS_PER_PAGE))
+  const safePage = Math.min(Math.max(1, page), pageCount)
+  const pagedEvents = useMemo(
+    () => filteredEvents.slice((safePage - 1) * EVENTS_PER_PAGE, safePage * EVENTS_PER_PAGE),
+    [filteredEvents, safePage],
+  )
 
-      <header className="zadm-page__head">
-        <div className="zadm-page__head-text">
-          <h1 className="zadm-page__title">Règlement des commissions</h1>
-          <p className="zadm-page__subtitle">
+  const onQueryChange = (e) => { setQuery(e.target.value); setPage(1) }
+  const onStatusFilterChange = (k) => { setStatusFilter(k); setPage(1) }
+  const onTabChange = (t) => { setTab(t); setPage(1) }
+
+  // Plan 03 §4.3: shared underlying store means the hero KPIs and the
+  // per-tab gate both key off the same `loading` value. Once the first tick
+  // resolves, the KPI numbers render for real. The tab bodies below use
+  // independent <RenderDataGate> so a broken tab doesn't mask the others.
+  const kpiLoading = loading && (commissionEvents || []).length === 0
+
+  // Tab counts
+  const counts = {
+    beneficiaries: payableByBeneficiary.length,
+    requests: sortedRequests.length,
+    events: (commissionEvents || []).length,
+  }
+
+  // Events belonging to the selected beneficiary (for the side panel)
+  const selectedBeneficiaryEvents = useMemo(() => {
+    if (!selectedBeneficiary) return []
+    return (eventsByBeneficiary.get(String(selectedBeneficiary)) || [])
+      .slice()
+      .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+  }, [selectedBeneficiary, eventsByBeneficiary])
+
+  return (
+    <div className="sell-field" dir="ltr">
+      <div className="led-topbar">
+        <button type="button" className="sp-back-btn" onClick={() => navigate(-1)}>
+          <span className="sp-back-btn__icon-wrap" aria-hidden>←</span>
+          <span>Retour</span>
+        </button>
+        <button
+          type="button"
+          className="led-refresh"
+          onClick={() => { if (typeof refresh === 'function') refresh() }}
+        >
+          <span aria-hidden>⟳</span>
+          <span>Rafraîchir</span>
+        </button>
+      </div>
+
+      <header className="sp-hero">
+        <div className="sp-hero__avatar" aria-hidden>
+          <span style={{
+            width: '100%', height: '100%', display: 'flex',
+            alignItems: 'center', justifyContent: 'center', fontSize: 24,
+          }}>💰</span>
+        </div>
+        <div className="sp-hero__info">
+          <h1 className="sp-hero__name">Règlement des commissions</h1>
+          <p className="sp-hero__role">
             Suivez les commissions, validez les demandes et enregistrez les paiements.
           </p>
         </div>
-        <div className="zadm-page__head-actions">
-          <button
-            type="button"
-            className="zadm-btn zadm-btn--secondary zadm-btn--sm"
-            onClick={() => {
-              if (typeof refresh === 'function') refresh()
-            }}
-          >
-            Rafraîchir
-          </button>
+        <div className="led-hero-kpis">
+          <div className="led-hero-kpi">
+            <span className="led-hero-kpi__num">
+              {kpiLoading ? <span className="sk-num sk-num--wide" /> : fmtMoney(totals.payableAmt)}
+            </span>
+            <span className="led-hero-kpi__label">À payer</span>
+          </div>
+          <span className="led-hero-kpi__sep" aria-hidden />
+          <div className="led-hero-kpi">
+            <span className="led-hero-kpi__num">
+              {kpiLoading ? <span className="sk-num" /> : totals.openReqs}
+            </span>
+            <span className="led-hero-kpi__label">Demandes</span>
+          </div>
+          <span className="led-hero-kpi__sep" aria-hidden />
+          <div className="led-hero-kpi">
+            <span className="led-hero-kpi__num">
+              {kpiLoading ? <span className="sk-num" /> : totals.eventsCount}
+            </span>
+            <span className="led-hero-kpi__label">Événements</span>
+          </div>
         </div>
       </header>
 
-      <div className="zadm-page__body">
-        {/* KPI strip — totals first so admins scan amounts before workflow */}
-        <div className="zadm-kpi-grid">
-          <div className="zadm-kpi">
-            <span className="zadm-kpi__label">En attente</span>
-            <span className="zadm-kpi__value">{fmtMoney(totals.pendingAmt)}</span>
-            <span className="zadm-kpi__hint">Pas encore payables</span>
-          </div>
-          <div className="zadm-kpi zadm-kpi--accent">
-            <span className="zadm-kpi__label">À payer</span>
-            <span className="zadm-kpi__value">{fmtMoney(totals.payableAmt)}</span>
-            <span className="zadm-kpi__hint">Prêt à regrouper</span>
-          </div>
-          <div className="zadm-kpi">
-            <span className="zadm-kpi__label">Déjà payé</span>
-            <span className="zadm-kpi__value">{fmtMoney(totals.paidAmt)}</span>
-            <span className="zadm-kpi__hint">Cumul historique</span>
-          </div>
-          <div className="zadm-kpi">
-            <span className="zadm-kpi__label">Demandes ouvertes</span>
-            <span className="zadm-kpi__value">{totals.openReqs}</span>
-            <span className="zadm-kpi__hint">En revue ou approuvées</span>
-          </div>
+      <div className="led-tabs" role="tablist" aria-label="Sections">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === 'beneficiaries'}
+          className={`led-tab ${tab === 'beneficiaries' ? 'led-tab--on' : ''}`}
+          onClick={() => onTabChange('beneficiaries')}
+        >
+          <span>Bénéficiaires</span>
+          <span className="led-tab__count">{counts.beneficiaries}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === 'requests'}
+          className={`led-tab ${tab === 'requests' ? 'led-tab--on' : ''}`}
+          onClick={() => onTabChange('requests')}
+        >
+          <span>Demandes</span>
+          <span className="led-tab__count">{counts.requests}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === 'events'}
+          className={`led-tab ${tab === 'events' ? 'led-tab--on' : ''}`}
+          onClick={() => onTabChange('events')}
+        >
+          <span>Événements</span>
+          <span className="led-tab__count">{counts.events}</span>
+        </button>
+      </div>
+
+      <div className="sp-cat-bar">
+        <div className="sp-cat-stats">
+          <strong>{kpiLoading ? <span className="sk-num" /> : fmtMoney(totals.pendingAmt)}</strong> en attente
+          <span className="sp-cat-stat-dot" />
+          <strong>{kpiLoading ? <span className="sk-num" /> : fmtMoney(totals.payableAmt)}</strong> à payer
+          <span className="sp-cat-stat-dot" />
+          <strong>{kpiLoading ? <span className="sk-num" /> : fmtMoney(totals.paidAmt)}</strong> payé
         </div>
-
-        {/* Section 1: aggregation by beneficiary */}
-        <section className="zadm-card">
-          <header className="zadm-card__head">
-            <div className="zadm-card__head-text">
-              <h2 className="zadm-card__title">1. Bénéficiaires à payer</h2>
-              <p className="zadm-card__subtitle">
-                Regroupez les lignes payables en une demande. Le seuil minimum vient des réglages projet.
-              </p>
+        {tab === 'events' && (
+          <>
+            <div className="sp-cat-filters">
+              <input
+                className="sp-cat-search"
+                placeholder="Rechercher (vente, bénéficiaire, niveau)…"
+                value={query}
+                onChange={onQueryChange}
+                aria-label="Rechercher un événement"
+              />
             </div>
-          </header>
-          <div className="zadm-card__body">
-            {payableByBeneficiary.length === 0 ? (
-              <div className="zadm-empty">
-                <div className="zadm-empty__icon" aria-hidden>∅</div>
-                <div className="zadm-empty__title">Aucun montant à regrouper</div>
-                <p className="zadm-empty__hint">
-                  Les commissions apparaîtront ici dès qu'une vente sera clôturée au notaire.
-                </p>
-              </div>
-            ) : (
-              <div className="zadm-table-wrap">
-                <table className="zadm-table">
-                  <thead>
-                    <tr>
-                      <th className="zadm-th">Bénéficiaire</th>
-                      <th className="zadm-th">Lignes</th>
-                      <th className="zadm-th" style={{ textAlign: 'right' }}>Montant brut</th>
-                      <th className="zadm-th" style={{ textAlign: 'right' }}>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {payableByBeneficiary.map((row) => (
-                      <tr key={row.beneficiaryClientId} className="zadm-tr">
-                        <td className="zadm-td" style={{ fontWeight: 600 }}>{clientName(row.beneficiaryClientId)}</td>
-                        <td className="zadm-td zadm-td--muted">
-                          {row.count} ligne{row.count > 1 ? 's' : ''} payable{row.count > 1 ? 's' : ''}
-                        </td>
-                        <td className="zadm-td zadm-td--num" style={{ fontWeight: 700 }}>
-                          {fmtMoney(row.gross)}
-                        </td>
-                        <td className="zadm-td zadm-td--actions">
-                          <button
-                            type="button"
-                            className="zadm-btn zadm-btn--primary zadm-btn--sm"
-                            onClick={() => handleSubmit(row.beneficiaryClientId)}
-                          >
-                            Créer la demande
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </section>
-
-        {/* Section 2: payout requests lifecycle */}
-        <section className="zadm-card">
-          <header className="zadm-card__head">
-            <div className="zadm-card__head-text">
-              <h2 className="zadm-card__title">2. Demandes de paiement</h2>
-              <p className="zadm-card__subtitle">
-                Approuvez, rejetez ou clôturez chaque demande. Renseignez une référence avant de marquer comme payé.
-              </p>
+            <div className="led-chips" role="group" aria-label="Filtrer par statut">
+              {[
+                { k: 'all', label: 'Tous' },
+                { k: 'pending', label: 'En attente' },
+                { k: 'payable', label: 'À payer' },
+                { k: 'paid', label: 'Payé' },
+                { k: 'rejected', label: 'Rejeté' },
+              ].map((opt) => (
+                <button
+                  key={opt.k}
+                  type="button"
+                  className={`led-chip${statusFilter === opt.k ? ' led-chip--on' : ''}`}
+                  onClick={() => onStatusFilterChange(opt.k)}
+                  aria-pressed={statusFilter === opt.k}
+                >
+                  {opt.label}
+                </button>
+              ))}
             </div>
-          </header>
-          <div className="zadm-card__body">
-            {sortedRequests.length === 0 ? (
-              <div className="zadm-empty">
-                <div className="zadm-empty__icon" aria-hidden>◷</div>
-                <div className="zadm-empty__title">Aucune demande enregistrée</div>
-                <p className="zadm-empty__hint">
-                  Créez une demande depuis la section « Bénéficiaires à payer » ci-dessus.
-                </p>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {sortedRequests.map((req) => (
-                  <div
-                    key={req.id}
-                    style={{
-                      border: '1px solid var(--zadm-border)',
-                      borderRadius: 'var(--zadm-r)',
-                      padding: 16,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 12,
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-                      <div style={{ minWidth: 0, flex: '1 1 220px' }}>
-                        <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--zadm-text)' }}>
-                          {clientName(req.beneficiaryClientId)}
-                        </div>
-                        <div style={{ fontSize: 13, color: 'var(--zadm-text-dim)', marginTop: 2 }}>
-                          {(req.eventIds || []).length} événement
-                          {(req.eventIds || []).length > 1 ? 's' : ''} regroupé
-                          {(req.eventIds || []).length > 1 ? 's' : ''}
-                        </div>
-                        <div style={{ fontSize: 12, color: 'var(--zadm-text-muted)', marginTop: 4 }}>
-                          Créé le {req.createdAt || '—'}
-                        </div>
-                      </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
-                        <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--zadm-text)' }}>
-                          {fmtMoney(req.grossAmount)}
-                        </div>
-                        <StatusPill status={req.status} />
-                      </div>
+          </>
+        )}
+      </div>
+
+      {/* ─────────── TAB: BÉNÉFICIAIRES ─────────── */}
+      {tab === 'beneficiaries' && (
+        <div className="sp-cards">
+          <RenderDataGate
+            loading={loading && (commissionEvents || []).length === 0}
+            data={payableByBeneficiary}
+            onRetry={refresh}
+            skeleton={<SkeletonCard cards={4} />}
+            empty={
+              <EmptyState
+                icon="📭"
+                title="Aucun montant à regrouper"
+                description="Les commissions apparaîtront ici dès qu'une vente sera clôturée au notaire."
+              />
+            }
+          >
+            {(rows) => rows.map((row) => {
+            const name = clientName(row.beneficiaryClientId)
+            const busy = busyKey === `submit:${row.beneficiaryClientId}`
+            return (
+              <div
+                key={row.beneficiaryClientId}
+                className="sp-card sp-card--blue"
+                style={{ cursor: 'default' }}
+              >
+                <div className="sp-card__head">
+                  <div className="sp-card__user">
+                    <span className="sp-card__initials">{initials(name)}</span>
+                    <div style={{ minWidth: 0 }}>
+                      <p className="sp-card__name">{name}</p>
+                      <p className="sp-card__sub">
+                        {row.count} ligne{row.count > 1 ? 's' : ''} payable{row.count > 1 ? 's' : ''}
+                      </p>
                     </div>
-
-                    {req.status === 'pending_review' ? (
-                      <div
-                        style={{
-                          display: 'flex',
-                          flexWrap: 'wrap',
-                          gap: 8,
-                          alignItems: 'center',
-                          paddingTop: 12,
-                          borderTop: '1px dashed var(--zadm-border)',
-                        }}
-                      >
-                        <input
-                          className="zadm-filter__control"
-                          style={{ flex: '1 1 220px', minWidth: 0 }}
-                          placeholder="Motif du rejet (si applicable)"
-                          value={rejectReasonByReq[req.id] || ''}
-                          onChange={(e) =>
-                            setRejectReasonByReq((m) => ({ ...m, [req.id]: e.target.value }))
-                          }
-                        />
-                        <button
-                          type="button"
-                          className="zadm-btn zadm-btn--primary zadm-btn--sm"
-                          onClick={() => handleReview(req.id, 'approved')}
-                        >
-                          Approuver
-                        </button>
-                        <button
-                          type="button"
-                          className="zadm-btn zadm-btn--danger zadm-btn--sm"
-                          onClick={() => handleReview(req.id, 'rejected')}
-                        >
-                          Rejeter
-                        </button>
-                      </div>
-                    ) : null}
-
-                    {req.status === 'approved' ? (
-                      <div
-                        style={{
-                          display: 'flex',
-                          flexWrap: 'wrap',
-                          gap: 8,
-                          alignItems: 'center',
-                          paddingTop: 12,
-                          borderTop: '1px dashed var(--zadm-border)',
-                        }}
-                      >
-                        <input
-                          className="zadm-filter__control"
-                          style={{ flex: '1 1 220px', minWidth: 0 }}
-                          placeholder="Référence paiement (ex. virement #1234)"
-                          value={payRefByReq[req.id] || ''}
-                          onChange={(e) =>
-                            setPayRefByReq((m) => ({ ...m, [req.id]: e.target.value }))
-                          }
-                        />
-                        <button
-                          type="button"
-                          className="zadm-btn zadm-btn--primary zadm-btn--sm"
-                          onClick={() => handleReview(req.id, 'paid')}
-                        >
-                          Marquer payé
-                        </button>
-                      </div>
-                    ) : null}
-
-                    {req.status === 'paid' ? (
-                      <div
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 8,
-                          padding: '8px 12px',
-                          background: 'var(--zadm-success-50)',
-                          borderRadius: 'var(--zadm-r-sm)',
-                          fontSize: 13,
-                          color: 'var(--zadm-success)',
-                          fontWeight: 500,
-                        }}
-                      >
-                        <span aria-hidden>✓</span>
-                        <span>
-                          Payé le {req.paidAt || '—'}
-                          {req.paymentRef ? ` · Réf. ${req.paymentRef}` : ''}
-                        </span>
-                      </div>
-                    ) : null}
-
-                    {req.status === 'rejected' && req.reviewReason ? (
-                      <div
-                        style={{
-                          display: 'flex',
-                          alignItems: 'flex-start',
-                          gap: 8,
-                          padding: '8px 12px',
-                          background: 'var(--zadm-danger-50)',
-                          borderRadius: 'var(--zadm-r-sm)',
-                          fontSize: 13,
-                          color: 'var(--zadm-danger)',
-                        }}
-                      >
-                        <span aria-hidden>✕</span>
-                        <span>Rejeté : {req.reviewReason}</span>
-                      </div>
-                    ) : null}
                   </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </section>
+                  <span className="sp-badge sp-badge--blue">À regrouper</span>
+                </div>
 
-        {/* Section 3: full ledger table with filters */}
-        <section className="zadm-card">
-          <header className="zadm-card__head">
-            <div className="zadm-card__head-text">
-              <h2 className="zadm-card__title">3. Journal des commissions</h2>
-              <p className="zadm-card__subtitle">
-                {totals.eventsCount} événement{totals.eventsCount > 1 ? 's' : ''} au total · tri du plus récent au plus ancien.
-              </p>
-            </div>
-          </header>
-          <div className="zadm-toolbar">
-            <div className="zadm-toolbar__left">
-              <div className="zadm-search">
-                <span className="zadm-search__icon" aria-hidden>⌕</span>
-                <input
-                  type="search"
-                  className="zadm-search__input"
-                  placeholder="Rechercher (vente, bénéficiaire, niveau)…"
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                />
-              </div>
-            </div>
-            <div className="zadm-toolbar__right">
-              <div className="zadm-filters">
-                {[
-                  { k: 'all', label: 'Tous' },
-                  { k: 'pending', label: 'En attente' },
-                  { k: 'payable', label: 'À payer' },
-                  { k: 'paid', label: 'Payé' },
-                  { k: 'rejected', label: 'Rejeté' },
-                ].map((opt) => (
-                  <button
-                    key={opt.k}
-                    type="button"
-                    className={`zadm-chip${statusFilter === opt.k ? ' zadm-chip--active' : ''}`}
-                    onClick={() => setStatusFilter(opt.k)}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-          <div className="zadm-card__body zadm-card__body--flush">
-            {filteredEvents.length === 0 ? (
-              <div style={{ padding: 16 }}>
-                <div className="zadm-empty">
-                  <div className="zadm-empty__icon" aria-hidden>∅</div>
-                  <div className="zadm-empty__title">Aucun événement</div>
-                  <p className="zadm-empty__hint">
-                    {sortedEvents.length === 0
-                      ? 'Les commissions générées apparaîtront ici.'
-                      : 'Aucune ligne ne correspond à vos filtres.'}
-                  </p>
+                <div className="sp-card__body">
+                  <div className="sp-card__price">
+                    <span className="sp-card__amount">{(row.gross || 0).toLocaleString('fr-FR')}</span>
+                    <span className="sp-card__currency">TND</span>
+                  </div>
+                  <div className="sp-card__info" style={{ gap: 6 }}>
+                    <button
+                      type="button"
+                      className="led-card-cta led-card-cta--ghost"
+                      onClick={() => setSelectedBeneficiary(row.beneficiaryClientId)}
+                      disabled={Boolean(busyKey)}
+                      title="Voir les lignes payables"
+                    >
+                      Détail
+                    </button>
+                    <button
+                      type="button"
+                      className="led-card-cta"
+                      onClick={() => handleSubmit(row.beneficiaryClientId)}
+                      disabled={Boolean(busyKey)}
+                    >
+                      {busy ? 'Création…' : 'Créer la demande'}
+                    </button>
+                  </div>
                 </div>
               </div>
-            ) : (
-              <div className="zadm-table-wrap">
-                <table className="zadm-table">
-                  <thead>
-                    <tr>
-                      <th className="zadm-th">Vente</th>
-                      <th className="zadm-th">Bénéficiaire</th>
-                      <th className="zadm-th">Niveau</th>
-                      <th className="zadm-th" style={{ textAlign: 'right' }}>Montant</th>
-                      <th className="zadm-th">Statut</th>
+            )
+          })}
+          </RenderDataGate>
+        </div>
+      )}
+
+      {/* ─────────── TAB: DEMANDES ─────────── */}
+      {tab === 'requests' && (
+        <div className="sp-cards">
+          <RenderDataGate
+            loading={loading && (commissionEvents || []).length === 0}
+            data={sortedRequests}
+            onRetry={refresh}
+            skeleton={<SkeletonCard cards={4} />}
+            empty={
+              <EmptyState
+                icon="📭"
+                title="Aucune demande enregistrée"
+                description="Créez une demande depuis l'onglet « Bénéficiaires »."
+              />
+            }
+          >
+            {(reqs) => reqs.map((req) => {
+            const name = clientName(req.beneficiaryClientId)
+            const tone = statusTone(req.status)
+            const nEv = (req.eventIds || []).length
+            return (
+              <button
+                key={req.id}
+                type="button"
+                className={`sp-card sp-card--${tone}`}
+                onClick={() => setSelectedRequest(req)}
+                aria-label={`Ouvrir la demande de ${name}`}
+              >
+                <div className="sp-card__head">
+                  <div className="sp-card__user">
+                    <span className="sp-card__initials">{initials(name)}</span>
+                    <div style={{ minWidth: 0 }}>
+                      <p className="sp-card__name">{name}</p>
+                      <p className="sp-card__sub">
+                        {nEv} événement{nEv > 1 ? 's' : ''} · {fmtDate(req.createdAt)}
+                      </p>
+                    </div>
+                  </div>
+                  <span className={`sp-badge sp-badge--${tone}`}>{statusLabel(req.status)}</span>
+                </div>
+
+                <div className="sp-card__body">
+                  <div className="sp-card__price">
+                    <span className="sp-card__amount">{(Number(req.grossAmount) || 0).toLocaleString('fr-FR')}</span>
+                    <span className="sp-card__currency">TND</span>
+                  </div>
+                  <div className="sp-card__info">
+                    <span>
+                      {req.status === 'pending_review' && 'Validation requise'}
+                      {req.status === 'approved' && 'À payer'}
+                      {req.status === 'paid' && (req.paymentRef ? `Réf. ${req.paymentRef}` : 'Payé')}
+                      {req.status === 'rejected' && 'Rejetée'}
+                    </span>
+                  </div>
+                </div>
+              </button>
+            )
+          })}
+          </RenderDataGate>
+        </div>
+      )}
+
+      {/* ─────────── TAB: ÉVÉNEMENTS ─────────── */}
+      {tab === 'events' && (
+        <>
+          <div className="sp-cards">
+            <RenderDataGate
+              loading={loading && (commissionEvents || []).length === 0}
+              data={filteredEvents}
+              onRetry={refresh}
+              skeleton={<SkeletonCard cards={6} />}
+              empty={
+                <EmptyState
+                  icon={sortedEvents.length === 0 ? '📭' : '🔍'}
+                  title={sortedEvents.length === 0 ? 'Aucun événement' : 'Aucun événement ne correspond'}
+                  description={
+                    sortedEvents.length === 0
+                      ? 'Les commissions générées apparaîtront ici.'
+                      : 'Essayez un autre terme ou réinitialisez les filtres.'
+                  }
+                />
+              }
+            >
+              {() => pagedEvents.map((e) => {
+              const name = clientName(e.beneficiaryClientId)
+              const tone = statusTone(e.status)
+              return (
+                <div key={e.id} className={`sp-card sp-card--${tone}`} style={{ cursor: 'default' }}>
+                  <div className="sp-card__head">
+                    <div className="sp-card__user">
+                      <span className="sp-card__initials">{initials(name)}</span>
+                      <div style={{ minWidth: 0 }}>
+                        <p className="sp-card__name">{name}</p>
+                        <p className="sp-card__sub">
+                          N{e.level} · <span className="led-mono">{e.saleId}</span>
+                        </p>
+                      </div>
+                    </div>
+                    <span className={`sp-badge sp-badge--${tone}`}>{statusLabel(e.status)}</span>
+                  </div>
+
+                  <div className="sp-card__body">
+                    <div className="sp-card__price">
+                      <span className="sp-card__amount">{(Number(e.amount) || 0).toLocaleString('fr-FR')}</span>
+                      <span className="sp-card__currency">TND</span>
+                    </div>
+                    <div className="sp-card__info">
                       {adminUser?.id ? (
-                        <th className="zadm-th" style={{ textAlign: 'right' }}>Action</th>
-                      ) : null}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredEvents.map((e) => (
-                      <tr key={e.id} className="zadm-tr">
-                        <td
-                          className="zadm-td zadm-td--muted"
-                          style={{
-                            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-                            fontSize: 12,
-                          }}
+                        <button
+                          type="button"
+                          className="led-card-cta led-card-cta--ghost"
+                          onClick={() => openOverrideFor(e)}
+                          title="Ajuster le montant ou le statut"
                         >
-                          {e.saleId}
-                        </td>
-                        <td className="zadm-td" style={{ fontWeight: 500 }}>
-                          {clientName(e.beneficiaryClientId)}
-                        </td>
-                        <td className="zadm-td zadm-td--muted">N{e.level}</td>
-                        <td className="zadm-td zadm-td--num" style={{ fontWeight: 600 }}>
-                          {fmtMoney(e.amount)}
-                        </td>
-                        <td className="zadm-td">
-                          <StatusPill status={e.status} />
-                        </td>
-                        {adminUser?.id ? (
-                          <td className="zadm-td zadm-td--actions">
-                            <button
-                              type="button"
-                              className="zadm-btn zadm-btn--ghost zadm-btn--sm"
-                              onClick={() => openOverrideFor(e)}
-                              title="Ajuster le montant ou le statut"
-                            >
-                              Modifier
-                            </button>
-                          </td>
-                        ) : null}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+                          Modifier
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+            </RenderDataGate>
           </div>
-        </section>
-      </div>
+
+          {!kpiLoading && filteredEvents.length > EVENTS_PER_PAGE && (
+            <div className="sp-pager" role="navigation" aria-label="Pagination">
+              <button
+                type="button"
+                className="sp-pager__btn sp-pager__btn--nav"
+                disabled={safePage <= 1}
+                onClick={() => setPage(Math.max(1, safePage - 1))}
+                aria-label="Page précédente"
+              >
+                ‹
+              </button>
+              {getPagerPages(safePage, pageCount).map((p, i) =>
+                p === '…' ? (
+                  <span key={`dots-${i}`} className="sp-pager__ellipsis" aria-hidden>…</span>
+                ) : (
+                  <button
+                    key={p}
+                    type="button"
+                    className={`sp-pager__btn${p === safePage ? ' sp-pager__btn--active' : ''}`}
+                    onClick={() => setPage(p)}
+                    aria-current={p === safePage ? 'page' : undefined}
+                  >
+                    {p}
+                  </button>
+                ),
+              )}
+              <button
+                type="button"
+                className="sp-pager__btn sp-pager__btn--nav"
+                disabled={safePage >= pageCount}
+                onClick={() => setPage(Math.min(pageCount, safePage + 1))}
+                aria-label="Page suivante"
+              >
+                ›
+              </button>
+              <span className="sp-pager__info">
+                {(safePage - 1) * EVENTS_PER_PAGE + 1}–{Math.min(safePage * EVENTS_PER_PAGE, filteredEvents.length)} / {filteredEvents.length}
+              </span>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ─────────── REQUEST DETAIL MODAL ─────────── */}
+      {selectedRequest && (() => {
+        const req = selectedRequest
+        const name = clientName(req.beneficiaryClientId)
+        const tone = statusTone(req.status)
+        const nEv = (req.eventIds || []).length
+        return (
+          <AdminModal open onClose={() => setSelectedRequest(null)} title="">
+            <div className="sp-detail">
+              <div className="sp-detail__banner">
+                <div className="sp-detail__banner-top">
+                  <span className={`sp-badge sp-badge--${tone}`}>{statusLabel(req.status)}</span>
+                  <span className="sp-detail__date">{fmtDate(req.createdAt)}</span>
+                </div>
+                <div className="sp-detail__price">
+                  <span className="sp-detail__price-num">{(Number(req.grossAmount) || 0).toLocaleString('fr-FR')}</span>
+                  <span className="sp-detail__price-cur">TND</span>
+                </div>
+                <p className="sp-detail__banner-sub">
+                  {name} · {nEv} événement{nEv > 1 ? 's' : ''} regroupé{nEv > 1 ? 's' : ''}
+                </p>
+              </div>
+
+              <div className="sp-detail__section">
+                <div className="sp-detail__section-title">Demande</div>
+                <div className="sp-detail__row"><span>Bénéficiaire</span><strong>{name}</strong></div>
+                <div className="sp-detail__row"><span>Événements</span><strong>{nEv}</strong></div>
+                <div className="sp-detail__row"><span>Créé le</span><strong>{fmtDate(req.createdAt)}</strong></div>
+                <div className="sp-detail__row"><span>Statut</span><strong>{statusLabel(req.status)}</strong></div>
+                {req.paidAt ? (
+                  <div className="sp-detail__row"><span>Payé le</span><strong>{fmtDate(req.paidAt)}</strong></div>
+                ) : null}
+                {req.paymentRef ? (
+                  <div className="sp-detail__row"><span>Référence</span><strong>{req.paymentRef}</strong></div>
+                ) : null}
+              </div>
+
+              {req.status === 'pending_review' && (
+                <div className="sp-detail__section">
+                  <div className="sp-detail__section-title">Validation</div>
+                  <input
+                    className="led-action-input"
+                    placeholder="Motif du rejet (si applicable)"
+                    value={rejectReasonByReq[req.id] || ''}
+                    onChange={(ev) =>
+                      setRejectReasonByReq((m) => ({ ...m, [req.id]: ev.target.value }))
+                    }
+                  />
+                  <div className="led-actions">
+                    <button
+                      type="button"
+                      className="led-btn led-btn--primary"
+                      onClick={() => handleReview(req.id, 'approved')}
+                      disabled={Boolean(busyKey)}
+                    >
+                      {busyKey === `review:${req.id}:approved` ? 'Approbation…' : 'Approuver'}
+                    </button>
+                    <button
+                      type="button"
+                      className="led-btn led-btn--danger"
+                      onClick={() => handleReview(req.id, 'rejected')}
+                      disabled={Boolean(busyKey)}
+                    >
+                      {busyKey === `review:${req.id}:rejected` ? 'Rejet…' : 'Rejeter'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {req.status === 'approved' && (
+                <div className="sp-detail__section">
+                  <div className="sp-detail__section-title">Paiement</div>
+                  <input
+                    className="led-action-input"
+                    placeholder="Référence paiement (ex. virement #1234)"
+                    value={payRefByReq[req.id] || ''}
+                    onChange={(ev) =>
+                      setPayRefByReq((m) => ({ ...m, [req.id]: ev.target.value }))
+                    }
+                  />
+                  <div className="led-actions">
+                    <button
+                      type="button"
+                      className="led-btn led-btn--primary"
+                      onClick={() => handleReview(req.id, 'paid')}
+                      disabled={Boolean(busyKey)}
+                    >
+                      {busyKey === `review:${req.id}:paid` ? 'Enregistrement…' : 'Marquer payé'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {req.status === 'paid' && (
+                <div className="sp-detail__section">
+                  <div className="led-status-banner led-status-banner--ok">
+                    <span aria-hidden>✓</span>
+                    <span>
+                      Payé le {fmtDate(req.paidAt)}
+                      {req.paymentRef ? ` · Réf. ${req.paymentRef}` : ''}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {req.status === 'rejected' && req.reviewReason ? (
+                <div className="sp-detail__section">
+                  <div className="led-status-banner led-status-banner--err">
+                    <span aria-hidden>✕</span>
+                    <span>Rejeté : {req.reviewReason}</span>
+                  </div>
+                </div>
+              ) : null}
+
+              <div className="sp-detail__actions">
+                <button
+                  type="button"
+                  className="sp-detail__btn"
+                  onClick={() => setSelectedRequest(null)}
+                >
+                  Fermer
+                </button>
+              </div>
+            </div>
+          </AdminModal>
+        )
+      })()}
+
+      {/* ─────────── BENEFICIARY DETAIL MODAL (payable events) ─────────── */}
+      {selectedBeneficiary && (() => {
+        const name = clientName(selectedBeneficiary)
+        const rows = selectedBeneficiaryEvents.filter(
+          (e) => e.status === 'payable' && !e.paidAt && !claimedEventIds.has(e.id),
+        )
+        const gross = rows.reduce((s, e) => s + Number(e.amount || 0), 0)
+        const busy = busyKey === `submit:${selectedBeneficiary}`
+        return (
+          <AdminModal open onClose={() => setSelectedBeneficiary(null)} title="">
+            <div className="sp-detail">
+              <div className="sp-detail__banner">
+                <div className="sp-detail__banner-top">
+                  <span className="sp-badge sp-badge--blue">À regrouper</span>
+                  <span className="sp-detail__date">{rows.length} ligne{rows.length > 1 ? 's' : ''}</span>
+                </div>
+                <div className="sp-detail__price">
+                  <span className="sp-detail__price-num">{gross.toLocaleString('fr-FR')}</span>
+                  <span className="sp-detail__price-cur">TND</span>
+                </div>
+                <p className="sp-detail__banner-sub">{name}</p>
+              </div>
+
+              <div className="sp-detail__section">
+                <div className="sp-detail__section-title">Lignes payables</div>
+                {rows.length === 0 ? (
+                  <p className="sp-detail__notes">Aucune ligne payable libre.</p>
+                ) : rows.map((ev) => (
+                  <div key={ev.id} className="sp-detail__row">
+                    <span>
+                      N{ev.level} · <span className="led-mono">{ev.saleId}</span>
+                    </span>
+                    <strong>{fmtMoney(ev.amount)}</strong>
+                  </div>
+                ))}
+                <div className="sp-detail__row sp-detail__row--highlight">
+                  <span>Total brut</span><strong>{fmtMoney(gross)}</strong>
+                </div>
+              </div>
+
+              <div className="sp-detail__actions">
+                <button
+                  type="button"
+                  className="sp-detail__btn"
+                  onClick={() => setSelectedBeneficiary(null)}
+                  disabled={Boolean(busyKey)}
+                >
+                  Fermer
+                </button>
+                <button
+                  type="button"
+                  className="sp-detail__btn sp-detail__btn--edit"
+                  onClick={async () => {
+                    await handleSubmit(selectedBeneficiary)
+                    setSelectedBeneficiary(null)
+                  }}
+                  disabled={Boolean(busyKey) || rows.length === 0}
+                >
+                  {busy ? 'Création…' : 'Créer la demande'}
+                </button>
+              </div>
+            </div>
+          </AdminModal>
+        )
+      })()}
 
       <CommissionOverrideModal
         event={editingEvent}

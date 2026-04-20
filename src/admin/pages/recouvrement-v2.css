@@ -1,0 +1,258 @@
+/* src/admin/pages/recouvrement-v2.css
+   --------------------------------------------------------------
+   Lightweight styles for RecouvrementV2Page — a read-only "2+
+   months overdue" list. No modals, no filters beyond search.
+-------------------------------------------------------------- */
+
+.recouvrement-page {
+  padding: 20px clamp(16px, 3vw, 28px) 40px;
+  max-width: 1100px;
+  margin: 0 auto;
+  color: #0f172a;
+}
+
+.recouvrement-page__hero {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 12px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+.recouvrement-page__title {
+  font-size: 22px;
+  font-weight: 800;
+  margin: 0 0 4px;
+  letter-spacing: -0.01em;
+}
+.recouvrement-page__sub {
+  font-size: 13px;
+  color: #64748b;
+  margin: 0;
+}
+.recouvrement-page__refresh {
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+.recouvrement-page__refresh:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+}
+
+.recouvrement-page__kpis {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.recouvrement-page__kpi {
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.recouvrement-page__kpi--danger {
+  background: linear-gradient(180deg, #fef2f2 0%, #ffffff 100%);
+  border-color: #fecaca;
+}
+.recouvrement-page__kpi--amount {
+  background: linear-gradient(180deg, #f0fdf4 0%, #ffffff 100%);
+  border-color: #bbf7d0;
+}
+.recouvrement-page__kpi-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+  color: #64748b;
+}
+.recouvrement-page__kpi-value {
+  font-size: 22px;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: -0.01em;
+}
+.recouvrement-page__kpi--danger .recouvrement-page__kpi-value { color: #b91c1c; }
+.recouvrement-page__kpi--amount .recouvrement-page__kpi-value { color: #065f46; }
+
+.recouvrement-page__toolbar {
+  margin-bottom: 14px;
+}
+.recouvrement-page__search {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.recouvrement-page__search:focus {
+  border-color: #0f766e;
+  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
+}
+
+.recouvrement-page__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.recouvrement-page__row {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  overflow: hidden;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+}
+.recouvrement-page__row:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.06);
+  transform: translateY(-1px);
+}
+.recouvrement-page__row-btn {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  width: 100%;
+  padding: 14px 16px;
+  background: transparent;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+.recouvrement-page__row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.recouvrement-page__row-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.recouvrement-page__row-status {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 3px 10px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.recouvrement-page__row-status--pending {
+  background: rgba(251, 191, 36, 0.14);
+  color: #b45309;
+}
+.recouvrement-page__row-status--submitted {
+  background: rgba(251, 191, 36, 0.18);
+  color: #92400e;
+}
+.recouvrement-page__row-status--rejected {
+  background: rgba(248, 113, 113, 0.14);
+  color: #b91c1c;
+}
+
+.recouvrement-page__row-sub {
+  font-size: 12px;
+  color: #64748b;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.recouvrement-page__row-right {
+  text-align: right;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.recouvrement-page__row-amount {
+  font-size: 16px;
+  font-weight: 800;
+  color: #0f172a;
+}
+.recouvrement-page__row-late {
+  font-size: 11px;
+  font-weight: 700;
+  color: #b91c1c;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.recouvrement-page__row-due {
+  font-size: 10px;
+  color: #94a3b8;
+}
+
+.recouvrement-page__pager {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+}
+.recouvrement-page__pager-btn {
+  min-width: 32px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+.recouvrement-page__pager-btn:hover:not(:disabled) {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+}
+.recouvrement-page__pager-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.recouvrement-page__pager-btn--active {
+  background: #0f172a;
+  border-color: #0f172a;
+  color: #fff;
+}
+.recouvrement-page__pager-gap {
+  padding: 0 6px;
+  color: #94a3b8;
+  font-weight: 700;
+}
+.recouvrement-page__pager-hint {
+  margin-left: auto;
+  font-size: 11px;
+  color: #64748b;
+}
+
+@media (max-width: 600px) {
+  .recouvrement-page__kpis { grid-template-columns: 1fr; }
+  .recouvrement-page__row-btn { flex-direction: column; gap: 8px; }
+  .recouvrement-page__row-right { text-align: left; flex-direction: row; gap: 12px; flex-wrap: wrap; }
+}

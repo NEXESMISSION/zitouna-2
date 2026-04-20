@@ -2,16 +2,18 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../lib/AuthContext.jsx'
 import { useClients, useSales, useProjects, useAdminUsers } from '../../lib/useSupabase.js'
+import { runSafeAction } from '../../lib/runSafeAction.js'
 import * as db from '../../lib/db.js'
 import { getSaleStatusMeta, canonicalSaleStatus } from '../../domain/workflowModel.js'
 import SaleSnapshotTracePanel from '../components/SaleSnapshotTracePanel.jsx'
 import AdminModal from '../components/AdminModal.jsx'
-import './coordination-page.css'
-import './zitouna-admin-page.css'
+import RenderDataGate from '../../components/RenderDataGate.jsx'
+import { getPagerPages } from './pager-util.js'
 import './sell-field.css'
+import './coordination-page.css'
 
 const SLOT_OPTIONS = ['09:00', '10:30', '12:00', '14:00', '15:30', '17:00']
-const PER_PAGE = 10
+const PER_PAGE = 15
 
 // ----------------------------------------------------------------------------
 // Small helpers
@@ -67,16 +69,14 @@ function monthGrid(anchor) {
   }
   return cells
 }
-function getPagerPages(current, total) {
-  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1)
-  const out = [1]
-  const left = Math.max(2, current - 1)
-  const right = Math.min(total - 1, current + 1)
-  if (left > 2) out.push('…')
-  for (let i = left; i <= right; i++) out.push(i)
-  if (right < total - 1) out.push('…')
-  out.push(total)
-  return out
+
+// Map a sale's canonical status to an `sp-card--{tone}` + badge.
+function toneForSale(sale, hasFin, hasJur) {
+  const st = canonicalSaleStatus(sale.status)
+  if (st === 'pending_coordination') return hasFin || hasJur ? 'orange' : 'red'
+  if (hasFin && hasJur) return 'green'
+  if (hasFin || hasJur) return 'blue'
+  return 'orange'
 }
 
 // ----------------------------------------------------------------------------
@@ -110,6 +110,7 @@ export default function CoordinationPage() {
   }, [])
 
   const [query, setQuery] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
   const [view, setView] = useState('sales')
   const [page, setPage] = useState(1)
   const [monthAnchor, setMonthAnchor] = useState(() => startOfMonth(new Date()))
@@ -122,6 +123,8 @@ export default function CoordinationPage() {
   const [selectedAppointment, setSelectedAppointment] = useState(null)
   const [detailSale, setDetailSale] = useState(null)
   const [expiryOpen, setExpiryOpen] = useState(false)
+  const [reservationBusy, setReservationBusy] = useState(null)
+  const [reservationNotice, setReservationNotice] = useState('')
 
   // ---- derived lists -------------------------------------------------------
   const appointments = useMemo(() => {
@@ -151,27 +154,52 @@ export default function CoordinationPage() {
     return rows.sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`))
   }, [sales, adminUser?.name, user?.name])
 
-  const salesForCoordination = useMemo(() => {
-    const q = query.trim().toLowerCase()
+  const salesInScope = useMemo(() => {
     return (sales || [])
       .filter((s) => !['cancelled', 'rejected', 'completed'].includes(String(s.status || '')))
       .filter((s) => {
         const st = canonicalSaleStatus(s.status)
         return st === 'pending_coordination' || st === 'pending_finance' || st === 'pending_legal'
       })
-      .filter((s) => {
-        if (!q) return true
-        const hay = `${s.clientName || ''} ${s.projectTitle || ''} ${s.code || s.id || ''} ${normalizePlotIds(s).join(',')}`.toLowerCase()
-        return hay.includes(q)
-      })
       .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
-  }, [sales, query])
+  }, [sales])
 
   const planningBySale = useMemo(() => {
     const map = new Map()
     for (const a of appointments) map.set(`${a.saleId}:${a.type}`, a)
     return map
   }, [appointments])
+
+  const statusCounts = useMemo(() => {
+    let unplanned = 0, partial = 0, planned = 0
+    for (const s of salesInScope) {
+      const fin = planningBySale.has(`${s.id}:finance`)
+      const jur = planningBySale.has(`${s.id}:juridique`)
+      if (fin && jur) planned += 1
+      else if (fin || jur) partial += 1
+      else unplanned += 1
+    }
+    return { unplanned, partial, planned, total: salesInScope.length }
+  }, [salesInScope, planningBySale])
+
+  const salesForCoordination = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return salesInScope
+      .filter((s) => {
+        if (statusFilter === 'all') return true
+        const fin = planningBySale.has(`${s.id}:finance`)
+        const jur = planningBySale.has(`${s.id}:juridique`)
+        if (statusFilter === 'unplanned') return !fin && !jur
+        if (statusFilter === 'partial') return (fin || jur) && !(fin && jur)
+        if (statusFilter === 'planned') return fin && jur
+        return true
+      })
+      .filter((s) => {
+        if (!q) return true
+        const hay = `${s.clientName || ''} ${s.projectTitle || ''} ${s.code || s.id || ''} ${normalizePlotIds(s).join(',')}`.toLowerCase()
+        return hay.includes(q)
+      })
+  }, [salesInScope, planningBySale, statusFilter, query])
 
   const reservationExpiryQueue = useMemo(() => {
     const now = Date.now()
@@ -191,7 +219,7 @@ export default function CoordinationPage() {
 
   const pageCount = Math.max(1, Math.ceil(salesForCoordination.length / PER_PAGE))
   useEffect(() => { if (page > pageCount) setPage(1) }, [page, pageCount])
-  useEffect(() => { setPage(1) }, [query])
+  useEffect(() => { setPage(1) }, [query, statusFilter])
   const pagedSales = useMemo(
     () => salesForCoordination.slice((page - 1) * PER_PAGE, page * PER_PAGE),
     [salesForCoordination, page],
@@ -215,6 +243,8 @@ export default function CoordinationPage() {
   const dayAgenda = useMemo(() => appointmentsByDate.get(selectedDate) || [], [appointmentsByDate, selectedDate])
   const monthLabel = monthAnchor.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
   const plannedCount = appointments.length
+
+  const showSkeletons = salesLoading && salesInScope.length === 0
 
   // ---- actions -------------------------------------------------------------
   const openScheduler = (sale, type) => {
@@ -269,7 +299,7 @@ export default function CoordinationPage() {
     }
   }
 
-  // Reservation expiry auto-queueing (unchanged from v1)
+  // Reservation expiry auto-queueing (unchanged)
   useEffect(() => {
     if (!sales?.length) return
     let cancelled = false
@@ -301,229 +331,293 @@ export default function CoordinationPage() {
   }, [sales, salesUpdate])
 
   const extendReservation = async (sale, hours = 24) => {
-    const prevSt = String(sale.reservationStatus || '')
-    const next = new Date(Date.now() + hours * 3600000).toISOString()
-    await salesUpdate(sale.id, { reservationExpiresAt: next, reservationStatus: 'extended' })
-    await appendAuditLog({
-      action: 'reservation_extended', entity: 'sale', entityId: String(sale.id),
-      actorUserId: adminUser?.id || null, actorEmail: adminUser?.email || '', details: `+${hours}h`,
-    })
-    try {
-      await db.insertSaleReservationEvent({
-        saleId: sale.id, eventType: 'reservation_extended',
-        fromStatus: prevSt, toStatus: 'extended',
-        actorUserId: adminUser?.id || null, details: `Prolongation ${hours}h`,
-        metadata: { newExpiresAt: next },
+    if (reservationBusy) return
+    const key = `extend:${sale.id}`
+    await runSafeAction({
+      setBusy: (v) => setReservationBusy(v ? key : null),
+      onError: (msg) => { setReservationNotice(msg); window.setTimeout(() => setReservationNotice(''), 6000) },
+      label: 'Prolonger la réservation',
+    }, async () => {
+      const prevSt = String(sale.reservationStatus || '')
+      const next = new Date(Date.now() + hours * 3600000).toISOString()
+      await salesUpdate(sale.id, { reservationExpiresAt: next, reservationStatus: 'extended' })
+      await appendAuditLog({
+        action: 'reservation_extended', entity: 'sale', entityId: String(sale.id),
+        actorUserId: adminUser?.id || null, actorEmail: adminUser?.email || '', details: `+${hours}h`,
       })
-    } catch (e) { console.error(e) }
+      try {
+        await db.insertSaleReservationEvent({
+          saleId: sale.id, eventType: 'reservation_extended',
+          fromStatus: prevSt, toStatus: 'extended',
+          actorUserId: adminUser?.id || null, details: `Prolongation ${hours}h`,
+          metadata: { newExpiresAt: next },
+        })
+      } catch (e) { console.warn('[coord] insertSaleReservationEvent failed:', e?.message || e) }
+    })
   }
 
   const releaseExpiredReservation = async (sale) => {
-    const parcelDbIds = parcelDbIdsFromSale(sale)
-    const prevSt = String(sale.reservationStatus || '')
-    await salesUpdate(sale.id, {
-      reservationStatus: 'released',
-      reservationReleasedAt: new Date().toISOString(),
-      reservationReleaseReason: 'manual_release_after_expiry',
-      status: 'cancelled', pipelineStatus: 'cancelled',
-    })
-    for (const pid of parcelDbIds) {
-      try { await updateParcelStatus(pid, 'available') } catch { /* ignore */ }
-    }
-    await appendAuditLog({
-      action: 'reservation_released', entity: 'sale', entityId: String(sale.id),
-      actorUserId: adminUser?.id || null, actorEmail: adminUser?.email || '',
-      details: 'File expirée — libération parcelle(s)',
-    })
-    try {
-      await db.insertSaleReservationEvent({
-        saleId: sale.id, eventType: 'reservation_released',
-        fromStatus: prevSt, toStatus: 'released',
-        actorUserId: adminUser?.id || null,
-        details: 'Libération manuelle après expiration',
+    if (reservationBusy) return
+    const key = `release:${sale.id}`
+    await runSafeAction({
+      setBusy: (v) => setReservationBusy(v ? key : null),
+      onError: (msg) => { setReservationNotice(msg); window.setTimeout(() => setReservationNotice(''), 6000) },
+      label: 'Libérer la parcelle',
+    }, async () => {
+      const parcelDbIds = parcelDbIdsFromSale(sale)
+      const prevSt = String(sale.reservationStatus || '')
+      await salesUpdate(sale.id, {
+        reservationStatus: 'released',
+        reservationReleasedAt: new Date().toISOString(),
+        reservationReleaseReason: 'manual_release_after_expiry',
+        status: 'cancelled', pipelineStatus: 'cancelled',
       })
-    } catch (e) { console.error(e) }
+      for (const pid of parcelDbIds) {
+        try { await updateParcelStatus(pid, 'available') } catch (e) {
+          console.warn('[coord] updateParcelStatus failed:', e?.message || e, { pid })
+        }
+      }
+      try {
+        await appendAuditLog({
+          action: 'reservation_released', entity: 'sale', entityId: String(sale.id),
+          actorUserId: adminUser?.id || null, actorEmail: adminUser?.email || '',
+          details: 'File expirée — libération parcelle(s)',
+        })
+      } catch (e) { console.warn('[coord] appendAuditLog failed:', e?.message || e) }
+      try {
+        await db.insertSaleReservationEvent({
+          saleId: sale.id, eventType: 'reservation_released',
+          fromStatus: prevSt, toStatus: 'released',
+          actorUserId: adminUser?.id || null,
+          details: 'Libération manuelle après expiration',
+        })
+      } catch (e) { console.warn('[coord] insertSaleReservationEvent failed:', e?.message || e) }
+    })
   }
 
   // ---- render --------------------------------------------------------------
   const dateError = scheduler.open && scheduler.date && scheduler.time
     && new Date(`${scheduler.date}T${scheduler.time}:00`).getTime() < Date.now()
-    ? 'La date et l’heure doivent être dans le futur.' : ''
+    ? 'La date et l\u2019heure doivent être dans le futur.' : ''
+
+  const statusFilters = [
+    ['all',       'Tous',          statusCounts.total],
+    ['unplanned', 'À planifier',   statusCounts.unplanned],
+    ['partial',   'Partiellement', statusCounts.partial],
+    ['planned',   'Planifiés',     statusCounts.planned],
+  ]
 
   return (
-    <div className="sell-field coord-v3" dir="ltr">
+    <div className="sell-field" dir="ltr">
       <button type="button" className="sp-back-btn" onClick={() => navigate(-1)}>
         <span className="sp-back-btn__icon-wrap" aria-hidden>←</span>
         <span>Retour</span>
       </button>
 
-      {/* ── Topbar: title + compact KPIs ─────────────────────────────── */}
-      <header className="cv-topbar">
-        <div className="cv-topbar__title">
-          <h1 className="cv-topbar__h1">Coordination</h1>
-          <p className="cv-topbar__sub">Planifier les rendez-vous Finance et Juridique.</p>
+      <header className="sp-hero">
+        <div className="sp-hero__avatar" aria-hidden>
+          <span style={{ fontSize: 28 }}>🧭</span>
         </div>
-        <div className="cv-topbar__kpis">
-          <span className="cv-kpi-pill" title="Dossiers en attente de rendez-vous">
-            <strong>{salesForCoordination.length}</strong>
-            <span>à planifier</span>
+        <div className="sp-hero__info">
+          <h1 className="sp-hero__name">Coordination</h1>
+          <p className="sp-hero__role">Planifier les rendez-vous Finance et Juridique</p>
+        </div>
+        <div className="sp-hero__kpis">
+          <span className="sp-hero__kpi-num">
+            {showSkeletons ? <span className="sk-num sk-num--wide" /> : salesInScope.length}
           </span>
-          <span className="cv-kpi-pill cv-kpi-pill--good" title="Rendez-vous planifiés">
-            <strong>{plannedCount}</strong>
-            <span>planifiés</span>
-          </span>
-          {reservationExpiryQueue.length > 0 ? (
-            <button
-              type="button"
-              className="cv-kpi-pill cv-kpi-pill--warn"
-              onClick={() => setExpiryOpen(true)}
-              title="Réservations expirées — cliquez pour gérer"
-            >
-              ⚠ <strong>{reservationExpiryQueue.length}</strong>
-              <span>expirée{reservationExpiryQueue.length > 1 ? 's' : ''}</span>
-            </button>
-          ) : null}
+          <span className="sp-hero__kpi-label">dossier{salesInScope.length > 1 ? 's' : ''}</span>
         </div>
       </header>
 
-      {/* ── Tabs ─────────────────────────────────────────────────────── */}
-      <div className="cv-tabs" role="tablist">
-        <button
-          type="button" role="tab" aria-selected={view === 'sales'}
-          className={`cv-tab${view === 'sales' ? ' cv-tab--on' : ''}`}
-          onClick={() => setView('sales')}
-        >
-          Dossiers
-          <span className="cv-tab__count">{salesForCoordination.length}</span>
-        </button>
-        <button
-          type="button" role="tab" aria-selected={view === 'calendar'}
-          className={`cv-tab${view === 'calendar' ? ' cv-tab--on' : ''}`}
-          onClick={() => setView('calendar')}
-        >
-          Calendrier
-          <span className="cv-tab__count">{plannedCount}</span>
-        </button>
+      <div className="sp-cat-bar">
+        <div className="sp-cat-stats">
+          <strong>{showSkeletons ? <span className="sk-num" /> : salesInScope.length}</strong> total
+          <span className="sp-cat-stat-dot" />
+          <strong>{showSkeletons ? <span className="sk-num" /> : plannedCount}</strong> RDV planifié{plannedCount > 1 ? 's' : ''}
+          {reservationExpiryQueue.length > 0 && (
+            <>
+              <span className="sp-cat-stat-dot" />
+              <button
+                type="button"
+                className="cv-expiry-link"
+                onClick={() => setExpiryOpen(true)}
+                title="Réservations expirées — cliquez pour gérer"
+              >
+                ⚠ <strong>{reservationExpiryQueue.length}</strong> expirée{reservationExpiryQueue.length > 1 ? 's' : ''}
+              </button>
+            </>
+          )}
+        </div>
+        <div className="sp-cat-filters">
+          <input
+            className="sp-cat-search"
+            placeholder="Rechercher client, projet, code ou parcelle…"
+            aria-label="Rechercher un dossier"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </div>
+        <div className="cv-chips" role="tablist" aria-label="Vue">
+          <button
+            type="button" role="tab" aria-selected={view === 'sales'}
+            className={`cv-chip${view === 'sales' ? ' cv-chip--active' : ''}`}
+            onClick={() => setView('sales')}
+          >
+            Dossiers
+            <span className="cv-chip__count">{salesInScope.length}</span>
+          </button>
+          <button
+            type="button" role="tab" aria-selected={view === 'calendar'}
+            className={`cv-chip${view === 'calendar' ? ' cv-chip--active' : ''}`}
+            onClick={() => setView('calendar')}
+          >
+            Calendrier
+            <span className="cv-chip__count">{plannedCount}</span>
+          </button>
+        </div>
+        {view === 'sales' && (
+          <div className="cv-chips" role="tablist" aria-label="Filtrer par statut">
+            {statusFilters.map(([key, label, count]) => (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                aria-selected={statusFilter === key}
+                className={`cv-chip${statusFilter === key ? ' cv-chip--active' : ''}`}
+                onClick={() => setStatusFilter(key)}
+              >
+                {label}
+                <span className="cv-chip__count">{count}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {view === 'sales' && (
         <>
-          <div className="cv-search">
-            <input
-              type="search" value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Rechercher un client, projet, code ou parcelle…"
-              aria-label="Rechercher un dossier"
-            />
-          </div>
-
-          <section className="sp-cards cv-queue">
-            {salesLoading && salesForCoordination.length === 0 ? (
-              Array.from({ length: 5 }).map((_, i) => (
-                <article key={`sk-${i}`} className="sp-card sp-card--skeleton" aria-hidden>
-                  <div className="sp-card__head">
-                    <div className="sp-card__user">
-                      <span className="sp-sk-box" />
-                      <div>
-                        <span className="sp-sk-line sp-sk-line--title" />
-                        <span className="sp-sk-line sp-sk-line--sub" />
+          <div className="sp-cards">
+            <RenderDataGate
+              loading={showSkeletons}
+              error={null}
+              data={pagedSales}
+              isEmpty={() => salesForCoordination.length === 0}
+              skeleton={
+                <>
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <div key={`sk-${i}`} className="sp-card sp-card--skeleton" aria-hidden>
+                      <div className="sp-card__head">
+                        <div className="sp-card__user">
+                          <span className="sp-card__initials sk-box" />
+                          <div style={{ flex: 1 }}>
+                            <p className="sk-line sk-line--title" />
+                            <p className="sk-line sk-line--sub" />
+                          </div>
+                        </div>
+                        <span className="sk-line sk-line--badge" />
+                      </div>
+                      <div className="sp-card__body">
+                        <span className="sk-line sk-line--price" />
+                        <span className="sk-line sk-line--info" />
                       </div>
                     </div>
-                    <span className="sp-sk-line sp-sk-line--badge" />
+                  ))}
+                </>
+              }
+              empty={
+                <div className="sp-empty">
+                  <span className="sp-empty__emoji" aria-hidden>📭</span>
+                  <div className="sp-empty__title">
+                    {query || statusFilter !== 'all' ? 'Aucun résultat.' : 'Aucun dossier à coordonner.'}
                   </div>
-                </article>
-              ))
-            ) : salesForCoordination.length === 0 ? (
-              <div className="sp-empty">
-                <span className="sp-empty__emoji" aria-hidden>📭</span>
-                <div className="sp-empty__title">Aucun dossier à coordonner</div>
-                <p style={{ margin: '4px 0 10px', fontSize: 12, color: '#64748b' }}>
-                  Dès qu’une vente passe en « En attente coordination », elle apparaîtra ici.
-                </p>
-                <button type="button" className="sp-cta-btn" onClick={() => setView('calendar')}>
-                  <span className="sp-cta-btn__icon">📅</span>
-                  <span className="sp-cta-btn__text">Ouvrir le calendrier</span>
-                  <span className="sp-cta-btn__arrow">→</span>
-                </button>
-              </div>
-            ) : (
-              pagedSales.map((sale) => {
+                  {!query && statusFilter === 'all' && (
+                    <p className="cv-empty__text">
+                      Dès qu’une vente passe en « En attente coordination », elle apparaîtra ici.
+                    </p>
+                  )}
+                </div>
+              }
+            >
+              {(rows) => rows.map((sale) => {
                 const client = clients.find((c) => String(c.id) === String(sale.clientId))
                 const sellerClient = sale.sellerClientId ? clients.find((c) => String(c.id) === String(sale.sellerClientId)) : null
                 const sellerAgent = sale.agentId ? adminUsers.find((u) => String(u.id) === String(sale.agentId)) : null
-                const statusMeta = getSaleStatusMeta(sale.status)
                 const plotLabel = normalizePlotIds(sale).map((id) => `#${id}`).join(', ') || '—'
                 const financePlan = planningBySale.get(`${sale.id}:finance`)
                 const juridiquePlan = planningBySale.get(`${sale.id}:juridique`)
+                const hasFin = Boolean(financePlan)
+                const hasJur = Boolean(juridiquePlan)
+                const tone = toneForSale(sale, hasFin, hasJur)
+                const steps = (hasFin ? 1 : 0) + (hasJur ? 1 : 0)
+                const pct = (steps / 2) * 100
+                const statusMeta = getSaleStatusMeta(sale.status)
+                const badgeLabel = hasFin && hasJur
+                  ? 'RDV planifiés'
+                  : hasFin || hasJur
+                    ? (hasFin ? 'Juridique manquant' : 'Finance manquant')
+                    : (statusMeta.label || 'À planifier')
                 return (
-                  <article
+                  <button
                     key={sale.id}
-                    className="sp-card cv-card"
-                    role="button" tabIndex={0}
+                    type="button"
+                    className={`sp-card sp-card--${tone} cv-card`}
                     onClick={() => setDetailSale({ sale, client, sellerClient, sellerAgent })}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault()
-                        setDetailSale({ sale, client, sellerClient, sellerAgent })
-                      }
-                    }}
+                    aria-label={`Ouvrir le dossier de ${sale.clientName || 'client'}`}
                   >
                     <div className="sp-card__head">
                       <div className="sp-card__user">
-                        <span className="sp-card__initials" aria-hidden>{initials(sale.clientName)}</span>
-                        <div>
+                        <span className="sp-card__initials">{initials(sale.clientName)}</span>
+                        <div style={{ minWidth: 0 }}>
                           <p className="sp-card__name">{sale.clientName || 'Client'}</p>
-                          <p className="sp-card__sub">{sale.projectTitle || 'Projet'} · Parcelle {plotLabel}</p>
+                          <p className="sp-card__sub">
+                            {sale.projectTitle || 'Projet'} · Parcelle {plotLabel}
+                          </p>
                         </div>
                       </div>
-                      <span className={`sp-badge sp-badge--${statusMeta.badge || 'gray'}`}>
-                        {statusMeta.label}
-                      </span>
+                      <span className={`sp-badge sp-badge--${tone}`}>{badgeLabel}</span>
                     </div>
 
-                    <div className="cv-card__plan">
-                      <div className={`cv-card__plan-row${financePlan ? ' cv-card__plan-row--ok' : ''}`}>
-                        <span className="cv-card__plan-dot" aria-hidden />
-                        <span className="cv-card__plan-lbl">Finance</span>
-                        <span className="cv-card__plan-val">
+                    <div className="sp-card__body">
+                      <div className="sp-card__price">
+                        <span className="sp-card__amount">{(Number(sale.agreedPrice) || 0).toLocaleString('fr-FR')}</span>
+                        <span className="sp-card__currency">TND</span>
+                      </div>
+                      <div className="sp-card__info">
+                        <span>{steps}/2 RDV</span>
+                      </div>
+                    </div>
+
+                    <div className="cv-plan">
+                      <div className={`cv-plan__row${hasFin ? ' cv-plan__row--ok' : ''}`}>
+                        <span className="cv-plan__dot" aria-hidden />
+                        <span className="cv-plan__lbl">Finance</span>
+                        <span className="cv-plan__val">
                           {financePlan ? `${fmtDate(financePlan.date)} · ${financePlan.time}` : 'À planifier'}
                         </span>
                       </div>
-                      <div className={`cv-card__plan-row${juridiquePlan ? ' cv-card__plan-row--ok' : ''}`}>
-                        <span className="cv-card__plan-dot" aria-hidden />
-                        <span className="cv-card__plan-lbl">Juridique</span>
-                        <span className="cv-card__plan-val">
+                      <div className={`cv-plan__row${hasJur ? ' cv-plan__row--ok' : ''}`}>
+                        <span className="cv-plan__dot" aria-hidden />
+                        <span className="cv-plan__lbl">Juridique</span>
+                        <span className="cv-plan__val">
                           {juridiquePlan ? `${fmtDate(juridiquePlan.date)} · ${juridiquePlan.time}` : 'À planifier'}
                         </span>
                       </div>
                     </div>
 
-                    <div className="cv-card__actions" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        type="button"
-                        className={`cv-btn${financePlan ? ' cv-btn--ghost' : ' cv-btn--primary'}`}
-                        onClick={(e) => { e.stopPropagation(); openScheduler(sale, 'finance') }}
-                      >
-                        {financePlan ? 'Modifier Finance' : 'Planifier Finance'}
-                      </button>
-                      <button
-                        type="button"
-                        className={`cv-btn${juridiquePlan ? ' cv-btn--ghost' : ' cv-btn--primary'}`}
-                        onClick={(e) => { e.stopPropagation(); openScheduler(sale, 'juridique') }}
-                      >
-                        {juridiquePlan ? 'Modifier Juridique' : 'Planifier Juridique'}
-                      </button>
+                    <div className="nd-progress" aria-hidden>
+                      <span className="nd-progress__fill" style={{ width: `${pct}%` }} />
                     </div>
-                  </article>
+                  </button>
                 )
-              })
-            )}
-          </section>
+              })}
+            </RenderDataGate>
+          </div>
 
-          {salesForCoordination.length > PER_PAGE && (
+          {!showSkeletons && salesForCoordination.length > PER_PAGE && (
             <div className="sp-pager" role="navigation" aria-label="Pagination">
               <button
-                type="button" className="sp-pager__btn"
+                type="button" className="sp-pager__btn sp-pager__btn--nav"
                 disabled={page <= 1}
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 aria-label="Page précédente"
@@ -541,7 +635,7 @@ export default function CoordinationPage() {
                 ),
               )}
               <button
-                type="button" className="sp-pager__btn"
+                type="button" className="sp-pager__btn sp-pager__btn--nav"
                 disabled={page >= pageCount}
                 onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
                 aria-label="Page suivante"
@@ -560,14 +654,9 @@ export default function CoordinationPage() {
             <div className="sp-empty">
               <span className="sp-empty__emoji" aria-hidden>🗓️</span>
               <div className="sp-empty__title">Aucun rendez-vous planifié</div>
-              <p style={{ margin: '4px 0 10px', fontSize: 12, color: '#64748b' }}>
+              <p className="cv-empty__text">
                 Commencez par planifier un rendez-vous depuis l’onglet « Dossiers ».
               </p>
-              <button type="button" className="sp-cta-btn" onClick={() => setView('sales')}>
-                <span className="sp-cta-btn__icon">📋</span>
-                <span className="sp-cta-btn__text">Aller aux dossiers</span>
-                <span className="sp-cta-btn__arrow">→</span>
-              </button>
             </div>
           ) : (
             <>
@@ -629,8 +718,7 @@ export default function CoordinationPage() {
       <AdminModal
         open={Boolean(detailSale)}
         onClose={() => setDetailSale(null)}
-        title="Détails de la vente"
-        width={560}
+        title=""
       >
         {detailSale && (() => {
           const s = detailSale.sale
@@ -639,65 +727,112 @@ export default function CoordinationPage() {
           const sa = detailSale.sellerAgent
           const plots = normalizePlotIds(s).map((id) => `#${id}`).join(', ') || '—'
           const stMeta = getSaleStatusMeta(s.status)
+          const financePlan = planningBySale.get(`${s.id}:finance`)
+          const juridiquePlan = planningBySale.get(`${s.id}:juridique`)
           return (
-            <div className="cv-detail">
-              <div className="cv-detail__head">
-                <div>
-                  <div className="cv-detail__name">{s.clientName || 'Client'}</div>
-                  <div className="cv-detail__code">Code : <code>{s.code || s.id}</code></div>
+            <div className="sp-detail">
+              <div className="sp-detail__banner">
+                <div className="sp-detail__banner-top">
+                  <span className={`sp-badge sp-badge--${stMeta.badge || 'blue'}`}>{stMeta.label}</span>
+                  <span className="sp-detail__date">{fmtDate(s.createdAt)}</span>
                 </div>
-                <span className={`sp-badge sp-badge--${stMeta.badge || 'gray'}`}>{stMeta.label}</span>
+                <div className="sp-detail__price">
+                  <span className="sp-detail__price-num">{(Number(s.agreedPrice) || 0).toLocaleString('fr-FR')}</span>
+                  <span className="sp-detail__price-cur">TND</span>
+                </div>
+                <p className="sp-detail__banner-sub">
+                  {s.clientName || 'Client'} · Réf. {s.code || s.id}
+                </p>
               </div>
 
-              <DetailBlock title="Vendeur">
-                <Row k="Nom" v={sc?.name || sa?.name || sa?.email || '—'} />
-                <Row k="Rôle" v={sa?.role ? `Staff — ${sa.role}` : (sc ? 'Vendeur délégué (client)' : '—')} />
-                {(sc?.phone || sa?.phone) && <Row k="Téléphone" v={sc?.phone || sa?.phone} />}
-                {(sc?.email || sa?.email) && <Row k="Email" v={sc?.email || sa?.email} />}
-              </DetailBlock>
+              <div className="sp-detail__section">
+                <div className="sp-detail__section-title">Vendeur</div>
+                <div className="sp-detail__row"><span>Nom</span><strong>{sc?.name || sa?.name || sa?.email || '—'}</strong></div>
+                <div className="sp-detail__row"><span>Rôle</span><strong>{sa?.role ? `Staff — ${sa.role}` : (sc ? 'Vendeur délégué (client)' : '—')}</strong></div>
+                {(sc?.phone || sa?.phone) && (
+                  <div className="sp-detail__row"><span>Téléphone</span><strong style={{ direction: 'ltr' }}>{sc?.phone || sa?.phone}</strong></div>
+                )}
+                {(sc?.email || sa?.email) && (
+                  <div className="sp-detail__row"><span>Email</span><strong style={{ wordBreak: 'break-all' }}>{sc?.email || sa?.email}</strong></div>
+                )}
+              </div>
 
-              <DetailBlock title="Acheteur">
-                <Row k="Nom" v={c?.name || s.clientName || '—'} />
-                <Row k="Téléphone" v={c?.phone || s.buyerPhoneNormalized || '—'} />
-                {c?.cin && <Row k="CIN" v={c.cin} mono />}
-                {c?.email && <Row k="Email" v={c.email} />}
-                {c?.city && <Row k="Ville" v={c.city} />}
-              </DetailBlock>
+              <div className="sp-detail__section">
+                <div className="sp-detail__section-title">Acheteur</div>
+                <div className="sp-detail__row"><span>Nom</span><strong>{c?.name || s.clientName || '—'}</strong></div>
+                <div className="sp-detail__row"><span>Téléphone</span><strong style={{ direction: 'ltr' }}>{c?.phone || s.buyerPhoneNormalized || '—'}</strong></div>
+                {c?.cin && <div className="sp-detail__row"><span>CIN</span><strong style={{ direction: 'ltr' }}>{c.cin}</strong></div>}
+                {c?.email && <div className="sp-detail__row"><span>Email</span><strong style={{ wordBreak: 'break-all' }}>{c.email}</strong></div>}
+                {c?.city && <div className="sp-detail__row"><span>Ville</span><strong>{c.city}</strong></div>}
+              </div>
 
-              <DetailBlock title="Projet & parcelles">
-                <Row k="Projet" v={s.projectTitle || s.projectId || '—'} />
-                <Row k="Parcelle(s)" v={plots} />
-              </DetailBlock>
+              <div className="sp-detail__section">
+                <div className="sp-detail__section-title">Projet & parcelles</div>
+                <div className="sp-detail__row"><span>Projet</span><strong>{s.projectTitle || s.projectId || '—'}</strong></div>
+                <div className="sp-detail__row"><span>Parcelle(s)</span><strong>{plots}</strong></div>
+              </div>
 
-              <DetailBlock title="Montants">
-                <Row k="Prix convenu" v={fmtMoney(s.agreedPrice)} />
-                <Row k="Acompte" v={fmtMoney(s.deposit)} />
-                <Row k="Mode" v={s.paymentType === 'installments' ? `Échelonné — ${s.offerName || ''}` : 'Comptant'} />
+              <div className="sp-detail__section">
+                <div className="sp-detail__section-title">Montants</div>
+                <div className="sp-detail__row"><span>Prix convenu</span><strong>{fmtMoney(s.agreedPrice)}</strong></div>
+                <div className="sp-detail__row"><span>Acompte</span><strong>{fmtMoney(s.deposit)}</strong></div>
+                <div className="sp-detail__row">
+                  <span>Mode</span>
+                  <strong>{s.paymentType === 'installments' ? `Échelonné — ${s.offerName || ''}` : 'Comptant'}</strong>
+                </div>
                 {s.paymentType === 'installments' && (
-                  <Row k="Durée" v={`${s.offerDuration || 0} mois · ${s.offerDownPayment || 0}% apport`} />
+                  <div className="sp-detail__row">
+                    <span>Durée</span>
+                    <strong>{s.offerDuration || 0} mois · {s.offerDownPayment || 0}% apport</strong>
+                  </div>
                 )}
-              </DetailBlock>
+              </div>
 
-              <DetailBlock title="Planification">
-                <Row k="Finance"
-                  v={s.coordinationFinanceAt
-                    ? `${fmtDate(s.coordinationFinanceAt)} ${new Date(s.coordinationFinanceAt).toTimeString().slice(0, 5)}`
-                    : <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>À planifier</span>
-                  } />
-                <Row k="Juridique"
-                  v={s.coordinationJuridiqueAt
-                    ? `${fmtDate(s.coordinationJuridiqueAt)} ${new Date(s.coordinationJuridiqueAt).toTimeString().slice(0, 5)}`
-                    : <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>À planifier</span>
-                  } />
+              <div className="sp-detail__section">
+                <div className="sp-detail__section-title">Planification</div>
+                <div className="sp-detail__row">
+                  <span>Finance</span>
+                  <strong style={{ color: financePlan ? '#059669' : '#94a3b8' }}>
+                    {financePlan
+                      ? `${fmtDate(financePlan.date)} · ${financePlan.time}`
+                      : 'À planifier'}
+                  </strong>
+                </div>
+                <div className="sp-detail__row">
+                  <span>Juridique</span>
+                  <strong style={{ color: juridiquePlan ? '#059669' : '#94a3b8' }}>
+                    {juridiquePlan
+                      ? `${fmtDate(juridiquePlan.date)} · ${juridiquePlan.time}`
+                      : 'À planifier'}
+                  </strong>
+                </div>
                 {s.coordinationNotes && (
-                  <div className="cv-detail__notes">{s.coordinationNotes}</div>
+                  <div className="cv-notes">{s.coordinationNotes}</div>
                 )}
-              </DetailBlock>
+              </div>
 
-              <div className="cv-detail__footer">
-                <button className="cv-btn cv-btn--ghost" onClick={() => setDetailSale(null)}>Fermer</button>
-                <button className="cv-btn cv-btn--primary" onClick={() => { setDetailSale(null); openScheduler(s, 'finance') }}>Planifier Finance</button>
-                <button className="cv-btn cv-btn--primary" onClick={() => { setDetailSale(null); openScheduler(s, 'juridique') }}>Planifier Juridique</button>
+              <div className="sp-detail__actions">
+                <button
+                  type="button"
+                  className="sp-detail__btn"
+                  onClick={() => setDetailSale(null)}
+                >
+                  Fermer
+                </button>
+                <button
+                  type="button"
+                  className="sp-detail__btn sp-detail__btn--edit"
+                  onClick={() => { setDetailSale(null); openScheduler(s, 'finance') }}
+                >
+                  {financePlan ? 'Modifier Finance' : 'Planifier Finance'}
+                </button>
+                <button
+                  type="button"
+                  className="sp-detail__btn sp-detail__btn--edit"
+                  onClick={() => { setDetailSale(null); openScheduler(s, 'juridique') }}
+                >
+                  {juridiquePlan ? 'Modifier Juridique' : 'Planifier Juridique'}
+                </button>
               </div>
             </div>
           )
@@ -709,12 +844,23 @@ export default function CoordinationPage() {
         open={expiryOpen}
         onClose={() => setExpiryOpen(false)}
         title={`Réservations expirées (${reservationExpiryQueue.length})`}
-        width={500}
       >
         <div className="cv-expiry">
           <p className="cv-expiry__hint">
             Ces dossiers n’ont pas été validés à temps. Prolongez la réservation ou libérez la parcelle.
           </p>
+          {reservationNotice && (
+            <div
+              role="alert"
+              style={{
+                margin: '8px 0', padding: '10px 12px', borderRadius: 8,
+                background: '#fef3c7', color: '#92400e', fontSize: 13,
+                border: '1px solid #fde68a',
+              }}
+            >
+              {reservationNotice}
+            </div>
+          )}
           {reservationExpiryQueue.length === 0 ? (
             <div className="cv-expiry__empty">Aucune réservation expirée.</div>
           ) : (
@@ -731,11 +877,21 @@ export default function CoordinationPage() {
                       </div>
                     </div>
                     <div className="cv-expiry__item-actions">
-                      <button className="cv-btn cv-btn--ghost" onClick={() => extendReservation(sale, 24)}>
-                        Prolonger 24 h
+                      <button
+                        type="button"
+                        className="sp-detail__btn"
+                        onClick={() => extendReservation(sale, 24)}
+                        disabled={Boolean(reservationBusy)}
+                      >
+                        {reservationBusy === `extend:${sale.id}` ? 'Prolongation…' : 'Prolonger 24 h'}
                       </button>
-                      <button className="cv-btn cv-btn--danger" onClick={() => releaseExpiredReservation(sale)}>
-                        Libérer la parcelle
+                      <button
+                        type="button"
+                        className="sp-detail__btn sp-detail__btn--danger"
+                        onClick={() => releaseExpiredReservation(sale)}
+                        disabled={Boolean(reservationBusy)}
+                      >
+                        {reservationBusy === `release:${sale.id}` ? 'Libération…' : 'Libérer la parcelle'}
                       </button>
                     </div>
                   </li>
@@ -751,84 +907,97 @@ export default function CoordinationPage() {
         open={scheduler.open && Boolean(scheduler.sale)}
         onClose={closeScheduler}
         title={`Planifier un rendez-vous ${typeLabel(scheduler.type)}`}
-        width={480}
       >
         {scheduler.sale && (
-          <div className="cv-sched">
-            <div className="cv-sched__recap">
-              <div className="cv-sched__recap-lbl">Dossier</div>
-              <div className="cv-sched__recap-val">
-                <strong>{scheduler.sale.clientName || 'Client'}</strong>
-                <span className="cv-sched__recap-dim"> · {scheduler.sale.projectTitle || 'Projet'}</span>
+          <div className="sp-detail cv-sched">
+            <div className="sp-detail__banner">
+              <div className="sp-detail__banner-top">
+                <span className="sp-badge sp-badge--blue">{typeLabel(scheduler.type)}</span>
+                <span className="sp-detail__date">Dossier</span>
               </div>
-              <div className="cv-sched__recap-meta">{fmtMoney(scheduler.sale.agreedPrice)}</div>
+              <div className="sp-detail__price">
+                <span className="sp-detail__price-num">{(Number(scheduler.sale.agreedPrice) || 0).toLocaleString('fr-FR')}</span>
+                <span className="sp-detail__price-cur">TND</span>
+              </div>
+              <p className="sp-detail__banner-sub">
+                {scheduler.sale.clientName || 'Client'} · {scheduler.sale.projectTitle || 'Projet'}
+              </p>
             </div>
 
-            <div className="cv-sched__trace"><SaleSnapshotTracePanel sale={scheduler.sale} /></div>
-
-            <label className="cv-sched__label">Type</label>
-            <div className="cv-sched__pills" role="radiogroup">
-              <button
-                type="button" role="radio" aria-checked={scheduler.type === 'finance'}
-                className={`cv-pill${scheduler.type === 'finance' ? ' cv-pill--on' : ''}`}
-                onClick={() => setScheduler((p) => ({ ...p, type: 'finance' }))}
-              >Finance</button>
-              <button
-                type="button" role="radio" aria-checked={scheduler.type === 'juridique'}
-                className={`cv-pill${scheduler.type === 'juridique' ? ' cv-pill--on' : ''}`}
-                onClick={() => setScheduler((p) => ({ ...p, type: 'juridique' }))}
-              >Juridique</button>
+            <div className="sp-detail__section">
+              <SaleSnapshotTracePanel sale={scheduler.sale} />
             </div>
 
-            <label className="cv-sched__label" htmlFor="cv-date">Date</label>
-            <input
-              id="cv-date" type="date"
-              className={`cv-sched__input${dateError ? ' cv-sched__input--err' : ''}`}
-              value={scheduler.date} min={todayIso()}
-              aria-invalid={Boolean(dateError)}
-              onChange={(e) => setScheduler((p) => ({ ...p, date: e.target.value }))}
-            />
+            <div className="sp-detail__section">
+              <div className="sp-detail__section-title">Type</div>
+              <div className="cv-chips" role="radiogroup">
+                <button
+                  type="button" role="radio" aria-checked={scheduler.type === 'finance'}
+                  className={`cv-chip${scheduler.type === 'finance' ? ' cv-chip--active' : ''}`}
+                  onClick={() => setScheduler((p) => ({ ...p, type: 'finance' }))}
+                >Finance</button>
+                <button
+                  type="button" role="radio" aria-checked={scheduler.type === 'juridique'}
+                  className={`cv-chip${scheduler.type === 'juridique' ? ' cv-chip--active' : ''}`}
+                  onClick={() => setScheduler((p) => ({ ...p, type: 'juridique' }))}
+                >Juridique</button>
+              </div>
+            </div>
 
-            <label className="cv-sched__label" htmlFor="cv-time">
-              Heure
-              <span className="cv-sched__label-hint"> — n’importe quelle heure, à la minute près.</span>
-            </label>
-            <div className="cv-sched__time-row">
+            <div className="sp-detail__section">
+              <div className="sp-detail__section-title">Date</div>
+              <input
+                id="cv-date" type="date"
+                className={`cv-input${dateError ? ' cv-input--err' : ''}`}
+                value={scheduler.date} min={todayIso()}
+                aria-invalid={Boolean(dateError)}
+                onChange={(e) => setScheduler((p) => ({ ...p, date: e.target.value }))}
+              />
+            </div>
+
+            <div className="sp-detail__section">
+              <div className="sp-detail__section-title">
+                Heure <span style={{ fontWeight: 500, textTransform: 'none', letterSpacing: 0, color: '#94a3b8' }}>
+                  — à la minute près
+                </span>
+              </div>
               <input
                 id="cv-time"
                 type="time"
-                className="cv-sched__input cv-sched__time-input"
+                className="cv-input cv-input--time"
                 step="300"
                 value={scheduler.time}
                 onChange={(e) => setScheduler((p) => ({ ...p, time: e.target.value || '09:00' }))}
               />
-              <div className="cv-sched__time-quick" role="radiogroup" aria-label="Créneaux rapides">
+              <div className="cv-chips" role="radiogroup" aria-label="Créneaux rapides" style={{ marginTop: 6 }}>
                 {SLOT_OPTIONS.map((slot) => (
                   <button
                     key={slot} type="button" role="radio"
                     aria-checked={scheduler.time === slot}
-                    className={`cv-time${scheduler.time === slot ? ' cv-time--on' : ''}`}
+                    className={`cv-chip${scheduler.time === slot ? ' cv-chip--active' : ''}`}
                     onClick={() => setScheduler((p) => ({ ...p, time: slot }))}
                   >{slot}</button>
                 ))}
               </div>
             </div>
 
-            <label className="cv-sched__label" htmlFor="cv-notes">Notes</label>
-            <textarea
-              id="cv-notes" rows={3}
-              className="cv-sched__input"
-              value={scheduler.notes}
-              placeholder="Pièces à apporter, contexte…"
-              onChange={(e) => setScheduler((p) => ({ ...p, notes: e.target.value }))}
-            />
+            <div className="sp-detail__section">
+              <div className="sp-detail__section-title">Notes</div>
+              <textarea
+                id="cv-notes" rows={3}
+                className="cv-input"
+                value={scheduler.notes}
+                placeholder="Pièces à apporter, contexte…"
+                onChange={(e) => setScheduler((p) => ({ ...p, notes: e.target.value }))}
+              />
+            </div>
 
-            {dateError ? <div className="cv-sched__err">⚠ {dateError}</div> : null}
+            {dateError ? <div className="cv-err">⚠ {dateError}</div> : null}
 
-            <div className="cv-sched__actions">
-              <button type="button" className="cv-btn cv-btn--ghost" onClick={closeScheduler}>Annuler</button>
+            <div className="sp-detail__actions">
+              <button type="button" className="sp-detail__btn" onClick={closeScheduler}>Annuler</button>
               <button
-                type="button" className="cv-btn cv-btn--primary"
+                type="button" className="sp-detail__btn sp-detail__btn--edit"
                 disabled={schedulingSaving || Boolean(dateError)}
                 onClick={() => void confirmSchedule()}
               >
@@ -844,50 +1013,43 @@ export default function CoordinationPage() {
         open={Boolean(selectedAppointment)}
         onClose={() => setSelectedAppointment(null)}
         title="Détail du rendez-vous"
-        width={460}
       >
         {selectedAppointment && (
-          <div className="cv-apt">
+          <div className="sp-detail">
+            <div className="sp-detail__banner">
+              <div className="sp-detail__banner-top">
+                <span className={`sp-badge sp-badge--${selectedAppointment.type === 'finance' ? 'blue' : 'purple'}`}>
+                  {typeLabel(selectedAppointment.type)}
+                </span>
+                <span className="sp-detail__date">{fmtDate(selectedAppointment.date)} · {selectedAppointment.time}</span>
+              </div>
+              <div className="sp-detail__price">
+                <span className="sp-detail__price-num">{(Number(selectedAppointment.amount) || 0).toLocaleString('fr-FR')}</span>
+                <span className="sp-detail__price-cur">TND</span>
+              </div>
+              <p className="sp-detail__banner-sub">
+                {selectedAppointment.clientName}
+              </p>
+            </div>
+
             {selectedAppointmentSale && (
-              <div style={{ marginBottom: 12 }}>
+              <div className="sp-detail__section">
                 <SaleSnapshotTracePanel sale={selectedAppointmentSale} />
               </div>
             )}
-            <Row k="Type" v={typeLabel(selectedAppointment.type)} />
-            <Row k="Client" v={selectedAppointment.clientName} />
-            <Row k="Projet" v={selectedAppointment.projectTitle} />
-            <Row k="Parcelles" v={selectedAppointment.plotLabel} />
-            <Row k="Date" v={fmtDate(selectedAppointment.date)} />
-            <Row k="Heure" v={selectedAppointment.time} />
-            <Row k="Montant" v={fmtMoney(selectedAppointment.amount)} />
-            <Row k="Agent" v={selectedAppointment.agentName} />
-            {selectedAppointment.coordinationNotes ? (
-              <div className="cv-detail__notes">{selectedAppointment.coordinationNotes}</div>
-            ) : null}
+
+            <div className="sp-detail__section">
+              <div className="sp-detail__section-title">Rendez-vous</div>
+              <div className="sp-detail__row"><span>Projet</span><strong>{selectedAppointment.projectTitle}</strong></div>
+              <div className="sp-detail__row"><span>Parcelles</span><strong>{selectedAppointment.plotLabel}</strong></div>
+              <div className="sp-detail__row"><span>Agent</span><strong>{selectedAppointment.agentName}</strong></div>
+              {selectedAppointment.coordinationNotes ? (
+                <div className="cv-notes">{selectedAppointment.coordinationNotes}</div>
+              ) : null}
+            </div>
           </div>
         )}
       </AdminModal>
-    </div>
-  )
-}
-
-// ----------------------------------------------------------------------------
-// Small presentational helpers used only inside the detail/appt modals.
-// ----------------------------------------------------------------------------
-function DetailBlock({ title, children }) {
-  return (
-    <section className="cv-detail__block">
-      <div className="cv-detail__block-title">{title}</div>
-      <div className="cv-detail__block-body">{children}</div>
-    </section>
-  )
-}
-
-function Row({ k, v, mono }) {
-  return (
-    <div className="cv-detail__row">
-      <span className="cv-detail__row-k">{k}</span>
-      <span className={`cv-detail__row-v${mono ? ' cv-detail__row-v--mono' : ''}`}>{v}</span>
     </div>
   )
 }

@@ -15,11 +15,60 @@ export default function PurchaseMandatPage() {
   const { project: proj, loading } = usePublicProjectDetail(projectId)
   const { options: slotOptions, loading: slotsLoading } = usePublicVisitSlotOptions()
 
+  // Local override of the incoming plotIds — lets the client re-pick parcels
+  // on this screen via the "Sélection rapide" panel without navigating back.
+  const [plotIdsOverride, setPlotIdsOverride] = useState(null)
+  const effectivePlotIds = plotIdsOverride ?? plotIdsFromState
+
   const selectedPlots = useMemo(() => {
-    if (!proj || !Array.isArray(plotIdsFromState) || plotIdsFromState.length === 0) return []
-    const set = new Set(plotIdsFromState.map(Number))
+    if (!proj || !Array.isArray(effectivePlotIds) || effectivePlotIds.length === 0) return []
+    const set = new Set(effectivePlotIds.map(Number))
     return proj.plots.filter(pl => set.has(pl.id))
-  }, [proj, plotIdsFromState])
+  }, [proj, effectivePlotIds])
+
+  // "Sélection rapide" panel state.
+  const [quickPickOpen, setQuickPickOpen] = useState(false)
+  const [quickPickCount, setQuickPickCount] = useState(1)
+  const [quickPickMode, setQuickPickMode] = useState('adjacent')
+
+  const availablePlotsSorted = useMemo(() => {
+    if (!proj) return []
+    return [...proj.plots]
+      .filter(p => p.status === 'available')
+      .sort((a, b) => Number(a.id) - Number(b.id))
+  }, [proj])
+  const quickPickMax = availablePlotsSorted.length
+  // Derived clamp (avoids the set-state-in-effect lint rule).
+  const clampedQuickPickCount = Math.max(1, Math.min(quickPickCount, Math.max(1, quickPickMax)))
+
+  const runQuickPick = () => {
+    const n = Math.max(1, Math.min(Number(clampedQuickPickCount) || 1, quickPickMax))
+    if (quickPickMax === 0) return
+    let chosen = []
+    if (quickPickMode === 'adjacent') {
+      const list = availablePlotsSorted
+      const windows = []
+      for (let i = 0; i + n <= list.length; i++) {
+        let ok = true
+        for (let k = 1; k < n; k++) {
+          if (Number(list[i + k].id) !== Number(list[i + k - 1].id) + 1) { ok = false; break }
+        }
+        if (ok) windows.push(list.slice(i, i + n))
+      }
+      chosen = windows.length > 0
+        ? windows[Math.floor(Math.random() * windows.length)]
+        : list.slice(0, n)
+    } else {
+      const pool = [...availablePlotsSorted]
+      for (let i = pool.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1))
+        const t = pool[i]; pool[i] = pool[j]; pool[j] = t
+      }
+      chosen = pool.slice(0, n)
+    }
+    setPlotIdsOverride(chosen.map(pl => Number(pl.id)))
+    setQuickPickOpen(false)
+  }
 
   const [rendezvousDate, setRendezvousDate] = useState(() => localISODate())
   const [rendezvousHourId, setRendezvousHourId] = useState('')
@@ -36,8 +85,8 @@ export default function PurchaseMandatPage() {
       <main className="screen screen--app">
         <section className="dashboard-page">
           <TopBar />
-          <div className="empty-state" style={{ padding: '3rem 1rem' }}>
-            <div className="app-loader-spinner" style={{ margin: '0 auto 12px' }} />
+          <div className="empty-state empty-state--loading-pad">
+            <div className="app-loader-spinner empty-state__spinner-gap" />
             <p>Chargement…</p>
           </div>
         </section>
@@ -58,6 +107,65 @@ export default function PurchaseMandatPage() {
         <div className="mandat-card">
           <div className="mandat-card-header"><div className="mandat-card-header-inner"><h1 className="mandat-card-title">DEMANDE DE RENDEZ-VOUS DE VISITE</h1></div></div>
           <div className="mandat-card-lead"><p className="mandat-card-sub">{proj.title} · {proj.city}, {proj.region}</p></div>
+
+          <section className="mandat-section mandat-section--light mandat-section--pt-sm">
+            <div className="quickpick-header-row">
+              <div>
+                <h2 className="mandat-section-title mandat-section-title--tight">Parcelles retenues</h2>
+                <p className="mandat-selected-plots">
+                  {selectedPlots.length} parcelle{selectedPlots.length > 1 ? 's' : ''} ·{' '}
+                  {selectedPlots.map(p => `#${p.label ?? p.id}`).join(', ')}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setQuickPickOpen(v => !v)}
+                disabled={quickPickMax === 0}
+                aria-expanded={quickPickOpen}
+                aria-controls="mandat-quickpick-panel"
+                className={`quickpick-toggle-btn${quickPickOpen ? ' is-open' : ''}`}
+                title={quickPickMax === 0 ? 'Aucune parcelle disponible' : 'Sélection rapide'}
+              >
+                <span aria-hidden>⚡</span>
+                <span>Sélection rapide</span>
+              </button>
+            </div>
+            {quickPickOpen && (
+              <div
+                id="mandat-quickpick-panel"
+                role="group"
+                aria-label="Sélection rapide de parcelles"
+                className="quickpick-panel quickpick-panel--md"
+              >
+                <label className="quickpick-label">
+                  Combien de parcelles ?
+                  <input
+                    type="number"
+                    min={1}
+                    max={quickPickMax || 1}
+                    value={clampedQuickPickCount}
+                    onChange={e => setQuickPickCount(Math.max(1, Math.min(quickPickMax || 1, Number(e.target.value) || 1)))}
+                    className="quickpick-count-input"
+                  />
+                  <span className="quickpick-help-text">/ {quickPickMax} dispo.</span>
+                </label>
+                <div role="radiogroup" aria-label="Mode de sélection" className="quickpick-radio-group">
+                  <label className="quickpick-radio-label">
+                    <input type="radio" name="mandat-quickpick-mode" value="adjacent" checked={quickPickMode === 'adjacent'} onChange={() => setQuickPickMode('adjacent')} />
+                    Adjacentes (côte à côte)
+                  </label>
+                  <label className="quickpick-radio-label">
+                    <input type="radio" name="mandat-quickpick-mode" value="random" checked={quickPickMode === 'random'} onChange={() => setQuickPickMode('random')} />
+                    Aléatoires
+                  </label>
+                </div>
+                <div className="quickpick-actions">
+                  <button type="button" onClick={() => setQuickPickOpen(false)} className="quickpick-btn quickpick-btn--ghost">Annuler</button>
+                  <button type="button" onClick={runQuickPick} disabled={quickPickMax === 0} className="quickpick-btn quickpick-btn--primary">Sélectionner</button>
+                </div>
+              </div>
+            )}
+          </section>
 
           <section className="mandat-section mandat-section--light mandat-section--loc">
             <h2 className="mandat-section-title">Localisation et état</h2>

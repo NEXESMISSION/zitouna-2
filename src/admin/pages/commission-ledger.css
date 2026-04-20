@@ -1,0 +1,299 @@
+/* ══════════════════════════════════════════════════════════════
+   commission-ledger.css — led-* prefix tweaks on top of sell-field.css
+   (cl-* is already used by ClientsPage, so we use led-*)
+   CommissionLedgerPage-only visual helpers.
+   ══════════════════════════════════════════════════════════════ */
+
+/* Section header above each grid */
+.led-section {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 22px 0 10px;
+}
+.led-section:first-of-type { margin-top: 8px; }
+.led-section__title {
+  font-size: 14px;
+  font-weight: 800;
+  color: #0f172a;
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.led-section__count {
+  font-size: 11px;
+  font-weight: 700;
+  color: #1d4ed8;
+  background: #eff6ff;
+  padding: 2px 9px;
+  border-radius: 999px;
+}
+.led-section__sub {
+  font-size: 12px;
+  color: #64748b;
+  margin: 0;
+}
+
+/* Main tab pills (Bénéficiaires / Demandes / Événements) */
+.led-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.led-tab {
+  border: 1.5px solid #e2e8f0;
+  background: #ffffff;
+  color: #475569;
+  border-radius: 999px;
+  padding: 7px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s, box-shadow 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+}
+.led-tab:hover:not(.led-tab--on) {
+  border-color: #93c5fd;
+  color: #1d4ed8;
+}
+.led-tab--on {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #ffffff;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.20);
+}
+.led-tab__count {
+  font-size: 10px;
+  font-weight: 800;
+  background: rgba(255, 255, 255, 0.25);
+  color: inherit;
+  padding: 1px 7px;
+  border-radius: 999px;
+  min-width: 18px;
+  text-align: center;
+}
+.led-tab:not(.led-tab--on) .led-tab__count {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+/* Status filter chips (inside sp-cat-bar for the events view) */
+.led-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.led-chip {
+  border: 1.5px solid #e2e8f0;
+  background: #ffffff;
+  color: #475569;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+}
+.led-chip:hover:not(.led-chip--on) {
+  border-color: #93c5fd;
+  color: #1d4ed8;
+}
+.led-chip--on {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #ffffff;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.20);
+}
+
+/* A secondary hero KPI (two-number cluster) */
+.led-hero-kpis {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.led-hero-kpi {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  line-height: 1;
+}
+.led-hero-kpi__num {
+  font-size: 20px;
+  font-weight: 800;
+  color: #ffffff;
+}
+.led-hero-kpi__label {
+  font-size: 10px;
+  font-weight: 600;
+  color: rgba(255,255,255,0.70);
+  margin-top: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.led-hero-kpi__sep {
+  width: 1px;
+  align-self: stretch;
+  background: rgba(255,255,255,0.22);
+  margin: 0 2px;
+}
+
+/* Request action panels inside detail modal */
+.led-action-input {
+  width: 100%;
+  padding: 9px 11px;
+  border-radius: 9px;
+  border: 1.5px solid #e2e8f0;
+  background: #ffffff;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 500;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.led-action-input:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37,99,235,0.08);
+}
+.led-action-input::placeholder { color: #94a3b8; font-weight: 400; }
+
+/* Action button row within detail */
+.led-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+.led-btn {
+  flex: 1 1 130px;
+  min-width: 0;
+  border: none;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: background 0.15s, box-shadow 0.15s, color 0.15s;
+  text-align: center;
+}
+.led-btn--primary {
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(37,99,235,0.20);
+}
+.led-btn--primary:hover:not(:disabled) { box-shadow: 0 4px 16px rgba(37,99,235,0.30); }
+.led-btn--danger {
+  background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(220,38,38,0.20);
+}
+.led-btn--danger:hover:not(:disabled) { box-shadow: 0 4px 16px rgba(220,38,38,0.30); }
+.led-btn--ghost {
+  background: #f1f5f9;
+  color: #475569;
+}
+.led-btn--ghost:hover:not(:disabled) { background: #e2e8f0; color: #0f172a; }
+.led-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* Card-level action button (small, sits in the card body) */
+.led-card-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 11px;
+  border-radius: 999px;
+  background: #2563eb;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  border: none;
+  cursor: pointer;
+  transition: background 0.15s, box-shadow 0.15s;
+  box-shadow: 0 2px 6px rgba(37,99,235,0.20);
+}
+.led-card-cta:hover:not(:disabled) { background: #1d4ed8; box-shadow: 0 3px 10px rgba(37,99,235,0.30); }
+.led-card-cta:disabled { opacity: 0.55; cursor: not-allowed; }
+
+/* Secondary CTA ("Modifier" on events) */
+.led-card-cta--ghost {
+  background: #f1f5f9;
+  color: #475569;
+  box-shadow: none;
+}
+.led-card-cta--ghost:hover:not(:disabled) {
+  background: #e2e8f0;
+  color: #0f172a;
+  box-shadow: none;
+}
+
+/* Inline result banners on finished request cards */
+.led-status-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  margin-top: 8px;
+}
+.led-status-banner--ok {
+  background: #ecfdf5;
+  color: #065f46;
+}
+.led-status-banner--err {
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+/* Refresh button (top-right under back arrow) */
+.led-refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 9px;
+  background: #ffffff;
+  border: 1.5px solid #e2e8f0;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.led-refresh:hover { border-color: #93c5fd; color: #1d4ed8; background: #f8fafc; }
+
+/* Mono block for sale id in event cards */
+.led-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: #64748b;
+}
+
+/* The header strip (back btn + refresh) */
+.led-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+/* Responsive: tabs wrap on small screens */
+@media (max-width: 640px) {
+  .led-tabs { width: 100%; }
+  .led-tab { flex: 1 1 auto; justify-content: center; text-align: center; }
+  .led-hero-kpi__num { font-size: 16px; }
+}

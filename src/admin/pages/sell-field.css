@@ -428,53 +428,21 @@
   font-size: 13px; margin-bottom: 16px;
   background: var(--sp-white);
 }
+.sp-empty--mt12 { margin-top: 12px; }
 .sp-empty__emoji { font-size: 30px; margin-bottom: 8px; display: block; }
 .sp-empty__title { color: var(--sp-900); font-weight: 700; font-size: 15px; margin-bottom: 4px; }
 
 /* ══════════════════════════════════════════════════════════════
    SKELETON LOADING (cards shown while sales are fetching)
+   ──────────────────────────────────────────────────────────────
+   Canonical skeleton primitives live in src/styles/skeletons.css
+   (`.sk`, `.sk-line`, `.sk-line--title`, `.sk-box`, `.sk-num`, …).
+   Only the card-wrapper styles remain here because `.sp-card--
+   skeleton` is the admin card shell, not a skeleton primitive.
    ══════════════════════════════════════════════════════════════ */
 .sp-card--skeleton { pointer-events: none; cursor: default; border-left-color: var(--sp-200); }
 .sp-card--skeleton .sp-card__head { margin-bottom: 10px; }
 .sp-card--skeleton .sp-card__body { display: flex; justify-content: space-between; align-items: center; }
-.sp-sk-box,
-.sp-sk-line {
-  display: block;
-  background: linear-gradient(90deg, #eef2f7 0%, #f8fafc 50%, #eef2f7 100%);
-  background-size: 200% 100%;
-  animation: sp-sk-shimmer 1.3s ease-in-out infinite;
-  border-radius: 6px;
-}
-.sp-sk-box { width: 36px; height: 36px; border-radius: 10px; }
-.sp-sk-line--title { height: 12px; width: 55%; margin: 2px 0 6px; }
-.sp-sk-line--sub   { height: 10px; width: 75%; margin: 0; }
-.sp-sk-line--badge { height: 20px; width: 78px; border-radius: 999px; }
-.sp-sk-line--price { height: 18px; width: 110px; }
-.sp-sk-line--info  { height: 12px; width: 80px; }
-@keyframes sp-sk-shimmer {
-  0%   { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
-}
-
-/* Inline number/text shimmer — replaces a "0" or "—" placeholder
-   while data is loading. Use .sp-sk-num inside a hero/stat pill
-   (dark tinted gradient) and .sp-sk-num--light inside white cards. */
-.sp-sk-num {
-  display: inline-block;
-  vertical-align: middle;
-  height: 0.9em;
-  width: 36px;
-  border-radius: 5px;
-  background: linear-gradient(90deg, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0.38) 50%, rgba(255,255,255,0.16) 100%);
-  background-size: 200% 100%;
-  animation: sp-sk-shimmer 1.3s ease-in-out infinite;
-}
-.sp-sk-num--wide { width: 64px; }
-.sp-sk-num--xl   { width: 96px; height: 1em; }
-.sp-sk-num--light {
-  background: linear-gradient(90deg, #eef2f7 0%, #f8fafc 50%, #eef2f7 100%);
-  background-size: 200% 100%;
-}
 
 /* ══════════════════════════════════════════════════════════════
    PAGINATION
@@ -604,6 +572,13 @@
 /* Step heading */
 .sp-wizard__title { margin: 0 0 3px; font-size: 14px; font-weight: 800; color: #0f172a; letter-spacing: -0.01em; }
 .sp-wizard__helper { display: block; margin: 0 0 10px; font-size: 12px; line-height: 1.5; color: #94a3b8; font-weight: 500; }
+.sp-wizard__helper--mt0 { margin-top: 0; }
+.sp-wizard__helper--mb0 { margin-bottom: 0; }
+.sp-plot-head {
+  padding: 0 4px 10px;
+  border-bottom: 1px solid #e2e8f0;
+  margin-bottom: 10px;
+}
 
 /* Live summary pill */
 .sp-wizard__summary {
@@ -781,7 +756,7 @@
   margin: 0; flex: 1; display: flex; align-items: center; justify-content: center;
   padding: 10px; background: transparent; border: none;
 }
-.sp-plots-grid-shell--solo .sp-plot-micro-grid { justify-content: center; max-height: min(44vh, 340px); gap: 6px; padding: 5px; }
+.sp-plots-grid-shell--solo .sp-plot-micro-grid { justify-content: center; max-height: min(52vh, 420px); gap: 8px; padding: 6px; }
 .sp-plot-micro-grid {
   display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start;
   max-height: min(40vh, 300px); overflow-y: auto; padding: 5px;
@@ -814,6 +789,77 @@
 }
 .sp-plot-micro--taken .sp-plot-micro__num {
   text-decoration: line-through; font-size: 10px; color: #dc2626;
+}
+
+/* Richer parcel tile — shows number, surface, and computed price */
+.sp-plot-tile {
+  aspect-ratio: auto;
+  min-width: clamp(6.5rem, 28vw, 9rem);
+  min-height: auto;
+  padding: 8px 10px;
+  flex-direction: column;
+  gap: 2px;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  line-height: 1.15;
+}
+.sp-plot-tile .sp-plot-micro__num { font-size: 13px; }
+.sp-plot-tile__meta {
+  font-size: 10px; font-weight: 600; color: #475569; font-variant-numeric: tabular-nums;
+}
+.sp-plot-tile__price {
+  font-size: 11px; font-weight: 700; color: #0f766e; font-variant-numeric: tabular-nums;
+}
+.sp-plot-micro--selected .sp-plot-tile__meta,
+.sp-plot-micro--selected .sp-plot-tile__price { color: #e0f2fe; }
+.sp-plot-micro--taken .sp-plot-tile__meta,
+.sp-plot-micro--taken .sp-plot-tile__price { color: #fca5a5; }
+
+/* Custom price override block */
+.sp-price-override {
+  margin: 12px 4px 4px;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+.sp-price-override__toggle {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; font-weight: 600; color: #0f172a; cursor: pointer;
+}
+.sp-price-override__toggle input { width: 16px; height: 16px; accent-color: #2563eb; cursor: pointer; }
+.sp-price-override__list {
+  margin-top: 10px; display: flex; flex-direction: column; gap: 8px;
+  padding-top: 10px; border-top: 1px dashed #cbd5e1;
+}
+.sp-price-override__row {
+  display: grid; grid-template-columns: minmax(90px, auto) 1fr minmax(160px, 200px);
+  align-items: center; gap: 8px;
+  padding: 6px 8px; border-radius: 8px; background: #ffffff; border: 1px solid #e2e8f0;
+}
+.sp-price-override__label { font-size: 12px; font-weight: 700; color: #0f172a; }
+.sp-price-override__hint { font-size: 10px; color: #64748b; font-variant-numeric: tabular-nums; }
+.sp-price-override__input-wrap {
+  display: flex; align-items: center; gap: 6px;
+  border: 1px solid #cbd5e1; border-radius: 8px; background: #ffffff; padding: 2px 8px 2px 2px;
+}
+.sp-price-override__input {
+  flex: 1; border: none; outline: none; background: transparent; padding: 6px 8px;
+  font-size: 13px; font-variant-numeric: tabular-nums; text-align: right;
+}
+.sp-price-override__unit { font-size: 11px; font-weight: 700; color: #475569; }
+.sp-price-override__total {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 8px 10px; border-radius: 8px; background: #ecfeff; border: 1px solid #a5f3fc;
+  font-size: 12px; color: #0f172a;
+}
+.sp-price-override__total strong { font-size: 14px; color: #0e7490; font-variant-numeric: tabular-nums; }
+@media (max-width: 480px) {
+  .sp-price-override__row {
+    grid-template-columns: 1fr; gap: 4px; padding: 8px;
+  }
+  .sp-price-override__hint { font-size: 10px; }
 }
 
 /* Recap sections (step 6) */

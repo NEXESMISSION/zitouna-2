@@ -1,7 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../lib/AuthContext.jsx'
-import { supabase } from '../lib/supabase.js'
+import { supabase, RECOVERY_FLAG_KEY } from '../lib/supabase.js'
+import { validatePassword } from '../lib/passwordPolicy.js'
+import { ErrorPanel } from '../components/ErrorPanel.jsx'
 import appLogo from '../../logo2.png'
 import { IconEye, IconEyeOff, IconKey } from '../LoginDecor.jsx'
 
@@ -28,14 +30,38 @@ export default function ResetPasswordPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
-  const [hasSession, setHasSession] = useState(false)
+  const [hasRecoverySession, setHasRecoverySession] = useState(false)
   const [checking, setChecking] = useState(true)
+  // FE-H4 — store the redirect timer so we can clear it if the user
+  // navigates away (or clicks again) before it fires.
+  const redirectTimerRef = useRef(null)
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setHasSession(Boolean(session))
-      setChecking(false)
+    let cancelled = false
+    // FE-C3 — only proceed if BOTH (a) a Supabase session exists, AND
+    // (b) the session was obtained via the password-recovery hash. The
+    // recovery flag lives in sessionStorage and is set in lib/supabase.js
+    // before the hash is stripped from the URL. Without this check, any
+    // logged-in user (including a stolen-laptop scenario) could hit
+    // /reset-password and silently overwrite the password.
+    Promise.resolve().then(async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        if (cancelled) return
+        let recovered = false
+        try { recovered = window.sessionStorage.getItem(RECOVERY_FLAG_KEY) === '1' } catch { /* ignore */ }
+        setHasRecoverySession(Boolean(session) && recovered)
+      } finally {
+        if (!cancelled) setChecking(false)
+      }
     })
+    return () => {
+      cancelled = true
+      if (redirectTimerRef.current) {
+        window.clearTimeout(redirectTimerRef.current)
+        redirectTimerRef.current = null
+      }
+    }
   }, [])
 
   async function handleSubmit(e) {
@@ -43,8 +69,9 @@ export default function ResetPasswordPage() {
     setError('')
     setSuccess('')
 
-    if (password.length < 8) {
-      setError('Le mot de passe doit contenir au moins 8 caractères.')
+    const pwCheck = validatePassword(password)
+    if (!pwCheck.ok) {
+      setError(pwCheck.message)
       return
     }
     if (password !== confirm) {
@@ -59,8 +86,15 @@ export default function ResetPasswordPage() {
         setError(result.error || 'Impossible de réinitialiser le mot de passe.')
         return
       }
+      // Clear the recovery flag — single-use only.
+      try { window.sessionStorage.removeItem(RECOVERY_FLAG_KEY) } catch { /* ignore */ }
       setSuccess('Mot de passe modifié avec succès ! Redirection…')
-      setTimeout(() => navigate('/login', { replace: true }), 1500)
+      // Cancel any pending redirect from a prior submit before scheduling a new one.
+      if (redirectTimerRef.current) window.clearTimeout(redirectTimerRef.current)
+      redirectTimerRef.current = window.setTimeout(() => {
+        redirectTimerRef.current = null
+        navigate('/login', { replace: true })
+      }, 1500)
     } finally {
       setLoading(false)
     }
@@ -69,23 +103,24 @@ export default function ResetPasswordPage() {
   if (checking) {
     return (
       <main className="screen screen--login reset-password-page">
-        <div className="login-content" style={{ textAlign: 'center', padding: '4rem 2rem' }}>
-          <div className="app-loader-spinner" />
+        <div className="app-loader--route" aria-busy="true" aria-live="polite">
+          <span className="sr-only">Vérification du lien de réinitialisation…</span>
+          <div className="app-loader--route__brand">Zitouna Garden</div>
         </div>
       </main>
     )
   }
 
-  if (!hasSession) {
+  if (!hasRecoverySession) {
     return (
       <main className="screen screen--login reset-password-page">
         <div className="auth-bg auth-bg--one" aria-hidden="true" />
         <div className="auth-bg auth-bg--two" aria-hidden="true" />
         <div className="login-content" style={{ textAlign: 'center' }}>
-          <h1 className="login-title">Lien expiré</h1>
+          <h1 className="login-title">Lien expiré ou invalide</h1>
           <p style={{ color: 'var(--color-text-secondary, #ccc)', marginBottom: '1.5rem' }}>
-            Ce lien de réinitialisation n'est plus valide ou a expiré.<br />
-            Demandez un nouveau lien.
+            Cette page n'est accessible qu'à partir d'un lien de réinitialisation reçu par e-mail.<br />
+            Demandez un nouveau lien si nécessaire.
           </p>
           <button className="submit-button login-submit" onClick={() => navigate('/forgot-password', { replace: true })}>
             Demander un nouveau lien
@@ -106,7 +141,15 @@ export default function ResetPasswordPage() {
         </div>
         <h1 className="login-title">Réinitialiser le mot de passe</h1>
 
-        {error ? <div className="auth-alert auth-alert--error">{error}</div> : null}
+        {error ? (
+          <ErrorPanel
+            error={error}
+            title="Réinitialisation impossible"
+            hint={error}
+            onRetry={() => setError('')}
+            retryLabel="Réessayer"
+          />
+        ) : null}
         {success ? <div className="auth-alert auth-alert--ok">{success}</div> : null}
 
         <form className="form login-form" onSubmit={handleSubmit}>
@@ -161,6 +204,16 @@ export default function ResetPasswordPage() {
           <button type="submit" className="submit-button login-submit" disabled={loading}>
             {loading ? 'Modification…' : 'Confirmer et se connecter'}
           </button>
+          {loading ? (
+            <p
+              className="login-status"
+              role="status"
+              aria-live="polite"
+              style={{ marginTop: 8, textAlign: 'center', opacity: 0.75, fontSize: 13 }}
+            >
+              Modification du mot de passe…
+            </p>
+          ) : null}
         </form>
 
         <div className="forgot-bottom">

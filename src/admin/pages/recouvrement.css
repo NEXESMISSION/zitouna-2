@@ -195,12 +195,28 @@
   transition: width 0.3s ease;
 }
 
-/* 2×2 summary cards inside the modal */
+/* 3-column summary cards inside the modal */
 .rv-summary {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 8px;
 }
+@media (max-width: 520px) {
+  .rv-summary { grid-template-columns: 1fr; }
+}
+.rv-summary__note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1e40af;
+  font-size: 13px;
+}
+.rv-summary__note strong { font-weight: 700; }
 .rv-summary__card {
   display: flex;
   flex-direction: column;
@@ -220,6 +236,20 @@
   opacity: 0.8;
 }
 .rv-summary__value { font-size: 15px; font-weight: 800; color: inherit; }
+.rv-summary__hint {
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0.7;
+  margin-top: 2px;
+  line-height: 1.3;
+}
+.rv-summary__hint {
+  font-size: 10.5px;
+  font-weight: 500;
+  opacity: 0.75;
+  margin-top: 2px;
+  line-height: 1.3;
+}
 
 /* Collapsible contract details */
 .rv-details {

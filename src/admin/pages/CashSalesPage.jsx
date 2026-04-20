@@ -4,6 +4,9 @@ import { useSales } from '../../lib/useSupabase.js'
 import AdminModal from '../components/AdminModal.jsx'
 import SaleSnapshotTracePanel from '../components/SaleSnapshotTracePanel.jsx'
 import { getPagerPages } from './pager-util.js'
+import RenderDataGate from '../../components/RenderDataGate.jsx'
+import EmptyState from '../../components/EmptyState.jsx'
+import { SkeletonCard } from '../../components/skeletons/index.js'
 import './sell-field.css'
 import './cash-sales.css'
 
@@ -44,7 +47,7 @@ function fmtTND(n) {
 
 export default function CashSalesPage() {
   const navigate = useNavigate()
-  const { sales, loading: salesLoading } = useSales()
+  const { sales, loading: salesLoading, error: salesError, refresh: refreshSales } = useSales()
   const [search, setSearch] = useState('')
   const [detailSale, setDetailSale] = useState(null)
   const [page, setPage] = useState(1)
@@ -112,7 +115,7 @@ export default function CashSalesPage() {
         </div>
         <div className="sp-hero__kpis">
           <span className="sp-hero__kpi-num">
-            {showSkeletons ? <span className="sp-sk-num sp-sk-num--wide" /> : filteredSales.length}
+            {showSkeletons ? <span className="sk-num sk-num--wide" /> : filteredSales.length}
           </span>
           <span className="sp-hero__kpi-label">vente{filteredSales.length > 1 ? 's' : ''}</span>
         </div>
@@ -120,11 +123,11 @@ export default function CashSalesPage() {
 
       <div className="sp-cat-bar">
         <div className="sp-cat-stats cs-cat-stats">
-          <strong>{showSkeletons ? <span className="sp-sk-num" /> : filteredSales.length}</strong> affichées
+          <strong>{showSkeletons ? <span className="sk-num" /> : filteredSales.length}</strong> affichées
           <span className="sp-cat-stat-dot" />
-          <strong>{showSkeletons ? <span className="sp-sk-num" /> : todayCount}</strong> aujourd'hui
+          <strong>{showSkeletons ? <span className="sk-num" /> : todayCount}</strong> aujourd'hui
           <span className="sp-cat-stat-dot" />
-          <strong>{showSkeletons ? <span className="sp-sk-num sp-sk-num--wide" /> : totalAmount.toLocaleString('fr-FR')}</strong> TND
+          <strong>{showSkeletons ? <span className="sk-num sk-num--wide" /> : totalAmount.toLocaleString('fr-FR')}</strong> TND
         </div>
         <div className="sp-cat-filters">
           <input
@@ -138,38 +141,30 @@ export default function CashSalesPage() {
       </div>
 
       <div className="sp-cards">
-        {showSkeletons ? (
-          Array.from({ length: 6 }).map((_, i) => (
-            <div key={`sk-${i}`} className="sp-card sp-card--skeleton" aria-hidden>
-              <div className="sp-card__head">
-                <div className="sp-card__user">
-                  <span className="sp-card__initials sp-sk-box" />
-                  <div style={{ flex: 1 }}>
-                    <p className="sp-sk-line sp-sk-line--title" />
-                    <p className="sp-sk-line sp-sk-line--sub" />
-                  </div>
-                </div>
-                <span className="sp-sk-line sp-sk-line--badge" />
-              </div>
-              <div className="sp-card__body">
-                <span className="sp-sk-line sp-sk-line--price" />
-                <span className="sp-sk-line sp-sk-line--info" />
-              </div>
-            </div>
-          ))
-        ) : filteredSales.length === 0 ? (
-          <div className="sp-empty">
-            <span className="sp-empty__emoji" aria-hidden>{noAnyCash ? '📭' : '🔍'}</span>
-            <div className="sp-empty__title">
-              {noAnyCash ? 'Aucune vente comptant pour le moment.' : `Aucun résultat pour « ${search} ».`}
-            </div>
-            {noAnyCash && (
-              <p className="cs-empty__text">
-                Les ventes comptant apparaîtront ici automatiquement une fois la clôture notaire effectuée.
-              </p>
-            )}
-          </div>
-        ) : pagedSales.map((sale) => {
+        <RenderDataGate
+          loading={salesLoading && cashSales.length === 0}
+          error={salesError}
+          data={cashSales}
+          skeleton={<SkeletonCard cards={6} />}
+          onRetry={() => refreshSales()}
+          isEmpty={() => filteredSales.length === 0}
+          empty={
+            <EmptyState
+              icon={noAnyCash ? '💵' : '🔍'}
+              title={
+                noAnyCash
+                  ? 'Aucune vente comptant pour le moment.'
+                  : `Aucun résultat pour « ${search} ».`
+              }
+              description={
+                noAnyCash
+                  ? 'Les ventes comptant apparaîtront ici automatiquement une fois la clôture notaire effectuée.'
+                  : null
+              }
+            />
+          }
+        >
+          {() => pagedSales.map((sale) => {
           const parcels = Array.isArray(sale.plotIds) && sale.plotIds.length
             ? sale.plotIds.map((id) => `#${id}`).join(', ')
             : sale.plotId != null ? `#${sale.plotId}` : '—'
@@ -203,6 +198,7 @@ export default function CashSalesPage() {
             </button>
           )
         })}
+        </RenderDataGate>
       </div>
 
       {!showSkeletons && filteredSales.length > CASH_PER_PAGE && (

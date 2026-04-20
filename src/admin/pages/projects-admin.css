@@ -214,3 +214,72 @@
 .prj-detail-actions { display: flex; gap: 6px; margin-top: 12px; }
 .prj-detail-btn { flex: 1; border: none; border-radius: 8px; padding: 10px; font-size: 12px; font-weight: 700; cursor: pointer; text-align: center; background: var(--100); color: var(--600); }
 .prj-detail-btn--del { background: var(--red-dim); color: var(--red); }
+
+/* ══════════════════════════════════════════════════════════════
+   pa-* — ProjectsPage adaptations layered over sell-field.css
+   (sell-field card grid assumes client-style rows; projects need
+    a thumbnail header and a compact stats grid in the body)
+   ══════════════════════════════════════════════════════════════ */
+.sell-field .pa-hero-action {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(255,255,255,0.3);
+  background: rgba(255,255,255,0.12);
+  color: #fff;
+  font-weight: 700;
+  font-size: 12px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  backdrop-filter: blur(4px);
+  transition: background .15s, transform .12s;
+}
+.sell-field .pa-hero-action:hover { background: rgba(255,255,255,0.22); transform: translateY(-1px); }
+.sell-field .pa-hero-action:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.sell-field .pa-card-thumb {
+  width: 36px; height: 36px; border-radius: 10px; overflow: hidden;
+  flex-shrink: 0; background: linear-gradient(135deg, #dbeafe, #bfdbfe);
+  display: flex; align-items: center; justify-content: center;
+  color: #1d4ed8; font-weight: 800; font-size: 14px;
+  border: 1px solid #dbeafe;
+}
+.sell-field .pa-card-thumb iframe {
+  width: 100%; height: 100%; border: 0; display: block;
+  pointer-events: none; transform: scale(1.4); transform-origin: center;
+}
+
+.sell-field .pa-stats {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
+  width: 100%;
+}
+.sell-field .pa-stat {
+  display: flex; flex-direction: column; gap: 1px;
+  padding: 6px 8px; background: #f8fafc;
+  border: 1px solid #e2e8f0; border-radius: 8px;
+  min-width: 0;
+}
+.sell-field .pa-stat__lbl {
+  font-size: 9px; font-weight: 700; color: #64748b;
+  text-transform: uppercase; letter-spacing: .03em;
+}
+.sell-field .pa-stat__val {
+  font-size: 13px; font-weight: 800; color: #0f172a;
+  font-variant-numeric: tabular-nums;
+}
+.sell-field .pa-stat--green .pa-stat__val { color: #059669; }
+.sell-field .pa-stat--red   .pa-stat__val { color: #dc2626; }
+.sell-field .pa-stat--blue  .pa-stat__val { color: #1d4ed8; }
+
+.sell-field .pa-detail-map {
+  margin: 0 16px 12px; border-radius: 10px; overflow: hidden;
+  border: 1px solid #e2e8f0; height: 140px; background: #f1f5f9;
+}
+.sell-field .pa-detail-map iframe { width: 100%; height: 100%; border: 0; display: block; }
+
+@media (max-width: 640px) {
+  .sell-field .pa-stats { grid-template-columns: repeat(2, 1fr); }
+  .sell-field .pa-hero-action { padding: 6px 10px; font-size: 11px; }
+}

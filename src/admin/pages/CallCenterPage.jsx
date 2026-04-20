@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import AdminModal from '../components/AdminModal.jsx'
 import { useToast } from '../components/AdminToast.jsx'
@@ -13,6 +13,9 @@ import {
   SLOT_OPTIONS,
 } from './commercialStore.js'
 import { getPagerPages } from './pager-util.js'
+import RenderDataGate from '../../components/RenderDataGate.jsx'
+import EmptyState from '../../components/EmptyState.jsx'
+import { SkeletonCard } from '../../components/skeletons/index.js'
 import './sell-field.css'
 import './call-center-page.css'
 
@@ -22,7 +25,23 @@ export default function CallCenterPage() {
   const navigate = useNavigate()
   const { addToast } = useToast()
   const calls = useCalls()
-  const { projects, loading: projectsLoading } = useProjects()
+  const { projects } = useProjects()
+  // `useCalls` is a sync external-store hook with no `loading` flag; gate the
+  // initial skeleton on a brief first-mount window so the page doesn't flash
+  // an empty state before `refreshCalls()` resolves.
+  const [initialCallsLoad, setInitialCallsLoad] = useState(true)
+  useEffect(() => {
+    // Initial-load window: skeleton hides once calls arrive OR after 1500ms.
+    // setState-in-effect is intentional here — this is a one-shot boot gate.
+    if (calls.length > 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setInitialCallsLoad(false)
+      return
+    }
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    const id = setTimeout(() => setInitialCallsLoad(false), 1500)
+    return () => clearTimeout(id)
+  }, [calls.length])
   const PROJECT_OPTIONS = useMemo(
     () => projects.map((p) => ({ id: p.id, title: p.title, city: p.city })),
     [projects],
@@ -132,8 +151,10 @@ export default function CallCenterPage() {
     [filteredCalls, safePage],
   )
   const onSearchChange = (e) => { setSearch(e.target.value); setPage(1) }
-  // Skeletons while projects (needed for the filter list) are loading.
-  const showSkeletons = projectsLoading && calls.length === 0
+  // Plan 03 §6.3 — the skeleton should gate on calls data, not on projects
+  // (which is a filter-dropdown concern). Projects loading is handled inline
+  // in the dropdown as a brief disabled state.
+  const showSkeletons = initialCallsLoad && calls.length === 0
 
   return (
     <div className="sell-field" dir="ltr">
@@ -150,7 +171,7 @@ export default function CallCenterPage() {
         </div>
         <div className="sp-hero__kpis">
           <span className="sp-hero__kpi-num">
-            {showSkeletons ? <span className="sp-sk-num sp-sk-num--wide" /> : stats.today}
+            {showSkeletons ? <span className="sk-num sk-num--wide" /> : stats.today}
           </span>
           <span className="sp-hero__kpi-label">aujourd'hui</span>
         </div>
@@ -164,13 +185,13 @@ export default function CallCenterPage() {
 
       <div className="sp-cat-bar">
         <div className="sp-cat-stats cc-cat-stats">
-          <strong>{showSkeletons ? <span className="sp-sk-num" /> : stats.total}</strong> total
+          <strong>{showSkeletons ? <span className="sk-num" /> : stats.total}</strong> total
           <span className="sp-cat-stat-dot" />
-          <strong>{showSkeletons ? <span className="sp-sk-num" /> : stats.today}</strong> aujourd'hui
+          <strong>{showSkeletons ? <span className="sk-num" /> : stats.today}</strong> aujourd'hui
           <span className="sp-cat-stat-dot" />
-          <strong>{showSkeletons ? <span className="sp-sk-num" /> : stats.motorise}</strong> motorisés
+          <strong>{showSkeletons ? <span className="sk-num" /> : stats.motorise}</strong> motorisés
           <span className="sp-cat-stat-dot" />
-          <strong>{showSkeletons ? <span className="sp-sk-num" /> : stats.nonMotorise}</strong> navette
+          <strong>{showSkeletons ? <span className="sk-num" /> : stats.nonMotorise}</strong> navette
         </div>
         <div className="sp-cat-filters">
           <input
@@ -254,43 +275,29 @@ export default function CallCenterPage() {
       )}
 
       <div className="sp-cards">
-        {showSkeletons ? (
-          Array.from({ length: 5 }).map((_, i) => (
-            <div key={`sk-${i}`} className="sp-card sp-card--skeleton" aria-hidden>
-              <div className="sp-card__head">
-                <div className="sp-card__user">
-                  <span className="sp-card__initials sp-sk-box" />
-                  <div style={{ flex: 1 }}>
-                    <p className="sp-sk-line sp-sk-line--title" />
-                    <p className="sp-sk-line sp-sk-line--sub" />
-                  </div>
-                </div>
-                <span className="sp-sk-line sp-sk-line--badge" />
-              </div>
-              <div className="sp-card__body">
-                <span className="sp-sk-line sp-sk-line--price" />
-                <span className="sp-sk-line sp-sk-line--info" />
-              </div>
-            </div>
-          ))
-        ) : filteredCalls.length === 0 ? (
-          <div className="sp-empty">
-            <span className="sp-empty__emoji" aria-hidden>{activeFiltersCount > 0 || !isSameDayAsToday ? '🔍' : '📭'}</span>
-            <div className="sp-empty__title">
-              {calls.length === 0 ? 'Aucun appel enregistré.' : 'Aucun résultat.'}
-            </div>
-            <p className="cc-empty__text">
-              {calls.length === 0
-                ? 'Cliquez sur « Ajouter un appel » pour enregistrer une première visite.'
-                : 'Essayez de modifier les filtres ou réinitialisez-les.'}
-            </p>
-            {activeFiltersCount > 0 && (
-              <button type="button" className="cc-empty__btn" onClick={resetFilters}>
-                Réinitialiser
-              </button>
-            )}
-          </div>
-        ) : pagedCalls.map((call) => (
+        <RenderDataGate
+          loading={showSkeletons}
+          data={calls}
+          skeleton={<SkeletonCard cards={5} />}
+          isEmpty={() => filteredCalls.length === 0}
+          empty={
+            <EmptyState
+              icon={activeFiltersCount > 0 || !isSameDayAsToday ? '🔍' : '📞'}
+              title={calls.length === 0 ? 'Aucun appel enregistré.' : 'Aucun résultat.'}
+              description={
+                calls.length === 0
+                  ? 'Cliquez sur « Ajouter un appel » pour enregistrer une première visite.'
+                  : 'Essayez de modifier les filtres ou réinitialisez-les.'
+              }
+              action={
+                activeFiltersCount > 0
+                  ? { label: 'Réinitialiser', onClick: resetFilters }
+                  : null
+              }
+            />
+          }
+        >
+          {() => pagedCalls.map((call) => (
           <button
             key={call.id}
             type="button"
@@ -322,6 +329,7 @@ export default function CallCenterPage() {
             {call.notes && <p className="cc-card__note">{call.notes}</p>}
           </button>
         ))}
+        </RenderDataGate>
       </div>
 
       {!showSkeletons && filteredCalls.length > CALLS_PER_PAGE && (

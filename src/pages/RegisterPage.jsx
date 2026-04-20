@@ -1,6 +1,8 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../lib/AuthContext.jsx'
+import { validatePassword, PASSWORD_POLICY_HINT } from '../lib/passwordPolicy.js'
+import { ErrorPanel } from '../components/ErrorPanel.jsx'
 import {
   IconEye,
   IconEyeOff,
@@ -24,6 +26,10 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false)
   const [success, setSuccess] = useState('')
   const [error, setError] = useState('')
+  // FE-C1 — synchronous double-submit guard, see LoginPage for the rationale.
+  // The register flow has the worst blast radius — a parallel signUp can
+  // create two clients rows for one auth user (see AUDIT_RELATIONS_PROBLEMES H1).
+  const submittingRef = useRef(false)
 
   const [form, setForm] = useState({
     firstname: '',
@@ -51,6 +57,8 @@ export default function RegisterPage() {
 
   async function handleSubmit(e) {
     e.preventDefault()
+    if (submittingRef.current) return
+    submittingRef.current = true
     setError('')
     setSuccess('')
     const firstname = String(form.firstname || '').trim()
@@ -59,28 +67,23 @@ export default function RegisterPage() {
     const countryCode = String(form.countryCode || '').trim()
     const phoneDigits = String(form.phoneLocal || '').replace(/\D/g, '')
 
-    if (!firstname || !lastname) {
-      setError('Prénom et nom sont obligatoires.')
-      return
+    // Validation gate — release the ref on every early-return so the user
+    // can retry after fixing the form. (Without this, a failed validation
+    // would lock the submit button forever.)
+    let validationError = null
+    if (!firstname || !lastname)         validationError = 'Prénom et nom sont obligatoires.'
+    else if (!email)                     validationError = 'Adresse e-mail invalide.'
+    else {
+      const pwCheck = validatePassword(form.password)
+      if (!pwCheck.ok) validationError = pwCheck.message
     }
-    if (!email) {
-      setError('Adresse e-mail invalide.')
-      return
-    }
-    if (form.password.length < 8) {
-      setError('Le mot de passe doit contenir au moins 8 caractères.')
-      return
-    }
-    if (!/^\+\d{1,4}$/.test(countryCode)) {
-      setError('Indicatif pays invalide.')
-      return
-    }
-    if (phoneDigits && phoneDigits.length < 6) {
-      setError('Le numéro local doit contenir au moins 6 chiffres.')
-      return
-    }
-    if (form.password !== form.confirm) {
-      setError('Les mots de passe ne correspondent pas.')
+    if (!validationError && !/^\+\d{1,4}$/.test(countryCode)) validationError = 'Indicatif pays invalide.'
+    if (!validationError && phoneDigits && phoneDigits.length < 6) validationError = 'Le numéro local doit contenir au moins 6 chiffres.'
+    if (!validationError && form.password !== form.confirm) validationError = 'Les mots de passe ne correspondent pas.'
+
+    if (validationError) {
+      setError(validationError)
+      submittingRef.current = false
       return
     }
 
@@ -158,6 +161,7 @@ export default function RegisterPage() {
       }
     } finally {
       setLoading(false)
+      submittingRef.current = false
     }
   }
 
@@ -173,7 +177,15 @@ export default function RegisterPage() {
           <span>Remplissez vos informations</span>
         </div>
 
-        {error ? <div className="auth-alert auth-alert--error">{error}</div> : null}
+        {error ? (
+          <ErrorPanel
+            error={error}
+            title="Inscription impossible"
+            hint={error}
+            onRetry={() => setError('')}
+            retryLabel="Réessayer"
+          />
+        ) : null}
         {success ? <div className="auth-alert auth-alert--ok">{success}</div> : null}
 
         <form className="form login-form" onSubmit={handleSubmit}>
@@ -314,6 +326,16 @@ export default function RegisterPage() {
           <button type="submit" className="submit-button login-submit" disabled={loading}>
             {loading ? 'Inscription en cours…' : 'S\'inscrire'}
           </button>
+          {loading ? (
+            <p
+              className="login-status"
+              role="status"
+              aria-live="polite"
+              style={{ marginTop: 8, textAlign: 'center', opacity: 0.75, fontSize: 13 }}
+            >
+              Inscription en cours…
+            </p>
+          ) : null}
         </form>
 
         <p className="signup-text login-signup">

@@ -315,23 +315,6 @@
 }
 .ct-kpi-6__info:hover { background: #cbd5e1; color: #0f172a; }
 
-/* KPI skeleton tiles for the initial fetch. */
-.ct-kpi-6__tile--skeleton { position: relative; overflow: hidden; }
-.ct-kpi-6__skeleton-label,
-.ct-kpi-6__skeleton-value,
-.ct-kpi-6__skeleton-delta {
-  display: block; border-radius: 6px; background: #e2e8f0;
-  animation: ct-skeleton-pulse 1.2s ease-in-out infinite;
-}
-.ct-kpi-6__skeleton-label { width: 60%; height: 10px; margin-bottom: 8px; }
-.ct-kpi-6__skeleton-value { width: 80%; height: 20px; margin-bottom: 8px; }
-.ct-kpi-6__skeleton-delta { width: 40%; height: 10px; }
-@keyframes ct-skeleton-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.55; } }
-
-/* Events table loading skeletons. */
-.ct-events-table__skeleton-row td { padding: 10px 8px; }
-.ct-skeleton-bar { height: 14px; background: #e2e8f0; border-radius: 6px; animation: ct-skeleton-pulse 1.2s ease-in-out infinite; }
-
 /* Interactive sparkline — hover line, active dot, floating tooltip. */
 .ct-trend__wrap { position: relative; }
 .ct-trend__svg { cursor: crosshair; }

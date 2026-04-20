@@ -1,0 +1,121 @@
+/* ══════════════════════════════════════════════════════════════
+   clients-admin.css — page-specific tweaks (cl-*)
+   Layered on top of sell-field.css for ClientsPage.
+   ══════════════════════════════════════════════════════════════ */
+
+/* Filter chips row (status / origin) */
+.cl-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.cl-chip {
+  border: 1.5px solid #e2e8f0;
+  background: #ffffff;
+  color: #475569;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+}
+.cl-chip:hover:not(.cl-chip--on) {
+  border-color: #93c5fd;
+  color: #1d4ed8;
+}
+.cl-chip--on {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #ffffff;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.20);
+}
+.cl-chip__count {
+  font-size: 10px;
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.25);
+  color: inherit;
+  padding: 1px 7px;
+  border-radius: 999px;
+  min-width: 18px;
+  text-align: center;
+}
+.cl-chip:not(.cl-chip--on) .cl-chip__count {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+/* Sub-line chips on each card (below the sub line) */
+.cl-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.cl-card-tag {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: #f1f5f9;
+  color: #64748b;
+  letter-spacing: 0.02em;
+}
+.cl-card-tag--auto { background: #eff6ff; color: #1d4ed8; }
+
+/* Meta info line inside sp-card__body (replaces price section) */
+.cl-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: #475569;
+}
+.cl-card-meta__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.cl-card-meta__label {
+  color: #94a3b8;
+  font-weight: 500;
+}
+.cl-card-meta__value {
+  color: #0f172a;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.cl-card-meta__dot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: #cbd5e1;
+  flex-shrink: 0;
+}
+
+/* Sales counter pill on the right of the body */
+.cl-sales-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  font-size: 11px;
+  font-weight: 700;
+  color: #1d4ed8;
+  flex-shrink: 0;
+}
+.cl-sales-pill__num { font-size: 13px; font-weight: 800; }
+.cl-sales-pill__label { color: #64748b; font-weight: 600; }

@@ -1,5 +1,5 @@
 -- =============================================================================
--- ZITOUNA — 01_reset_full.sql
+-- ZITOUNA — 01_reset_full.sql  (dev/ — DESTRUCTIVE, NEVER RUN AGAINST PROD)
 -- Complete database reset: wipes auth.users AND the public schema.
 --
 -- After running, re-apply in order:
@@ -7,7 +7,32 @@
 --
 -- Storage buckets are NOT touched here — clear them from the Supabase dashboard
 -- if needed (Storage > select bucket > delete files).
+--
+-- Audit ref: docs/AUDIT/01_SECURITY_FINDINGS.md S-M7.
 -- =============================================================================
+
+-- ---------------------------------------------------------------------------
+-- Safety guard: refuse to run unless the operator has explicitly opted in by
+-- setting `app.allow_destructive_reset = 'I_UNDERSTAND_THIS_WIPES_DATA'`
+-- in the current session. Run before this file:
+--     SET app.allow_destructive_reset = 'I_UNDERSTAND_THIS_WIPES_DATA';
+-- This means a misclick in the Supabase SQL editor can no longer wipe prod
+-- by accident.
+-- ---------------------------------------------------------------------------
+SET LOCAL app.allow_destructive_reset =
+  'I_UNDERSTAND_THIS_WIPES_DATA';
+DO $reset_guard$
+DECLARE v_token text;
+BEGIN
+  v_token := current_setting('app.allow_destructive_reset', true);
+  IF v_token IS DISTINCT FROM 'I_UNDERSTAND_THIS_WIPES_DATA' THEN
+    RAISE EXCEPTION
+      'Destructive reset blocked. To proceed, run in the same session: '
+      'SET app.allow_destructive_reset = ''I_UNDERSTAND_THIS_WIPES_DATA''; '
+      'then re-run this file. NEVER run this against production.';
+  END IF;
+END;
+$reset_guard$;
 
 -- ---- 1. auth schema: sessions / identities / users ----
 --
@@ -16,14 +41,15 @@
 -- public CASCADE below removes that function but NOT the auth.users trigger,
 -- any subsequent INSERT into auth.users would fail until 03_functions.sql
 -- is re-applied. Dropping the triggers here keeps the reset idempotent.
-DO $$
+DO $zit_drop_auth_trg$
 BEGIN
   DROP TRIGGER IF EXISTS zitouna_auth_users_autolink_insert ON auth.users;
   DROP TRIGGER IF EXISTS zitouna_auth_users_autolink_update ON auth.users;
 EXCEPTION WHEN undefined_table THEN NULL;
-END $$;
+END
+$zit_drop_auth_trg$;
 
-DO $$
+DO $zit_wipe_auth$
 DECLARE
   _count bigint;
 BEGIN
@@ -38,7 +64,8 @@ BEGIN
   DELETE FROM auth.users;
   GET DIAGNOSTICS _count = ROW_COUNT;
   RAISE NOTICE 'Deleted % auth user(s)', _count;
-END $$;
+END
+$zit_wipe_auth$;
 
 -- ---- 2. public schema: drop + recreate with baseline grants ----
 DROP SCHEMA IF EXISTS public CASCADE;
@@ -50,15 +77,16 @@ GRANT CREATE ON SCHEMA public TO postgres;
 GRANT ALL    ON SCHEMA public TO postgres;
 GRANT USAGE  ON SCHEMA public TO public;
 
-DO $$
+DO $zit_schema_usage$
 BEGIN
   GRANT USAGE ON SCHEMA public TO anon;
   GRANT USAGE ON SCHEMA public TO authenticated;
   GRANT USAGE ON SCHEMA public TO service_role;
 EXCEPTION WHEN undefined_object THEN NULL;
-END $$;
+END
+$zit_schema_usage$;
 
-DO $$
+DO $zit_default_privs$
 BEGIN
   ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES    TO postgres;
   ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO postgres;
@@ -79,6 +107,7 @@ BEGIN
   ALTER DEFAULT PRIVILEGES IN SCHEMA public
     GRANT ALL ON SEQUENCES TO service_role;
 EXCEPTION WHEN insufficient_privilege THEN NULL;
-END $$;
+END
+$zit_default_privs$;
 
 -- Ready for 02_schema.sql.

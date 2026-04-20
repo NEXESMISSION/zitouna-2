@@ -1,0 +1,125 @@
+/* src/styles/accessibility.css
+   ─────────────────────────────────────────────────────────────────
+   Centralized accessibility helpers. Currently:
+     • prefers-reduced-motion — disables shimmer / slide / pulse and
+       falls back to static muted blocks so motion-sensitive users
+       still see a clear "this is a placeholder" shape.
+     • .sr-only — screen-reader-only text helper for icon-only
+       buttons and status regions where the visible content is a
+       symbol or shimmer shape.
+     • focus-visible polish — tighter, higher-contrast ring for
+       keyboard users (no effect on mouse/touch).
+
+   Imported once from src/main.jsx after skeletons.css.
+   ───────────────────────────────────────────────────────────────── */
+
+/* ── Reduced-motion: scoped override for skeleton-family animations ── */
+/* We DO NOT blanket-kill every animation site-wide — the app uses
+   purposeful motion (orb pulse on browse page, map transitions)
+   that users opted into. Instead we target the loading/placeholder
+   animations that exist only to signal "still waiting". */
+@media (prefers-reduced-motion: reduce) {
+  /* Canonical skeletons (src/styles/skeletons.css). */
+  .sk,
+  .sk--hero,
+  .sk-line,
+  .sk-line--title,
+  .sk-line--sub,
+  .sk-line--badge,
+  .sk-line--price,
+  .sk-line--info,
+  .sk-line--label,
+  .sk-box,
+  .sk-box--sm,
+  .sk-box--lg,
+  .sk-avatar,
+  .sk-avatar--sm,
+  .sk-avatar--lg,
+  .sk-num,
+  .sk-num--wide,
+  .sk-num--xl,
+  .sk-button,
+  .sk-button--sm,
+  .sk-button--wide,
+  .sk-map,
+  .sk-thumb {
+    animation: none !important;
+    background: var(--sk-base-light) !important;
+    background-size: auto !important;
+  }
+  [data-theme="dark"] .sk,
+  [data-theme="dark"] .sk-line,
+  [data-theme="dark"] .sk-box,
+  [data-theme="dark"] .sk-avatar,
+  [data-theme="dark"] .sk-num,
+  [data-theme="dark"] .sk-button,
+  [data-theme="dark"] .sk-map,
+  [data-theme="dark"] .sk-thumb,
+  .sk--on-dark {
+    background: var(--sk-base-dark) !important;
+  }
+  .sk--hero {
+    background: var(--sk-base-hero) !important;
+  }
+
+  /* Chunk-loader slide — stop the bar, leave a static strip. */
+  .app-loader--chunk__bar {
+    animation: none !important;
+    left: 0 !important;
+    width: 100% !important;
+    opacity: 0.4;
+  }
+
+  /* Opt-in escape hatch for animations that ARE the content
+     (e.g. a visualization the user explicitly toggled). Wrap
+     such elements in .allow-motion to restore their motion. */
+  .allow-motion,
+  .allow-motion * {
+    animation-duration: revert !important;
+    animation-iteration-count: revert !important;
+    transition-duration: revert !important;
+  }
+}
+
+/* ── Screen-reader-only text helper ──────────────────────────── */
+/* Use for icon-only buttons, aria-label duplicates, and as the
+   accessible label inside aria-busy regions where the shimmer
+   shapes are aria-hidden. */
+.sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+/* Visible-on-focus variant for skip-links. */
+.sr-only--focusable:focus,
+.sr-only--focusable:focus-visible {
+  position: static !important;
+  width: auto !important;
+  height: auto !important;
+  padding: initial !important;
+  margin: initial !important;
+  overflow: visible !important;
+  clip: auto !important;
+  white-space: normal !important;
+}
+
+/* ── Focus-visible polish ────────────────────────────────────── */
+/* Keyboard users get a visible focus ring; mouse users do not.
+   Browsers without :focus-visible fall back to the default :focus. */
+:focus-visible {
+  outline: 2px solid #a8cc50;
+  outline-offset: 2px;
+}
+[data-theme="admin"] :focus-visible {
+  outline-color: #164e63;
+}
+[data-theme="auth"] :focus-visible {
+  outline-color: #a8cc50;
+}

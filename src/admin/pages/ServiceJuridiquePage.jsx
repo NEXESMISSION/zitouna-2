@@ -2,24 +2,20 @@ import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../lib/AuthContext.jsx'
 import { useSales } from '../../lib/useSupabase.js'
+import { runSafeAction } from '../../lib/runSafeAction.js'
 import AdminModal from '../components/AdminModal.jsx'
 import SaleSnapshotTracePanel from '../components/SaleSnapshotTracePanel.jsx'
-import './zitouna-admin-page.css'
-import './service-juridique.css'
+import RenderDataGate from '../../components/RenderDataGate.jsx'
+import { getPagerPages } from './pager-util.js'
 import './sell-field.css'
+import './service-juridique.css'
 
-const PER_PAGE = 10
+const PER_PAGE = 15
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 function fmtMoney(v) { return `${(Number(v) || 0).toLocaleString('fr-FR')} TND` }
-function fmtMoneyShort(v) {
-  const n = Number(v) || 0
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 10_000) return `${Math.round(n / 1000)}k`
-  return n.toLocaleString('fr-FR', { maximumFractionDigits: 0 })
-}
 function fmtDate(iso) {
   if (!iso) return '—'
   try { return new Date(iso).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' }) }
@@ -46,31 +42,6 @@ function juridiqueScheduleFromSale(iso) {
     time: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`,
   }
 }
-function startOfMonth(d) { return new Date(d.getFullYear(), d.getMonth(), 1) }
-function addMonths(d, n) { return new Date(d.getFullYear(), d.getMonth() + n, 1) }
-function monthGrid(anchor) {
-  const first = startOfMonth(anchor)
-  const startWeekday = (first.getDay() + 6) % 7
-  const daysInMonth = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate()
-  const cells = []
-  let day = 1 - startWeekday
-  for (let i = 0; i < 42; i += 1) {
-    cells.push({ date: new Date(first.getFullYear(), first.getMonth(), day), inMonth: day >= 1 && day <= daysInMonth })
-    day += 1
-  }
-  return cells
-}
-function getPagerPages(current, total) {
-  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1)
-  const out = [1]
-  const left = Math.max(2, current - 1)
-  const right = Math.min(total - 1, current + 1)
-  if (left > 2) out.push('…')
-  for (let i = left; i <= right; i++) out.push(i)
-  if (right < total - 1) out.push('…')
-  out.push(total)
-  return out
-}
 
 // ---------------------------------------------------------------------------
 // Page
@@ -78,14 +49,12 @@ function getPagerPages(current, total) {
 export default function ServiceJuridiquePage() {
   const navigate = useNavigate()
   const { adminUser } = useAuth()
-  const { sales, update: salesUpdate } = useSales()
+  const { sales, loading: salesLoading, update: salesUpdate } = useSales()
 
-  const [view, setView] = useState('list')
   const [query, setQuery] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
   const [page, setPage] = useState(1)
   const [selectedId, setSelectedId] = useState(null)
-  const [monthAnchor, setMonthAnchor] = useState(() => startOfMonth(new Date()))
-  const [selectedDate, setSelectedDate] = useState(() => toIsoDate(new Date()))
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState(null)
 
@@ -98,7 +67,6 @@ export default function ServiceJuridiquePage() {
 
   // ── Filter: sales awaiting Juridique validation ───────────────────────────
   const legalEntries = useMemo(() => {
-    const q = query.trim().toLowerCase()
     return (sales || [])
       .filter((s) => {
         const st = String(s.status || '')
@@ -132,48 +100,55 @@ export default function ServiceJuridiquePage() {
         }
       })
       .filter(Boolean)
-      .filter((e) => {
-        if (!q) return true
-        const hay = `${e.clientName} ${e.projectTitle} ${e.saleCode} ${e.plotIds.join(',')}`.toLowerCase()
-        return hay.includes(q)
-      })
       .sort((a, b) => {
         const c = `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`)
         if (c !== 0) return c
         return String(a.clientName).localeCompare(String(b.clientName))
       })
-  }, [sales, query])
+  }, [sales])
 
-  const todayCount = useMemo(
-    () => legalEntries.filter((e) => e.date === todayIso).length,
-    [legalEntries, todayIso],
-  )
+  // ── Status partition ──────────────────────────────────────────────────────
+  const entryStatus = (e) => {
+    if (e.date === todayIso) return 'today'
+    if (e.date < todayIso) return 'overdue'
+    return 'upcoming'
+  }
 
-  const totalVolume = useMemo(
-    () => legalEntries.reduce((sum, e) => sum + e.priceTotal, 0),
-    [legalEntries],
-  )
-
-  // ── Paging ───────────────────────────────────────────────────────────────
-  const pageCount = Math.max(1, Math.ceil(legalEntries.length / PER_PAGE))
-  const paged = useMemo(
-    () => legalEntries.slice((page - 1) * PER_PAGE, page * PER_PAGE),
-    [legalEntries, page],
-  )
-
-  // ── Calendar ──────────────────────────────────────────────────────────────
-  const appointmentsByDate = useMemo(() => {
-    const m = new Map()
+  const totals = useMemo(() => {
+    const all = legalEntries.length
+    let today = 0, overdue = 0, upcoming = 0
     for (const e of legalEntries) {
-      if (!m.has(e.date)) m.set(e.date, [])
-      m.get(e.date).push(e)
+      const s = entryStatus(e)
+      if (s === 'today') today += 1
+      else if (s === 'overdue') overdue += 1
+      else upcoming += 1
     }
-    for (const [, list] of m) list.sort((a, b) => String(a.time).localeCompare(String(b.time)))
-    return m
-  }, [legalEntries])
-  const monthCells = useMemo(() => monthGrid(monthAnchor), [monthAnchor])
-  const dayAgenda = useMemo(() => appointmentsByDate.get(selectedDate) || [], [appointmentsByDate, selectedDate])
-  const monthLabel = monthAnchor.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
+    return { all, today, overdue, upcoming }
+  }, [legalEntries, todayIso])
+
+  // ── Search + filter ───────────────────────────────────────────────────────
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    let list = legalEntries
+    if (q) {
+      list = list.filter((e) => {
+        const hay = `${e.clientName} ${e.projectTitle} ${e.saleCode} ${e.plotIds.join(',')}`.toLowerCase()
+        return hay.includes(q)
+      })
+    }
+    if (statusFilter !== 'all') {
+      list = list.filter((e) => entryStatus(e) === statusFilter)
+    }
+    return list
+  }, [legalEntries, query, statusFilter, todayIso])
+
+  // ── Paging ────────────────────────────────────────────────────────────────
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PER_PAGE))
+  const safePage = Math.min(Math.max(1, page), pageCount)
+  const paged = useMemo(
+    () => filtered.slice((safePage - 1) * PER_PAGE, safePage * PER_PAGE),
+    [filtered, safePage],
+  )
 
   const selected = useMemo(
     () => (selectedId ? legalEntries.find((e) => String(e.id) === String(selectedId)) : null),
@@ -182,345 +157,315 @@ export default function ServiceJuridiquePage() {
 
   // ── Actions ───────────────────────────────────────────────────────────────
   async function stampReadyForNotary() {
-    if (!selected?.id) return
-    setSaving(true)
-    try {
+    if (!selected?.id || saving) return
+    const res = await runSafeAction({
+      setBusy: setSaving,
+      onError: (msg) => showToast(msg, false),
+      label: 'Valider le dossier juridique',
+    }, async () => {
       await salesUpdate(selected.id, {
         juridiqueValidatedAt: new Date().toISOString(),
         juridiqueValidatedBy: adminUser?.id || null,
       })
+    })
+    if (res.ok) {
       showToast('Dossier validé — transféré au notaire.')
       setSelectedId(null)
-    } catch (e) {
-      console.error('stampReadyForNotary', e)
-      showToast('Erreur lors de la validation', false)
-    } finally {
-      setSaving(false)
     }
   }
 
-  // ── Render ───────────────────────────────────────────────────────────────
+  const onQueryChange = (e) => { setQuery(e.target.value); setPage(1) }
+  const onStatusFilterChange = (key) => { setStatusFilter(key); setPage(1) }
+
+  const showSkeletons = salesLoading && legalEntries.length === 0
+
+  const statusFilters = [
+    ['all',      'Tous',         totals.all],
+    ['today',    "Aujourd'hui",  totals.today],
+    ['overdue',  'En retard',    totals.overdue],
+    ['upcoming', 'À venir',      totals.upcoming],
+  ]
+
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="sell-field jur-v3" dir="ltr">
+    <div className="sell-field" dir="ltr">
       <button type="button" className="sp-back-btn" onClick={() => navigate(-1)}>
         <span className="sp-back-btn__icon-wrap" aria-hidden>←</span>
         <span>Retour</span>
       </button>
 
-      {/* ── Topbar ───────────────────────────────────────────── */}
-      <header className="jv-topbar">
-        <div className="jv-topbar__title">
-          <h1 className="jv-topbar__h1">Service juridique</h1>
-          <p className="jv-topbar__sub">Traiter les rendez-vous planifiés et valider avant le notaire.</p>
+      <header className="sp-hero">
+        <div className="sp-hero__avatar sj-hero__icon" aria-hidden>
+          <span>⚖️</span>
         </div>
-        <div className="jv-topbar__kpis">
-          <span className="jv-kpi-pill" title="Dossiers à traiter">
-            <strong>{legalEntries.length}</strong><span>dossier{legalEntries.length > 1 ? 's' : ''}</span>
+        <div className="sp-hero__info">
+          <h1 className="sp-hero__name">Service juridique</h1>
+          <p className="sp-hero__role">Valider les dossiers avant le notaire</p>
+        </div>
+        <div className="sp-hero__kpis">
+          <span className="sp-hero__kpi-num">
+            {showSkeletons ? <span className="sk-num sk-num--wide" /> : totals.all}
           </span>
-          {todayCount > 0 ? (
-            <span className="jv-kpi-pill jv-kpi-pill--today" title="Prévus aujourd'hui">
-              <strong>{todayCount}</strong><span>aujourd’hui</span>
-            </span>
-          ) : null}
-          <span className="jv-kpi-pill jv-kpi-pill--info" title="Volume total">
-            <strong>{fmtMoneyShort(totalVolume)}</strong><span>TND volume</span>
-          </span>
+          <span className="sp-hero__kpi-label">dossier{totals.all > 1 ? 's' : ''}</span>
         </div>
       </header>
 
-      {/* ── Tabs ────────────────────────────────────────────── */}
-      <div className="jv-tabs" role="tablist">
-        <button
-          type="button" role="tab" aria-selected={view === 'list'}
-          className={`jv-tab${view === 'list' ? ' jv-tab--on' : ''}`}
-          onClick={() => setView('list')}
-        >
-          Liste
-          <span className="jv-tab__count">{legalEntries.length}</span>
-        </button>
-        <button
-          type="button" role="tab" aria-selected={view === 'calendar'}
-          className={`jv-tab${view === 'calendar' ? ' jv-tab--on' : ''}`}
-          onClick={() => setView('calendar')}
-        >
-          Calendrier
-        </button>
+      <div className="sp-cat-bar">
+        <div className="sp-cat-stats">
+          <strong>{showSkeletons ? <span className="sk-num" /> : totals.all}</strong> total
+          <span className="sp-cat-stat-dot" />
+          <strong>{showSkeletons ? <span className="sk-num" /> : totals.today}</strong> aujourd'hui
+          <span className="sp-cat-stat-dot" />
+          <strong>{showSkeletons ? <span className="sk-num" /> : totals.overdue}</strong> en retard
+        </div>
+        <div className="sp-cat-filters">
+          <input
+            className="sp-cat-search"
+            placeholder="Rechercher un client, projet, référence…"
+            value={query}
+            onChange={onQueryChange}
+            aria-label="Rechercher un dossier"
+          />
+        </div>
+        <div className="sj-chips" role="tablist" aria-label="Filtrer par statut">
+          {statusFilters.map(([key, label, count]) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={statusFilter === key}
+              className={`sj-chip${statusFilter === key ? ' sj-chip--active' : ''}`}
+              onClick={() => onStatusFilterChange(key)}
+            >
+              {label}
+              <span className="sj-chip__count">{count}</span>
+            </button>
+          ))}
+        </div>
       </div>
 
-      {view === 'list' && (
-        <>
-          <div className="jv-search">
-            <input
-              type="search" value={query}
-              onChange={(e) => { setQuery(e.target.value); setPage(1) }}
-              placeholder="Rechercher un client, projet, code ou parcelle…"
-              aria-label="Rechercher un dossier"
-            />
-          </div>
-
-          <section className="sp-cards jv-queue">
-            {legalEntries.length === 0 ? (
-              <div className="sp-empty">
-                <span className="sp-empty__emoji" aria-hidden>📭</span>
-                <div className="sp-empty__title">
-                  {query ? 'Aucun résultat' : 'Aucun dossier en attente'}
+      <div className="sp-cards">
+        <RenderDataGate
+          loading={showSkeletons}
+          error={null}
+          data={paged}
+          isEmpty={() => filtered.length === 0}
+          skeleton={
+            <>
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={`sk-${i}`} className="sp-card sp-card--skeleton" aria-hidden>
+                  <div className="sp-card__head">
+                    <div className="sp-card__user">
+                      <span className="sp-card__initials sk-box" />
+                      <div style={{ flex: 1 }}>
+                        <p className="sk-line sk-line--title" />
+                        <p className="sk-line sk-line--sub" />
+                      </div>
+                    </div>
+                    <span className="sk-line sk-line--badge" />
+                  </div>
+                  <div className="sp-card__body">
+                    <span className="sk-line sk-line--price" />
+                    <span className="sk-line sk-line--info" />
+                  </div>
                 </div>
-                <p style={{ margin: '4px 0 0', fontSize: 12, color: '#64748b' }}>
-                  {query
-                    ? 'Essayez un autre mot-clé.'
-                    : 'La coordination n’a planifié aucun rendez-vous juridique.'}
+              ))}
+            </>
+          }
+          empty={
+            <div className="sp-empty">
+              <span className="sp-empty__emoji" aria-hidden>📭</span>
+              <div className="sp-empty__title">
+                {query || statusFilter !== 'all'
+                  ? 'Aucun résultat.'
+                  : 'Aucun dossier en attente.'}
+              </div>
+              {!query && statusFilter === 'all' && (
+                <p className="sj-empty__text">
+                  La coordination n'a planifié aucun rendez-vous juridique.
                 </p>
-              </div>
-            ) : (
-              paged.map((entry) => {
-                const isToday = entry.date === todayIso
-                return (
-                  <article
-                    key={entry.id}
-                    className="sp-card jv-card"
-                    role="button" tabIndex={0}
-                    onClick={() => setSelectedId(entry.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault()
-                        setSelectedId(entry.id)
-                      }
-                    }}
-                  >
-                    <div className="sp-card__head">
-                      <div className="sp-card__user">
-                        <span className="sp-card__initials" aria-hidden>{initials(entry.clientName)}</span>
-                        <div>
-                          <p className="sp-card__name">{entry.clientName}</p>
-                          <p className="sp-card__sub">{entry.projectTitle} · Parcelle {entry.plotLabel}</p>
-                        </div>
-                      </div>
-                      {isToday
-                        ? <span className="sp-badge sp-badge--orange">Aujourd’hui</span>
-                        : <span className="sp-badge sp-badge--gray">{fmtDate(entry.date)}</span>
-                      }
-                    </div>
-
-                    <div className="jv-card__meta">
-                      <div className="jv-card__time">
-                        <span className="jv-card__time-ico" aria-hidden>🕐</span>
-                        <strong>{entry.time}</strong>
-                        <span className="jv-card__time-sep">·</span>
-                        <span>{fmtDate(entry.date)}</span>
-                      </div>
-                      <div className="jv-card__price">
-                        <span className="jv-card__price-num">{fmtMoney(entry.priceTotal)}</span>
-                        <span className="jv-card__price-type">{entry.paymentType}</span>
-                      </div>
-                    </div>
-                  </article>
-                )
-              })
-            )}
-          </section>
-
-          {legalEntries.length > PER_PAGE && (
-            <div className="sp-pager" role="navigation" aria-label="Pagination">
-              <button
-                type="button" className="sp-pager__btn"
-                disabled={page <= 1}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                aria-label="Page précédente"
-              >‹</button>
-              {getPagerPages(page, pageCount).map((p, i) =>
-                p === '…' ? (
-                  <span key={`d-${i}`} className="sp-pager__ellipsis" aria-hidden>…</span>
-                ) : (
-                  <button
-                    key={p} type="button"
-                    className={`sp-pager__btn${p === page ? ' sp-pager__btn--active' : ''}`}
-                    onClick={() => setPage(p)}
-                    aria-current={p === page ? 'page' : undefined}
-                  >{p}</button>
-                ),
               )}
-              <button
-                type="button" className="sp-pager__btn"
-                disabled={page >= pageCount}
-                onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
-                aria-label="Page suivante"
-              >›</button>
-              <span className="sp-pager__info">
-                {(page - 1) * PER_PAGE + 1}–{Math.min(page * PER_PAGE, legalEntries.length)} / {legalEntries.length}
-              </span>
             </div>
-          )}
-        </>
-      )}
+          }
+        >
+          {(rows) => rows.map((entry) => {
+          const st = entryStatus(entry)
+          const tone = st === 'today' ? 'orange' : st === 'overdue' ? 'red' : 'blue'
+          const badgeLabel = st === 'today'
+            ? "Aujourd'hui"
+            : st === 'overdue'
+              ? `Retard · ${fmtDate(entry.date)}`
+              : fmtDate(entry.date)
+          return (
+            <button
+              key={entry.id}
+              type="button"
+              className={`sp-card sp-card--${tone}`}
+              onClick={() => setSelectedId(entry.id)}
+              aria-label={`Ouvrir le dossier de ${entry.clientName}`}
+            >
+              <div className="sp-card__head">
+                <div className="sp-card__user">
+                  <span className="sp-card__initials">{initials(entry.clientName)}</span>
+                  <div style={{ minWidth: 0 }}>
+                    <p className="sp-card__name">{entry.clientName}</p>
+                    <p className="sp-card__sub">
+                      {entry.projectTitle} · Parcelle {entry.plotLabel}
+                    </p>
+                  </div>
+                </div>
+                <span className={`sp-badge sp-badge--${tone}`}>{badgeLabel}</span>
+              </div>
 
-      {view === 'calendar' && (
-        <section className="jv-cal">
-          <div className="jv-cal__nav">
-            <button type="button" className="jv-cal__nav-btn" onClick={() => setMonthAnchor((d) => addMonths(d, -1))}>‹</button>
-            <span className="jv-cal__month">{monthLabel}</span>
-            <button type="button" className="jv-cal__nav-btn" onClick={() => setMonthAnchor((d) => addMonths(d, 1))}>›</button>
-          </div>
-          <div className="jv-cal__week">
-            {['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'].map((d) => (
-              <span key={d} className="jv-cal__weekday">{d}</span>
-            ))}
-          </div>
-          <div className="jv-cal__grid">
-            {monthCells.map((cell) => {
-              const iso = toIsoDate(cell.date)
-              const count = (appointmentsByDate.get(iso) || []).length
-              const isSel = iso === selectedDate
-              const isToday = iso === todayIso
-              return (
-                <button
-                  key={`${iso}-${cell.inMonth ? 'in' : 'out'}`}
-                  type="button"
-                  className={`jv-cal__day${cell.inMonth ? '' : ' jv-cal__day--muted'}${isSel ? ' jv-cal__day--sel' : ''}${isToday ? ' jv-cal__day--today' : ''}`}
-                  onClick={() => setSelectedDate(iso)}
-                >
-                  <span className="jv-cal__day-num">{cell.date.getDate()}</span>
-                  {count > 0 ? <span className="jv-cal__day-dot">{count}</span> : null}
-                </button>
-              )
-            })}
-          </div>
-          <div className="jv-cal__agenda">
-            <div className="jv-cal__agenda-head">
-              {fmtDate(selectedDate)}
-              {selectedDate === todayIso
-                ? <span className="jv-today-chip">Aujourd’hui</span>
-                : null
-              }
-            </div>
-            {dayAgenda.length === 0 ? (
-              <div className="jv-cal__agenda-empty">Aucun rendez-vous ce jour.</div>
+              <div className="sp-card__body">
+                <div className="sp-card__price">
+                  <span className="sp-card__amount">{(entry.priceTotal || 0).toLocaleString('fr-FR')}</span>
+                  <span className="sp-card__currency">TND</span>
+                </div>
+                <div className="sp-card__info">
+                  <span>{entry.time} · {entry.paymentType}</span>
+                </div>
+              </div>
+            </button>
+          )
+          })}
+        </RenderDataGate>
+      </div>
+
+      {!showSkeletons && filtered.length > PER_PAGE && (
+        <div className="sp-pager" role="navigation" aria-label="Pagination">
+          <button
+            type="button"
+            className="sp-pager__btn sp-pager__btn--nav"
+            disabled={safePage <= 1}
+            onClick={() => setPage(Math.max(1, safePage - 1))}
+            aria-label="Page précédente"
+          >
+            ‹
+          </button>
+          {getPagerPages(safePage, pageCount).map((p, i) =>
+            p === '…' ? (
+              <span key={`dots-${i}`} className="sp-pager__ellipsis" aria-hidden>…</span>
             ) : (
-              dayAgenda.map((entry) => (
-                <button
-                  key={`${entry.id}-${entry.time}`} type="button"
-                  className="jv-cal__item"
-                  onClick={() => setSelectedId(entry.id)}
-                >
-                  <span className="jv-cal__item-time">{entry.time}</span>
-                  <span className="jv-cal__item-body">
-                    <span className="jv-cal__item-kind">Juridique</span>
-                    <span className="jv-cal__item-name">{entry.clientName}</span>
-                    <span className="jv-cal__item-sub">{entry.projectTitle} · {entry.plotLabel}</span>
-                  </span>
-                </button>
-              ))
-            )}
-          </div>
-        </section>
+              <button
+                key={p}
+                type="button"
+                className={`sp-pager__btn${p === safePage ? ' sp-pager__btn--active' : ''}`}
+                onClick={() => setPage(p)}
+                aria-current={p === safePage ? 'page' : undefined}
+              >
+                {p}
+              </button>
+            ),
+          )}
+          <button
+            type="button"
+            className="sp-pager__btn sp-pager__btn--nav"
+            disabled={safePage >= pageCount}
+            onClick={() => setPage(Math.min(pageCount, safePage + 1))}
+            aria-label="Page suivante"
+          >
+            ›
+          </button>
+          <span className="sp-pager__info">
+            {(safePage - 1) * PER_PAGE + 1}–{Math.min(safePage * PER_PAGE, filtered.length)} / {filtered.length}
+          </span>
+        </div>
       )}
 
-      {/* ── Detail + validation modal ───────────────────────── */}
-      <AdminModal
-        open={Boolean(selected)}
-        onClose={() => setSelectedId(null)}
-        title={selected ? `Dossier ${selected.saleCode}` : 'Dossier'}
-        width={560}
-      >
-        {selected && (
-          <div className="jv-detail">
-            <div className="jv-detail__head">
-              <div>
-                <div className="jv-detail__name">{selected.clientName}</div>
-                <div className="jv-detail__code">Réf : <code>{selected.saleCode}</code></div>
+      {selected && (
+        <AdminModal open onClose={() => setSelectedId(null)} title="">
+          <div className="sp-detail">
+            <div className="sp-detail__banner">
+              <div className="sp-detail__banner-top">
+                <span className="sp-badge sp-badge--blue">Juridique</span>
+                <span className="sp-detail__date">
+                  {fmtDate(selected.date)} · {selected.time}
+                </span>
               </div>
-              {selected.date === todayIso
-                ? <span className="sp-badge sp-badge--orange">Aujourd’hui</span>
-                : <span className="sp-badge sp-badge--gray">{fmtDate(selected.date)}</span>
-              }
+              <div className="sp-detail__price">
+                <span className="sp-detail__price-num">{(selected.priceTotal || 0).toLocaleString('fr-FR')}</span>
+                <span className="sp-detail__price-cur">TND</span>
+              </div>
+              <p className="sp-detail__banner-sub">
+                {selected.clientName} · Réf. {selected.saleCode}
+              </p>
             </div>
 
-            {/* Schedule hero */}
-            <div className="jv-detail__sched">
-              <div className="jv-detail__sched-lbl">Rendez-vous planifié</div>
-              <div className="jv-detail__sched-val">
-                <strong>{fmtDate(selected.date)}</strong>
-                <span className="jv-detail__sched-time">{selected.time}</span>
-              </div>
+            <div className="sp-detail__section">
+              <div className="sp-detail__section-title">Client</div>
+              <div className="sp-detail__row"><span>Nom</span><strong>{selected.clientName}</strong></div>
+              <div className="sp-detail__row"><span>Projet</span><strong>{selected.projectTitle}</strong></div>
+              <div className="sp-detail__row"><span>Parcelle(s)</span><strong>{selected.plotLabel}</strong></div>
             </div>
 
-            {selected.sale ? (
-              <div style={{ margin: '6px 0' }}>
+            <div className="sp-detail__section">
+              <div className="sp-detail__section-title">Vente</div>
+              <div className="sp-detail__row"><span>Prix total</span><strong>{fmtMoney(selected.priceTotal)}</strong></div>
+              <div className="sp-detail__row"><span>Prix / parcelle</span><strong>{fmtMoney(selected.pricePerPiece)}</strong></div>
+              <div className="sp-detail__row"><span>Offre</span><strong>{selected.offerName}</strong></div>
+              <div className="sp-detail__row"><span>Mode</span><strong>{selected.paymentType}</strong></div>
+            </div>
+
+            <div className="sp-detail__section">
+              <div className="sp-detail__section-title">Juridique</div>
+              <div className="sp-detail__row">
+                <span>Rendez-vous</span>
+                <strong>{fmtDate(selected.date)} · {selected.time}</strong>
+              </div>
+              {selected.coordinationNotes && (
+                <div className="sp-detail__row">
+                  <span>Notes coordination</span>
+                  <strong style={{ whiteSpace: 'pre-wrap' }}>{selected.coordinationNotes}</strong>
+                </div>
+              )}
+              {selected.notes && (
+                <div className="sp-detail__row">
+                  <span>Notes dossier</span>
+                  <strong style={{ whiteSpace: 'pre-wrap' }}>{selected.notes}</strong>
+                </div>
+              )}
+            </div>
+
+            {selected.sale && (
+              <div className="sp-detail__section">
                 <SaleSnapshotTracePanel sale={selected.sale} />
               </div>
-            ) : null}
+            )}
 
-            <DetailBlock title="Client & projet">
-              <Row k="Client" v={selected.clientName} />
-              <Row k="Projet" v={selected.projectTitle} />
-              <Row k="Parcelle(s)" v={selected.plotLabel} />
-            </DetailBlock>
-
-            <DetailBlock title="Montants">
-              <Row k="Prix total" v={fmtMoney(selected.priceTotal)} strong />
-              <Row k="Prix / parcelle" v={fmtMoney(selected.pricePerPiece)} />
-              <Row k="Offre" v={selected.offerName} />
-              <Row k="Mode paiement" v={selected.paymentType} />
-            </DetailBlock>
-
-            {selected.coordinationNotes ? (
-              <div className="jv-notes jv-notes--coord">
-                <div className="jv-notes__label">Notes coordination</div>
-                <div className="jv-notes__body">{selected.coordinationNotes}</div>
-              </div>
-            ) : null}
-            {selected.notes ? (
-              <div className="jv-notes">
-                <div className="jv-notes__label">Notes du dossier</div>
-                <div className="jv-notes__body">{selected.notes}</div>
-              </div>
-            ) : null}
-
-            <div className="jv-detail__footer">
+            <div className="sp-detail__actions">
               <button
-                type="button" className="jv-btn jv-btn--ghost"
+                type="button"
+                className="sp-detail__btn"
                 onClick={() => setSelectedId(null)}
-              >Fermer</button>
-              <button
-                type="button" className="jv-btn jv-btn--primary"
                 disabled={saving}
+              >
+                Fermer
+              </button>
+              <button
+                type="button"
+                className="sp-detail__btn sp-detail__btn--edit"
                 onClick={stampReadyForNotary}
+                disabled={saving}
                 title="Marque ce dossier comme conforme et le transfère au notaire"
               >
-                {saving ? 'Enregistrement…' : '✓ Valider — Prêt pour le notaire'}
+                {saving ? 'Enregistrement…' : 'Valider — Prêt pour le notaire'}
               </button>
             </div>
           </div>
-        )}
-      </AdminModal>
+        </AdminModal>
+      )}
 
-      {toast ? (
+      {toast && (
         <div
-          className={`jv-toast${toast.ok ? ' jv-toast--ok' : ' jv-toast--err'}`}
+          className={`sj-toast${toast.ok ? ' sj-toast--ok' : ' sj-toast--err'}`}
           role="status"
           onClick={() => setToast(null)}
         >
-          <span className="jv-toast__icon" aria-hidden>{toast.ok ? '✓' : '✕'}</span>
-          <span className="jv-toast__msg">{toast.msg}</span>
+          <span className="sj-toast__icon" aria-hidden>{toast.ok ? '✓' : '✕'}</span>
+          <span className="sj-toast__msg">{toast.msg}</span>
         </div>
-      ) : null}
-    </div>
-  )
-}
-
-function DetailBlock({ title, children }) {
-  return (
-    <section className="jv-detail__block">
-      <div className="jv-detail__block-title">{title}</div>
-      <div className="jv-detail__block-body">{children}</div>
-    </section>
-  )
-}
-
-function Row({ k, v, strong }) {
-  return (
-    <div className="jv-detail__row">
-      <span className="jv-detail__row-k">{k}</span>
-      <span className={`jv-detail__row-v${strong ? ' jv-detail__row-v--strong' : ''}`}>{v}</span>
+      )}
     </div>
   )
 }

@@ -2,7 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabase.js'
 import AdminModal from '../components/AdminModal.jsx'
+import RenderDataGate from '../../components/RenderDataGate.jsx'
+import EmptyState from '../../components/EmptyState.jsx'
+import { SkeletonCard } from '../../components/skeletons/index.js'
 import './zitouna-admin-page.css'
+import './commission-anomalies.css'
 
 // Read-only admin page that surfaces referral-tree anomalies returned by the
 // SQL RPC `public.detect_parrainage_anomalies()`.  The RPC is produced by a
@@ -149,7 +153,14 @@ export default function CommissionAnomaliesPage() {
     setLoading(true)
     setErr(null)
     try {
-      const { data: rpcData, error } = await supabase.rpc('detect_parrainage_anomalies')
+      // RESEARCH 03: the RPC previously ran without a timeout — if Supabase
+      // was down, the promise hung indefinitely and the page skeleton never
+      // resolved. 20s budget accommodates the full-tree scan on a cold
+      // replica while still surfacing a visible error to the admin.
+      const { data: rpcData, error } = await Promise.race([
+        supabase.rpc('detect_parrainage_anomalies'),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('RPC timeout (20s)')), 20_000)),
+      ])
       if (error) throw new Error(error.message)
       setData(rpcData || {})
     } catch (e) {
@@ -180,86 +191,6 @@ export default function CommissionAnomaliesPage() {
 
   return (
     <div className="zitu-page" dir="ltr">
-      <style>{`
-        .cli-hero {
-          background: linear-gradient(135deg, #eff6ff 0%, #f8fafc 100%);
-          border: 1px solid #e2e8f0;
-          border-radius: 14px;
-          padding: 18px 20px;
-          margin-top: 8px;
-          display: flex;
-          align-items: center;
-          gap: 14px;
-        }
-        .cli-hero__badge {
-          width: 44px; height: 44px;
-          border-radius: 12px;
-          background: #1d4ed8;
-          color: #fff;
-          font-size: 22px;
-          display: inline-flex;
-          align-items: center;
-          justify-content: center;
-          flex-shrink: 0;
-        }
-        .cli-hero__title { font-size: 20px; font-weight: 700; color: #0f172a; margin: 0; line-height: 1.2; }
-        .cli-hero__subtitle { font-size: 13px; color: #475569; margin: 4px 0 0; }
-
-        .can-toolbar { display: flex; justify-content: flex-end; gap: 8px; margin: 12px 0 6px; }
-        .can-stats {
-          display: grid;
-          grid-template-columns: repeat(5, 1fr);
-          gap: 10px;
-          margin: 12px 0 6px;
-        }
-        .can-stat {
-          background: #fff;
-          border: 1px solid #e2e8f0;
-          border-radius: 12px;
-          padding: 12px 14px;
-        }
-        .can-stat__label { font-size: 12px; color: #64748b; font-weight: 500; }
-        .can-stat__value { font-size: 22px; font-weight: 700; margin-top: 4px; line-height: 1; }
-        .can-stat--ok { background: #f0fdf4; border-color: #bbf7d0; }
-        .can-stat--ok .can-stat__value { color: #166534; }
-        .can-stat--warn { background: #fef2f2; border-color: #fecaca; }
-        .can-stat--warn .can-stat__value { color: #991b1b; }
-
-        .can-section { border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; margin-top: 10px; overflow: hidden; }
-        .can-section--warn { border-color: #fecaca; }
-        .can-section__header {
-          display: flex; align-items: center; gap: 10px;
-          width: 100%; text-align: left; cursor: pointer;
-          background: transparent; border: 0; padding: 12px 14px;
-          font: inherit; color: inherit;
-        }
-        .can-section__header:hover { background: #f8fafc; }
-        .can-section__title { flex: 1; font-weight: 600; color: #0f172a; }
-        .can-section__badge {
-          display: inline-block; min-width: 28px; padding: 2px 10px;
-          border-radius: 999px; font-size: 12px; font-weight: 700;
-          text-align: center;
-        }
-        .can-section__badge--ok { background: #dcfce7; color: #166534; }
-        .can-section__badge--warn { background: #fee2e2; color: #991b1b; }
-        .can-section__chev { font-size: 12px; color: #64748b; }
-        .can-section__body { padding: 0 14px 14px; border-top: 1px solid #f1f5f9; }
-        .can-list { list-style: none; padding: 0; margin: 8px 0 0; display: flex; flex-direction: column; gap: 6px; }
-        .can-item { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 10px; background: #fafafa; border: 1px solid #f1f5f9; border-radius: 8px; font-size: 13px; }
-        .can-item__title { font-weight: 600; color: #0f172a; }
-        .can-item__detail { color: #475569; }
-        .can-empty { margin: 10px 0 0; color: #166534; font-size: 13px; }
-        .can-error {
-          border: 1px solid #fecaca; background: #fef2f2; color: #991b1b;
-          padding: 10px 12px; border-radius: 10px; margin: 8px 0;
-          display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap;
-        }
-        .can-loading { color: #64748b; font-size: 14px; padding: 20px; text-align: center; }
-
-        @media (max-width: 900px) { .can-stats { grid-template-columns: repeat(2, 1fr); } }
-        @media (max-width: 600px) { .can-stats { grid-template-columns: 1fr; } }
-      `}</style>
-
       <div className="zitu-page__column">
         <button
           type="button"
@@ -293,15 +224,6 @@ export default function CommissionAnomaliesPage() {
           </button>
         </div>
 
-        {err ? (
-          <div className="can-error" role="alert">
-            <span>Erreur lors du chargement : {err}</span>
-            <button type="button" className="adm-btn adm-btn--secondary" onClick={refresh}>
-              Réessayer
-            </button>
-          </div>
-        ) : null}
-
         <div className="can-stats" role="group" aria-label="Synthèse des anomalies">
           {CATEGORIES.map((cat) => {
             const n = counts[cat.key]
@@ -315,26 +237,38 @@ export default function CommissionAnomaliesPage() {
           })}
         </div>
 
-        {loading && !data ? (
-          <div className="can-loading">Chargement des anomalies…</div>
-        ) : (
-          <div>
-            {totalAnomalies === 0 && !err ? (
-              <p className="can-empty" style={{ padding: '10px 0' }}>
-                ✓ Aucune anomalie détectée sur l'arbre de parrainage.
-              </p>
-            ) : null}
-            {CATEGORIES.map((cat) => (
-              <Section
-                key={cat.key}
-                category={cat}
-                rows={asList(data?.[cat.key])}
-                open={Boolean(openSections[cat.key])}
-                onToggle={() => toggleSection(cat.key)}
-              />
-            ))}
-          </div>
-        )}
+        {/* Plan 03 §4.4: replace the loading/error/empty/data ladder with a
+            four-state <RenderDataGate>. The RPC is timeout-wrapped upstream;
+            the gate's watchdog is the component-level safety net. */}
+        <RenderDataGate
+          loading={loading && !data}
+          error={err ? new Error(err) : null}
+          data={data}
+          onRetry={refresh}
+          skeleton={<SkeletonCard cards={5} />}
+          isEmpty={() => totalAnomalies === 0}
+          empty={
+            <EmptyState
+              icon="✅"
+              title="Aucune anomalie détectée"
+              description="L'arbre de parrainage est cohérent."
+            />
+          }
+        >
+          {(payload) => (
+            <div>
+              {CATEGORIES.map((cat) => (
+                <Section
+                  key={cat.key}
+                  category={cat}
+                  rows={asList(payload?.[cat.key])}
+                  open={Boolean(openSections[cat.key])}
+                  onToggle={() => toggleSection(cat.key)}
+                />
+              ))}
+            </div>
+          )}
+        </RenderDataGate>
       </div>
     </div>
   )

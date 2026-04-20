@@ -2,7 +2,10 @@ import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { useCommissionTracker } from '../lib/useCommissionTracker.js'
 import { useToast } from '../components/AdminToast.jsx'
+import RenderDataGate from '../../components/RenderDataGate.jsx'
+import EmptyState from '../../components/EmptyState.jsx'
 import './zitouna-admin-page.css'
+import './commission-analytics.css'
 
 // French helper for money formatting — matches the rest of the admin app.
 function fmtMoney(v) {
@@ -247,54 +250,6 @@ export default function CommissionAnalyticsPage() {
 
   return (
     <div className="zitu-page" dir="ltr">
-      <style>{`
-        .cli-hero { background: linear-gradient(135deg, #eff6ff 0%, #f8fafc 100%); border: 1px solid #e2e8f0; border-radius: 14px; padding: 18px 20px; margin-top: 8px; display: flex; align-items: center; gap: 14px; }
-        .cli-hero__badge { width: 44px; height: 44px; border-radius: 12px; background: #1d4ed8; color: #fff; font-size: 22px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
-        .cli-hero__title { font-size: 20px; font-weight: 700; color: #0f172a; margin: 0; line-height: 1.2; }
-        .cli-hero__subtitle { font-size: 13px; color: #475569; margin: 4px 0 0; }
-        .cli-hero__actions { margin-left: auto; display: flex; gap: 8px; }
-        .cli-hero__btn { padding: 8px 14px; border-radius: 10px; border: 1px solid #cbd5e1; background: #fff; color: #0f172a; font-size: 13px; font-weight: 600; cursor: pointer; }
-        .cli-hero__btn:hover { background: #f1f5f9; }
-        .cli-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 12px 0 6px; }
-        .cli-stat { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px 14px; }
-        .cli-stat__label { font-size: 12px; color: #64748b; font-weight: 500; }
-        .cli-stat__value { font-size: 22px; font-weight: 700; color: #0f172a; margin-top: 4px; line-height: 1; }
-        .cli-stat--info .cli-stat__value { color: #1d4ed8; }
-        .cli-stat--good .cli-stat__value { color: #166534; }
-        .cli-stat--warn .cli-stat__value { color: #b45309; }
-        @media (max-width: 760px) { .cli-stats { grid-template-columns: repeat(2, 1fr); } }
-        .ca-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
-        @media (max-width: 900px) { .ca-grid { grid-template-columns: 1fr; } }
-        .ca-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 16px 18px; }
-        .ca-card__title { font-size: 14px; font-weight: 700; color: #0f172a; margin: 0 0 10px; }
-        .ca-card__subtitle { font-size: 12px; color: #64748b; margin: 0 0 12px; }
-        .ca-chart { width: 100%; height: 220px; }
-        .ca-axis { fill: #94a3b8; font-size: 10px; }
-        .ca-grid-line { stroke: #e2e8f0; stroke-width: 1; }
-        .ca-line { fill: none; stroke: #1d4ed8; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
-        .ca-area { fill: rgba(29, 78, 216, 0.12); }
-        .ca-dot { fill: #1d4ed8; }
-        .ca-hbar-row { display: grid; grid-template-columns: 80px 1fr 110px; align-items: center; gap: 10px; padding: 6px 0; }
-        .ca-hbar-label { font-size: 13px; font-weight: 600; color: #0f172a; }
-        .ca-hbar-track { position: relative; height: 14px; border-radius: 7px; background: #f1f5f9; overflow: hidden; }
-        .ca-hbar-fill { position: absolute; top: 0; left: 0; bottom: 0; border-radius: 7px; transition: width 200ms ease; }
-        .ca-hbar-amount { font-size: 12px; color: #475569; text-align: right; font-variant-numeric: tabular-nums; }
-        .ca-bene-row { grid-template-columns: 200px 1fr 130px; }
-        @media (max-width: 640px) { .ca-bene-row { grid-template-columns: 140px 1fr 110px; } }
-        .ca-bene-name { font-size: 13px; font-weight: 600; color: #0f172a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .ca-bene-code { font-size: 11px; color: #64748b; margin-top: 1px; }
-        .ca-donut-wrap { display: grid; grid-template-columns: 220px 1fr; gap: 16px; align-items: center; }
-        @media (max-width: 640px) { .ca-donut-wrap { grid-template-columns: 1fr; justify-items: center; } }
-        .ca-legend { display: flex; flex-direction: column; gap: 6px; font-size: 12px; }
-        .ca-legend-row { display: grid; grid-template-columns: 14px 1fr auto; align-items: center; gap: 8px; }
-        .ca-legend-swatch { width: 12px; height: 12px; border-radius: 3px; }
-        .ca-legend-label { color: #0f172a; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .ca-legend-value { color: #475569; font-variant-numeric: tabular-nums; }
-        .ca-empty { font-size: 13px; color: #64748b; padding: 24px; text-align: center; }
-        .ca-seed-link { color: #1d4ed8; font-weight: 600; text-decoration: none; }
-        .ca-seed-link:hover { text-decoration: underline; }
-      `}</style>
-
       <div className="zitu-page__column">
         <div className="cli-hero" role="banner">
           <span className="cli-hero__badge" aria-hidden>Σ</span>
@@ -311,24 +266,9 @@ export default function CommissionAnalyticsPage() {
           </div>
         </div>
 
-        {error ? (
-          <div
-            role="alert"
-            style={{
-              background: '#fef2f2',
-              border: '1px solid #fecaca',
-              color: '#991b1b',
-              borderRadius: 12,
-              padding: 12,
-              marginTop: 10,
-              fontSize: 13,
-            }}
-          >
-            Erreur de chargement: {String(error.message || error)}
-          </div>
-        ) : null}
-
-        {/* KPI bar */}
+        {/* KPI bar renders even while loading — the tiles display 0 cleanly.
+            Plan 03 §4.6: charts-or-empty ladder below is collapsed to a single
+            <RenderDataGate> that also handles errors + slow-load banner. */}
         <div className="cli-stats">
           <div className="cli-stat cli-stat--info">
             <div className="cli-stat__label">Commissions totales</div>
@@ -348,36 +288,39 @@ export default function CommissionAnalyticsPage() {
           </div>
         </div>
 
-        {loading && !hasEvents ? (
-          <div className="ca-card" style={{ marginTop: 12 }}>
-            <div className="ca-empty">Chargement des analyses…</div>
-          </div>
-        ) : !hasEvents ? (
-          <div className="ca-card" style={{ marginTop: 12 }}>
-            <div className="ca-empty">
-              <p style={{ margin: 0, fontWeight: 600, color: '#0f172a' }}>
-                Aucune commission à analyser pour l'instant.
-              </p>
-              <p style={{ margin: '6px 0 10px' }}>
-                Dès qu'une vente notariée générera une commission, les graphiques s'actualiseront.
-              </p>
-              <Link
-                to="/docs/COMMISSION_TRACKER.md"
-                className="ca-seed-link"
-                onClick={(e) => {
-                  // Plain link to the seed doc — don't break SPA routing if absent.
-                  e.preventDefault()
-                  window.open('/docs/COMMISSION_TRACKER.md', '_blank', 'noopener')
-                }}
+        <RenderDataGate
+          loading={loading && !hasEvents}
+          error={error}
+          data={events}
+          onRetry={() => refresh().catch(() => {})}
+          skeleton="kpi"
+          isEmpty={() => !hasEvents}
+          empty={
+            <div className="ca-card ca-card--top-gap">
+              <EmptyState
+                icon="📊"
+                title="Aucune commission à analyser pour l'instant."
+                description="Dès qu'une vente notariée générera une commission, les graphiques s'actualiseront."
               >
-                Créer des données de test
-              </Link>
+                <Link
+                  to="/docs/COMMISSION_TRACKER.md"
+                  className="ca-seed-link"
+                  onClick={(e) => {
+                    // Plain link to the seed doc — don't break SPA routing if absent.
+                    e.preventDefault()
+                    window.open('/docs/COMMISSION_TRACKER.md', '_blank', 'noopener')
+                  }}
+                >
+                  Créer des données de test
+                </Link>
+              </EmptyState>
             </div>
-          </div>
-        ) : (
+          }
+        >
+          {() => (
           <div className="ca-grid">
             {/* Chart 1 — cumulative commissions over time */}
-            <div className="ca-card" style={{ gridColumn: '1 / -1' }}>
+            <div className="ca-card ca-card--full">
               <h2 className="ca-card__title">Commissions cumulées dans le temps</h2>
               <p className="ca-card__subtitle">
                 Montant cumulé (TND) par mois de création des événements.
@@ -503,7 +446,7 @@ export default function CommissionAnalyticsPage() {
             </div>
 
             {/* Chart 4 — per-project split (donut) */}
-            <div className="ca-card" style={{ gridColumn: '1 / -1' }}>
+            <div className="ca-card ca-card--full">
               <h2 className="ca-card__title">Répartition par projet</h2>
               <p className="ca-card__subtitle">Part des commissions rattachées à chaque projet notarié.</p>
               {donutSlices.length === 0 ? (
@@ -550,7 +493,8 @@ export default function CommissionAnalyticsPage() {
               )}
             </div>
           </div>
-        )}
+          )}
+        </RenderDataGate>
       </div>
     </div>
   )

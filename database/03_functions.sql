@@ -29,14 +29,14 @@ language sql
 stable
 security definer
 set search_path = public
-as $$
+as $zit_auto_1$
   select exists (
     select 1 from public.admin_users au
     where lower(trim(coalesce(au.email, ''))) = lower(trim(coalesce(auth.email(), '')))
       and au.status = 'active'
       and coalesce(trim(auth.email()), '') <> ''
   );
-$$;
+$zit_auto_1$;
 
 -- Current client id from auth.uid(). Null when the caller is not a buyer.
 -- Deterministic: if multiple clients rows ever share the same auth_user_id
@@ -50,12 +50,12 @@ language sql
 stable
 security definer
 set search_path = public
-as $$
+as $zit_auto_2$
   select c.id from public.clients c
   where c.auth_user_id = auth.uid()
   order by c.created_at asc, c.id asc
   limit 1;
-$$;
+$zit_auto_2$;
 
 create or replace function public.current_client_id_is_ambiguous()
 returns boolean
@@ -63,16 +63,16 @@ language sql
 stable
 security definer
 set search_path = public
-as $$
+as $zit_auto_3$
   select (select count(*) from public.clients c where c.auth_user_id = auth.uid()) > 1;
-$$;
+$zit_auto_3$;
 
 -- Mirrors src/lib/phone.js `normalizePhone` (E.164-style + TN country handling).
 create or replace function public.normalize_phone_e164(raw text)
 returns text
 language plpgsql
 immutable
-as $$
+as $zit_auto_4$
 declare
   s text;
   digits text;
@@ -90,7 +90,7 @@ begin
   if substring(digits from 1 for 3) = '216' then return '+' || digits; end if;
   return '+' || digits;
 end;
-$$;
+$zit_auto_4$;
 
 -- ============================================================================
 -- Profile self-heal: ensures a public.clients row linked to the current JWT,
@@ -111,11 +111,11 @@ returns jsonb
 language plpgsql
 security definer
 set search_path = public, auth
-as $$
+as $zit_auto_5$
 declare
   v_uid uuid := auth.uid();
   v_email text := nullif(lower(auth.email()), '');
-  v_name text := 'Client';
+  v_full_name text := 'Client';
   v_phone text := null;
   v_client_id uuid := null;
   v_code text;
@@ -141,17 +141,17 @@ begin
     );
   end if;
 
-  select
-    coalesce(
-      nullif(trim(concat(au.raw_user_meta_data->>'firstname', ' ', au.raw_user_meta_data->>'lastname')), ''),
-      nullif(au.raw_user_meta_data->>'name', ''),
-      nullif(split_part(au.email, '@', 1), ''),
-      'Client'
-    ),
-    nullif(au.raw_user_meta_data->>'phone', '')
-  into v_name, v_phone
-  from auth.users au
-  where au.id = v_uid;
+  v_full_name := coalesce(
+    (select nullif(trim(concat(au.raw_user_meta_data->>'firstname', ' ', au.raw_user_meta_data->>'lastname')), '')
+       from auth.users au where au.id = v_uid),
+    (select nullif(au.raw_user_meta_data->>'name', '')
+       from auth.users au where au.id = v_uid),
+    (select nullif(split_part(au.email, '@', 1), '')
+       from auth.users au where au.id = v_uid),
+    'Client'
+  );
+  v_phone := (select nullif(au.raw_user_meta_data->>'phone', '')
+                from auth.users au where au.id = v_uid);
 
   -- Link existing client row by email if not already linked.
   update public.clients c
@@ -167,7 +167,7 @@ begin
   if v_client_id is null then
     v_code := 'CL-' || upper(substring(replace(v_uid::text, '-', '') from 1 for 10));
     insert into public.clients (code, full_name, email, phone, auth_user_id, status)
-    values (v_code, coalesce(v_name, 'Client'), v_email, v_phone, v_uid, 'active')
+    values (v_code, coalesce(v_full_name, 'Client'), v_email, v_phone, v_uid, 'active')
     on conflict (email) do update
       set auth_user_id = excluded.auth_user_id, updated_at = now()
     returning id into v_client_id;
@@ -443,7 +443,7 @@ begin
     )
   );
 end;
-$$;
+$zit_auto_5$;
 
 -- ============================================================================
 -- Seller parcel assignments listing (staff or self).
@@ -471,7 +471,7 @@ language sql
 stable
 security definer
 set search_path = public
-as $$
+as $zit_auto_6$
   select
     spa.id, spa.client_id, c.full_name, spa.project_id, pr.title,
     spa.parcel_id, pa.parcel_number, spa.active, spa.note,
@@ -487,7 +487,7 @@ as $$
     and spa.client_id = p_client_id
     and (public.is_active_staff() or p_client_id = public.current_client_id())
   order by spa.assigned_at desc;
-$$;
+$zit_auto_6$;
 
 -- ============================================================================
 -- Referral wallet summary: consumed by the buyer dashboard "Parrainage" card.
@@ -500,7 +500,7 @@ language plpgsql
 security definer
 stable
 set search_path = public
-as $$
+as $zit_auto_7$
 declare
   v_client_id uuid := public.current_client_id();
   v_ambiguous boolean := public.current_client_id_is_ambiguous();
@@ -770,7 +770,7 @@ begin
     )
   );
 end;
-$$;
+$zit_auto_7$;
 
 -- ============================================================================
 -- Ambassador payout request: aggregates unlocked payable events up to p_amount.
@@ -784,7 +784,7 @@ returns jsonb
 language plpgsql
 security definer
 set search_path = public
-as $$
+as $zit_auto_8$
 declare
   v_client_id uuid := public.current_client_id();
   v_request_id uuid;
@@ -865,7 +865,7 @@ begin
 
   return jsonb_build_object('ok', true, 'requestId', v_request_id, 'code', v_code, 'amount', p_amount);
 end;
-$$;
+$zit_auto_8$;
 
 -- ============================================================================
 -- Commission events — DB-side backstop
@@ -887,7 +887,7 @@ returns int
 language plpgsql
 security definer
 set search_path = public
-as $$
+as $zit_auto_9$
 declare
   v_sale record;
   v_buyer uuid;
@@ -1078,14 +1078,14 @@ begin
   end if;
   return v_inserted;
 end;
-$$;
+$zit_auto_9$;
 
 create or replace function public.trg_sales_notary_commissions()
 returns trigger
 language plpgsql
 security definer
 set search_path = public
-as $$
+as $zit_auto_10$
 begin
   if NEW.notary_completed_at is not null
      and (OLD.notary_completed_at is null or OLD.notary_completed_at is distinct from NEW.notary_completed_at) then
@@ -1093,7 +1093,7 @@ begin
   end if;
   return NEW;
 end;
-$$;
+$zit_auto_10$;
 
 drop trigger if exists trg_sales_notary_commissions on public.sales;
 create trigger trg_sales_notary_commissions
@@ -1120,7 +1120,7 @@ returns void
 language plpgsql
 security definer
 set search_path = public
-as $$
+as $zit_auto_11$
 declare
   v_balance numeric(14,2) := 0;
 begin
@@ -1141,14 +1141,14 @@ begin
   on conflict (client_id) do update
     set balance = excluded.balance, updated_at = now();
 end;
-$$;
+$zit_auto_11$;
 
 create or replace function public.trg_ambassador_wallet_from_event()
 returns trigger
 language plpgsql
 security definer
 set search_path = public
-as $$
+as $zit_auto_12$
 begin
   if (TG_OP = 'DELETE') then
     perform public.recompute_ambassador_wallet(OLD.beneficiary_client_id);
@@ -1160,7 +1160,7 @@ begin
   end if;
   return NEW;
 end;
-$$;
+$zit_auto_12$;
 
 drop trigger if exists trg_commission_events_wallet on public.commission_events;
 create trigger trg_commission_events_wallet
@@ -1172,7 +1172,7 @@ returns trigger
 language plpgsql
 security definer
 set search_path = public
-as $$
+as $zit_auto_13$
 declare
   v_client uuid;
 begin
@@ -1187,7 +1187,7 @@ begin
   if v_client is not null then perform public.recompute_ambassador_wallet(v_client); end if;
   return NEW;
 end;
-$$;
+$zit_auto_13$;
 
 drop trigger if exists trg_payout_items_wallet on public.commission_payout_request_items;
 create trigger trg_payout_items_wallet
@@ -1199,7 +1199,7 @@ returns trigger
 language plpgsql
 security definer
 set search_path = public
-as $$
+as $zit_auto_14$
 begin
   if (TG_OP = 'UPDATE' and NEW.status is distinct from OLD.status) or TG_OP = 'INSERT' or TG_OP = 'DELETE' then
     perform public.recompute_ambassador_wallet(coalesce(NEW.beneficiary_client_id, OLD.beneficiary_client_id));
@@ -1207,7 +1207,7 @@ begin
   if TG_OP = 'DELETE' then return OLD; end if;
   return NEW;
 end;
-$$;
+$zit_auto_14$;
 
 drop trigger if exists trg_payout_req_wallet on public.commission_payout_requests;
 create trigger trg_payout_req_wallet
@@ -1226,7 +1226,7 @@ returns numeric
 language plpgsql
 security definer
 set search_path = public
-as $$
+as $zit_auto_15$
 declare
   v_new numeric(14,2);
 begin
@@ -1246,7 +1246,7 @@ begin
 
   return v_new;
 end;
-$$;
+$zit_auto_15$;
 
 -- ============================================================================
 -- Admin page path normalizer (mirrors src/admin/adminNavConfig.js).
@@ -1256,7 +1256,7 @@ create or replace function public.normalize_admin_page_path(raw text)
 returns text
 language plpgsql
 immutable
-as $$
+as $zit_auto_16$
 declare
   s text;
 begin
@@ -1268,7 +1268,7 @@ begin
   if length(s) > 1 and right(s, 1) = '/' then s := left(s, length(s) - 1); end if;
   return s;
 end;
-$$;
+$zit_auto_16$;
 
 -- ============================================================================
 -- Delegated seller predicate: caller is a client whose effective allowed
@@ -1282,7 +1282,7 @@ language sql
 stable
 security definer
 set search_path = public
-as $$
+as $zit_auto_17$
   with me as (
     select id, allowed_pages
     from public.clients
@@ -1303,7 +1303,7 @@ as $$
         and public.normalize_admin_page_path(g.page_key) in ('/admin/sell', '/sell')
     )
   );
-$$;
+$zit_auto_17$;
 
 -- Caller's clients.id (or null) — used as a WITH CHECK guard on delegated
 -- seller policies so they can only act on their own sales.
@@ -1313,11 +1313,11 @@ language sql
 stable
 security definer
 set search_path = public
-as $$
+as $zit_auto_18$
   select id from public.clients where auth_user_id = auth.uid()
   order by created_at asc, id asc
   limit 1;
-$$;
+$zit_auto_18$;
 
 -- ============================================================================
 -- Buyer stub RPC: Sell wizard calls this when a new buyer fiche must be
@@ -1336,7 +1336,7 @@ returns public.clients
 language plpgsql
 security definer
 set search_path = public, auth
-as $$
+as $zit_auto_19$
 declare
   v_uid uuid := auth.uid();
   v_is_staff boolean := public.is_active_staff();
@@ -1347,7 +1347,7 @@ declare
   v_phone_normalized text;
   v_email text;
   v_code text;
-  v_name text;
+  v_full_name text;
   v_existing public.clients%rowtype;
   v_new public.clients%rowtype;
 begin
@@ -1388,7 +1388,7 @@ begin
     raise exception 'create_buyer_stub_for_sale: phone_required' using errcode = '22023';
   end if;
 
-  v_name := coalesce(nullif(trim(coalesce(p_name, '')), ''), 'Client');
+  v_full_name := coalesce(nullif(trim(coalesce(p_name, '')), ''), 'Client');
   v_email := nullif(lower(trim(coalesce(p_email, ''))), '');
   v_code := coalesce(nullif(trim(coalesce(p_code, '')), ''),
                      'CLI-' || extract(epoch from now())::bigint::text);
@@ -1406,14 +1406,14 @@ begin
   end if;
 
   insert into public.clients (code, full_name, email, phone, phone_normalized, cin, city, status)
-  values (v_code, v_name, v_email, coalesce(p_phone, ''), v_phone_normalized,
+  values (v_code, v_full_name, v_email, coalesce(p_phone, ''), v_phone_normalized,
           nullif(trim(coalesce(p_cin, '')), ''), nullif(trim(coalesce(p_city, '')), ''),
           'active')
   returning * into v_new;
 
   return v_new;
 end;
-$$;
+$zit_auto_19$;
 
 -- ============================================================================
 -- Auto-link clients.auth_user_id ↔ auth.users.id
@@ -1431,7 +1431,7 @@ returns integer
 language plpgsql
 security definer
 set search_path = public, auth
-as $$
+as $zit_auto_20$
 declare
   v_email text; v_meta_phone text; v_e164 text; v_last8 text;
   v_linked integer := 0;
@@ -1469,14 +1469,14 @@ begin
   get diagnostics v_linked = row_count;
   return v_linked;
 end;
-$$;
+$zit_auto_20$;
 
 create or replace function public.autolink_client_to_auth_user(p_client_id uuid)
 returns uuid
 language plpgsql
 security definer
 set search_path = public, auth
-as $$
+as $zit_auto_21$
 declare
   v_email text; v_phone text; v_last8 text; v_uid uuid;
 begin
@@ -1515,7 +1515,7 @@ begin
    where id = p_client_id and auth_user_id is null;
   return v_uid;
 end;
-$$;
+$zit_auto_21$;
 
 -- Trigger: on auth.users INSERT or email/metadata UPDATE, link matching clients.
 create or replace function public.trg_auth_users_autolink_clients()
@@ -1523,12 +1523,12 @@ returns trigger
 language plpgsql
 security definer
 set search_path = public, auth
-as $$
+as $zit_auto_22$
 begin
   perform public.autolink_clients_for_auth_user(NEW.id);
   return NEW;
 end;
-$$;
+$zit_auto_22$;
 
 drop trigger if exists zitouna_auth_users_autolink_insert on auth.users;
 create trigger zitouna_auth_users_autolink_insert
@@ -1558,7 +1558,7 @@ returns jsonb
 language plpgsql
 security definer
 set search_path = public, auth
-as $$
+as $zit_auto_23$
 declare
   v_uid uuid := auth.uid();
   v_linked integer;
@@ -1572,7 +1572,7 @@ begin
    order by created_at asc, id asc limit 1;
   return jsonb_build_object('ok', v_cid is not null, 'linked', v_linked, 'clientId', v_cid);
 end;
-$$;
+$zit_auto_23$;
 
 -- ============================================================================
 -- Sale completion invariant safety net
@@ -1586,7 +1586,7 @@ $$;
 create or replace function public.trg_sales_fill_notary_on_complete()
 returns trigger
 language plpgsql
-as $$
+as $zit_auto_24$
 begin
   if NEW.status = 'completed' and NEW.notary_completed_at is null then
     NEW.notary_completed_at := coalesce(OLD.notary_completed_at, now());
@@ -1596,7 +1596,7 @@ begin
   end if;
   return NEW;
 end;
-$$;
+$zit_auto_24$;
 
 drop trigger if exists zitouna_sales_fill_notary_on_complete on public.sales;
 create trigger zitouna_sales_fill_notary_on_complete
@@ -1626,7 +1626,7 @@ returns integer
 language plpgsql
 security definer
 set search_path = public
-as $$
+as $zit_auto_25$
 declare
   v_inserted integer := 0;
 begin
@@ -1653,7 +1653,7 @@ begin
 
   return v_inserted;
 end;
-$$;
+$zit_auto_25$;
 
 -- ============================================================================
 -- Auto-parrainage on sale insert
@@ -1680,7 +1680,7 @@ returns trigger
 language plpgsql
 security definer
 set search_path = public
-as $$
+as $zit_auto_26$
 declare
   v_buyer uuid;
   v_seller uuid;
@@ -1715,7 +1715,7 @@ begin
 
   return NEW;
 end;
-$$;
+$zit_auto_26$;
 
 drop trigger if exists zitouna_sales_auto_parrainage on public.sales;
 create trigger zitouna_sales_auto_parrainage
@@ -1735,7 +1735,7 @@ returns integer
 language plpgsql
 security definer
 set search_path = public
-as $$
+as $zit_auto_27$
 declare
   v_inserted integer := 0;
 begin
@@ -1792,7 +1792,7 @@ begin
 
   return v_inserted;
 end;
-$$;
+$zit_auto_27$;
 
 -- ============================================================================
 -- Default commission rules seed
@@ -1812,7 +1812,7 @@ returns integer
 language plpgsql
 security definer
 set search_path = public
-as $$
+as $zit_auto_28$
 declare
   v_inserted integer := 0;
 begin
@@ -1853,7 +1853,7 @@ begin
 
   return v_inserted;
 end;
-$$;
+$zit_auto_28$;
 
 -- ============================================================================
 -- Grants for RPCs added in this file.
@@ -1923,7 +1923,7 @@ returns jsonb
 language plpgsql
 security definer
 set search_path = public
-as $$
+as $zit_auto_29$
 declare
   v_deleted_wrong_l1 int := 0;
   v_deleted_self_l2  int := 0;
@@ -1991,7 +1991,7 @@ begin
     'regenerated_sales', v_regenerated
   );
 end;
-$$;
+$zit_auto_29$;
 
 grant execute on function public.cleanup_inconsistent_commission_events() to service_role;
 
@@ -2025,7 +2025,7 @@ $zit_commission_unique$;
 create or replace function public.trg_commission_events_validate()
 returns trigger
 language plpgsql
-as $$
+as $zit_auto_30$
 declare
   v_seller uuid;
 begin
@@ -2049,7 +2049,7 @@ begin
 
   return NEW;
 end;
-$$;
+$zit_auto_30$;
 
 drop trigger if exists zitouna_commission_events_validate on public.commission_events;
 create trigger zitouna_commission_events_validate

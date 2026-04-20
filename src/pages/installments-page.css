@@ -336,54 +336,77 @@
   gap: 6px;
 }
 
+/* Pay card — redesigned. Dark brand surface with a thin olive accent, no
+   blue tints anywhere. Clear visual hierarchy: month/due → amount/status
+   → hint → action. Hover lifts the card slightly so the list feels
+   interactive without being noisy. */
 .ip__pay-card {
-  background: var(--ip);
-  border: 1px solid var(--ip-200);
-  border-radius: 10px;
-  padding: 12px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-  transition: border-color 0.15s;
+  position: relative;
+  background: linear-gradient(180deg, rgba(168, 204, 80, 0.05) 0%, rgba(0, 0, 0, 0.18) 100%);
+  border: 1px solid rgba(168, 204, 80, 0.16);
+  border-radius: 14px;
+  padding: 14px 16px;
+  transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+  overflow: hidden;
 }
-
+.ip__pay-card::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 12px; bottom: 12px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: linear-gradient(180deg, var(--ip-blue), var(--ip-blue-700));
+  opacity: 0.55;
+}
 .ip__pay-card:hover {
-  border-color: var(--ip-300);
+  border-color: rgba(168, 204, 80, 0.35);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
 }
 
 .ip__pay-top {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
 
 .ip__pay-month {
   font-size: 12px;
-  font-weight: 700;
-  color: var(--ip-900);
+  font-weight: 800;
+  color: var(--ip-blue);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
 .ip__pay-due {
-  font-size: 10px;
-  color: var(--ip-400);
+  font-size: 11px;
+  color: var(--ip-500);
+  font-weight: 500;
 }
 
 .ip__pay-mid {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: baseline;
+  gap: 10px;
   margin-bottom: 8px;
 }
 
 .ip__pay-amount {
-  font-size: 15px;
+  font-size: 22px;
   font-weight: 800;
   color: var(--ip-900);
+  letter-spacing: -0.01em;
+  line-height: 1.1;
 }
 
 .ip__pay-amount small {
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--ip-blue);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ip-500);
+  margin-left: 2px;
+  letter-spacing: 0.04em;
 }
 
 /* Status badges */
@@ -401,8 +424,11 @@
 }
 
 .ip__status--submitted {
-  background: var(--ip-blue-100);
-  color: var(--ip-blue-700);
+  /* Was blue tint — swapped to amber so "En révision" pairs with the
+     accent set (green=ok, amber=pending, red=rejected) and the app has
+     no stray blue patches. */
+  background: var(--ip-amber-50);
+  color: var(--ip-amber);
 }
 
 .ip__status--rejected {
@@ -455,8 +481,8 @@
   width: 40px;
   height: 40px;
   border-radius: 6px;
-  background: var(--ip-blue-50);
-  border: 1px solid var(--ip-blue-100);
+  background: rgba(168, 204, 80, 0.10);
+  border: 1px solid rgba(168, 204, 80, 0.28);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -488,42 +514,56 @@
   font-weight: 700;
   color: var(--ip-blue);
   text-decoration: none;
-  padding: 4px 8px;
-  border-radius: 6px;
-  background: var(--ip-blue-50);
-  border: 1px solid var(--ip-blue-100);
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgba(168, 204, 80, 0.10);
+  border: 1px solid rgba(168, 204, 80, 0.28);
   white-space: nowrap;
   flex-shrink: 0;
-  transition: all 0.15s;
+  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
 }
 
 .ip__receipt-link:hover {
   background: var(--ip-blue);
-  color: #fff;
+  color: #0b1f0c;
+  border-color: var(--ip-blue);
 }
 
-/* Action button */
+/* Action button — olive-green gradient, matching the footer submit in
+   the upload modal. Replaces the old dark-blue/green mixed gradient so
+   the whole flow reads as one cohesive brand colour. */
 .ip__pay-btn {
   width: 100%;
-  padding: 10px;
-  border: none;
-  border-radius: 8px;
-  font-size: 11px;
+  padding: 12px 14px;
+  margin-top: 4px;
+  border: 1px solid rgba(168, 204, 80, 0.5);
+  border-radius: 12px;
+  font-size: 13px;
   font-weight: 700;
   cursor: pointer;
-  transition: all 0.15s;
-  background: linear-gradient(145deg, #0f172a 0%, #1e3a5f 50%, #1a331d 100%);
-  color: #fff;
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.2);
+  letter-spacing: 0.01em;
+  background: linear-gradient(135deg, var(--ip-blue) 0%, var(--ip-blue-700) 100%);
+  color: #0b1f0c;
+  box-shadow: 0 4px 14px rgba(168, 204, 80, 0.22);
+  transition: transform 0.15s, box-shadow 0.15s, filter 0.15s;
 }
 
 .ip__pay-btn:hover {
-  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.3);
   transform: translateY(-1px);
+  box-shadow: 0 8px 22px rgba(168, 204, 80, 0.35);
+  filter: brightness(1.05);
 }
+.ip__pay-btn:active { transform: translateY(0); }
 
+/* "Corriger le reçu" — amber variant for action-required state. */
 .ip__pay-btn--correct {
-  background: var(--ip-amber);
+  background: linear-gradient(135deg, var(--ip-amber) 0%, #d97706 100%);
+  border-color: rgba(251, 191, 36, 0.55);
+  box-shadow: 0 4px 14px rgba(251, 191, 36, 0.28);
+  color: #1b1100;
+}
+.ip__pay-btn--correct:hover {
+  box-shadow: 0 8px 22px rgba(251, 191, 36, 0.40);
 }
 
 /* Empty */
@@ -552,297 +592,477 @@
 }
 
 /* ══════════════════════════════════════════════════════════════
+   PLAN DETAIL — metric grid (replaces the off-theme blue/red/green
+   light-mode boxes). Dark cards with a left accent stripe that
+   encodes the semantic tone (validated/review/rejected/remaining).
+   ══════════════════════════════════════════════════════════════ */
+.ip__metric-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.ip__metric {
+  position: relative;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(168, 204, 80, 0.05) 0%, rgba(0, 0, 0, 0.18) 100%);
+  border: 1px solid rgba(168, 204, 80, 0.14);
+  display: grid;
+  gap: 4px;
+  overflow: hidden;
+}
+.ip__metric::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 999px;
+  background: var(--accent, var(--ip-blue));
+}
+
+.ip__metric--validated { --accent: var(--ip-green); }
+.ip__metric--review    { --accent: var(--ip-amber); }
+.ip__metric--rejected  { --accent: var(--ip-red); }
+.ip__metric--remaining { --accent: var(--ip-blue); }
+
+.ip__metric-kicker {
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent, var(--ip-500));
+}
+.ip__metric-value {
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--ip-900);
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+.ip__metric-hint {
+  font-size: 11px;
+  color: var(--ip-500);
+  line-height: 1.3;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   PAGER — 1 · 2 · 3 style pager for the payments list
+   ══════════════════════════════════════════════════════════════ */
+.ip__pager {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(168, 204, 80, 0.04);
+  border: 1px solid rgba(168, 204, 80, 0.14);
+}
+.ip__pager-btn {
+  min-width: 34px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: rgba(168, 204, 80, 0.06);
+  border: 1px solid rgba(168, 204, 80, 0.18);
+  color: var(--ip-600);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s, border-color 0.15s, transform 0.15s;
+}
+.ip__pager-btn:hover:not(:disabled) {
+  background: rgba(168, 204, 80, 0.12);
+  color: var(--ip-900);
+  border-color: rgba(168, 204, 80, 0.35);
+}
+.ip__pager-btn:active:not(:disabled) { transform: scale(0.96); }
+.ip__pager-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.ip__pager-btn--nav {
+  font-size: 18px;
+  padding: 0 8px;
+  font-weight: 600;
+  line-height: 1;
+}
+.ip__pager-btn--active {
+  background: linear-gradient(135deg, var(--ip-blue) 0%, var(--ip-blue-700) 100%);
+  color: #0b1f0c;
+  border-color: rgba(168, 204, 80, 0.55);
+  box-shadow: 0 4px 12px rgba(168, 204, 80, 0.24);
+}
+.ip__pager-btn--active:hover { color: #0b1f0c; }
+.ip__pager-hint {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--ip-500);
+}
+@media (max-width: 400px) {
+  .ip__pager-hint { flex-basis: 100%; text-align: center; margin-left: 0; margin-top: 4px; }
+}
+
+/* ══════════════════════════════════════════════════════════════
    UPLOAD MODAL
    ══════════════════════════════════════════════════════════════ */
 
+/* Overlay: dark blurred backdrop anchored to the viewport. Inset safe-area
+   padding so the panel doesn't kiss the phone edges on iOS notches. */
 .ip__overlay {
   position: fixed;
   inset: 0;
   z-index: 200;
-  background: rgba(15, 23, 42, 0.5);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  background: rgba(6, 14, 8, 0.62);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 16px;
+  padding: max(20px, env(safe-area-inset-top)) 20px max(20px, env(safe-area-inset-bottom));
+  animation: ip-overlay-in 200ms ease-out both;
+}
+@keyframes ip-overlay-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
+/* Panel: dark card with a subtle Zitouna-green inner glow + hairline accent. */
 .ip__modal {
   width: 100%;
-  max-width: 400px;
-  background: #fff;
-  border-radius: 14px;
-  box-shadow: 0 20px 56px rgba(0, 0, 0, 0.14);
-  animation: ip-popup 220ms cubic-bezier(0.16, 1, 0.3, 1);
+  max-width: 440px;
+  background: linear-gradient(180deg, #1a331d 0%, #162917 100%);
+  border: 1px solid rgba(168, 204, 80, 0.18);
+  border-radius: 20px;
+  box-shadow:
+    0 30px 80px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(0, 0, 0, 0.25),
+    0 0 60px rgba(168, 204, 80, 0.06) inset;
+  color: var(--ip-900);
   overflow: hidden;
-  max-height: calc(100vh - 32px);
-  max-height: calc(100dvh - 32px);
+  max-height: calc(100dvh - 40px);
   display: flex;
   flex-direction: column;
+  animation: ip-popup 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  transform-origin: center;
 }
-
 @keyframes ip-popup {
-  from { opacity: 0; transform: translateY(10px) scale(0.97); }
-  to { opacity: 1; transform: none; }
+  from { opacity: 0; transform: translateY(14px) scale(0.96); filter: blur(3px); }
+  to   { opacity: 1; transform: none; filter: blur(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ip__overlay, .ip__modal { animation: none; }
 }
 
+/* Header: title + accent subtitle + pill close button. */
 .ip__modal-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--ip-100);
+  align-items: flex-start;
+  gap: 10px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid rgba(168, 204, 80, 0.12);
+  background:
+    radial-gradient(120% 80% at 50% 0%, rgba(168, 204, 80, 0.10), transparent 60%);
 }
 
 .ip__modal-title {
-  font-size: 13px;
+  font-size: 17px;
   font-weight: 700;
   color: var(--ip-900);
   margin: 0;
+  letter-spacing: -0.01em;
 }
 
 .ip__modal-sub {
-  font-size: 10px;
-  color: var(--ip-400);
-  margin: 1px 0 0;
+  font-size: 12px;
+  color: var(--ip-500);
+  margin: 4px 0 0;
 }
 
 .ip__modal-close {
-  background: none;
-  border: none;
-  font-size: 20px;
-  color: var(--ip-300);
-  cursor: pointer;
-  padding: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  background: rgba(168, 204, 80, 0.06);
+  border: 1px solid rgba(168, 204, 80, 0.18);
+  color: var(--ip-500);
+  font-size: 16px;
   line-height: 1;
-  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.18s, color 0.18s, border-color 0.18s, transform 0.18s;
+  flex-shrink: 0;
 }
-
 .ip__modal-close:hover {
-  background: var(--ip-100);
-  color: var(--ip-600);
+  background: rgba(239, 68, 68, 0.10);
+  border-color: rgba(239, 68, 68, 0.30);
+  color: var(--ip-red);
+  transform: rotate(90deg);
 }
 
+/* Body: vertical flow, generous spacing, scrolls when tall. */
 .ip__modal-body {
-  padding: 14px 16px;
+  padding: 18px 20px 8px;
   overflow-y: auto;
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
+/* Selected facility summary: prominent, card-like, olive accent. */
 .ip__modal-info {
-  font-size: 11px;
-  color: var(--ip-600);
-  background: var(--ip-blue-50);
-  border: 1px solid var(--ip-blue-100);
-  border-radius: 8px;
-  padding: 8px 10px;
-  margin-bottom: 12px;
-  text-align: center;
+  background: linear-gradient(135deg, rgba(168, 204, 80, 0.12), rgba(168, 204, 80, 0.04));
+  border: 1px solid rgba(168, 204, 80, 0.24);
+  border-radius: 14px;
+  padding: 14px 16px;
+  position: relative;
+  overflow: hidden;
+}
+.ip__modal-info::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  background: linear-gradient(180deg, var(--ip-blue), var(--ip-blue-700));
 }
 
 .ip__modal-info--receipt {
   display: grid;
-  gap: 3px;
+  gap: 4px;
   text-align: left;
 }
 
 .ip__modal-info-kicker {
   font-size: 10px;
   font-weight: 700;
-  color: var(--ip-blue-700);
+  color: var(--ip-blue);
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.08em;
 }
 
 .ip__modal-info-main {
-  font-size: 13px;
+  font-size: 18px;
+  font-weight: 700;
   color: var(--ip-900);
+  letter-spacing: -0.01em;
+  line-height: 1.25;
 }
 
 .ip__modal-info-meta {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--ip-500);
+  margin-top: 2px;
 }
 
+/* Section label: small uppercase helper above each group. */
 .ip__upload-label {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
-  color: var(--ip-600);
-  margin: 0 0 6px;
+  color: var(--ip-500);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin: 0 0 8px;
 }
 
+/* Upload buttons: two generous tappable tiles with icon + label. */
 .ip__upload-btns {
-  display: flex;
-  gap: 6px;
-  margin-bottom: 10px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
 }
 
 .ip__upload-btn {
-  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 10px;
-  border: 1.5px dashed var(--ip-200);
-  border-radius: 8px;
-  background: var(--ip-bg);
-  font-size: 11px;
+  gap: 8px;
+  padding: 18px 12px;
+  border: 1.5px dashed rgba(168, 204, 80, 0.28);
+  border-radius: 12px;
+  background: rgba(168, 204, 80, 0.04);
+  font-size: 13px;
   font-weight: 600;
   color: var(--ip-600);
   cursor: pointer;
-  transition: all 0.15s;
+  text-align: center;
+  transition: background-color 0.18s, border-color 0.18s, color 0.18s, transform 0.18s;
+  user-select: none;
 }
-
-.ip__upload-btn:hover {
+.ip__upload-btn:hover,
+.ip__upload-btn:focus-within {
   border-color: var(--ip-blue);
-  color: var(--ip-blue);
-  background: var(--ip-blue-50);
+  background: rgba(168, 204, 80, 0.10);
+  color: var(--ip-900);
 }
+.ip__upload-btn:active { transform: scale(0.98); }
 
-.ip__upload-btn input {
-  display: none;
-}
+.ip__upload-btn input { display: none; }
 
+/* File status pill: empty vs ready. */
 .ip__upload-status {
-  padding: 8px 10px;
-  border-radius: 8px;
-  font-size: 11px;
-  font-weight: 600;
-  margin-bottom: 10px;
-  display: grid;
+  padding: 12px 14px;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
   gap: 2px;
 }
 
 .ip__upload-status--ok {
-  background: var(--ip-green-50);
+  background: rgba(52, 211, 153, 0.10);
   color: var(--ip-green);
-  border: 1px solid #a7f3d0;
+  border: 1px solid rgba(52, 211, 153, 0.28);
 }
 
 .ip__upload-status--empty {
-  background: var(--ip-100);
-  color: var(--ip-400);
+  background: rgba(168, 204, 80, 0.04);
+  color: var(--ip-500);
+  border: 1px dashed rgba(168, 204, 80, 0.20);
+  font-size: 12px;
+  text-align: center;
 }
 
 .ip__upload-status-title {
-  font-size: 9px;
+  font-size: 10px;
+  font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.08em;
   opacity: 0.85;
 }
 
 .ip__upload-status-name {
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
   color: var(--ip-900);
   word-break: break-word;
 }
 
+/* Image preview: framed thumbnail, centered, no harsh edges. */
 .ip__upload-preview {
-  margin-bottom: 10px;
-  border-radius: 8px;
+  border-radius: 12px;
   overflow: hidden;
-  border: 1px solid var(--ip-200);
+  border: 1px solid rgba(168, 204, 80, 0.18);
+  background:
+    linear-gradient(45deg, rgba(0,0,0,0.15) 25%, transparent 25%, transparent 75%, rgba(0,0,0,0.15) 75%),
+    linear-gradient(45deg, rgba(0,0,0,0.15) 25%, transparent 25%, transparent 75%, rgba(0,0,0,0.15) 75%) 8px 8px,
+    var(--ip-bg);
+  background-size: 16px 16px;
 }
-
 .ip__upload-preview img {
   width: 100%;
-  max-height: 220px;
+  max-height: 240px;
   object-fit: contain;
   display: block;
-  background: var(--ip-100);
 }
 
 .ip__upload-size {
-  font-size: 10px;
-  color: var(--ip-400);
-  margin-bottom: 8px;
+  font-size: 11px;
+  color: var(--ip-500);
+  margin-top: -8px;
 }
 
 .ip__upload-error {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--ip-red);
-  background: var(--ip-red-50);
-  border-radius: 6px;
-  padding: 6px 8px;
-  margin-bottom: 8px;
+  background: rgba(248, 113, 113, 0.10);
+  border: 1px solid rgba(248, 113, 113, 0.28);
+  border-radius: 10px;
+  padding: 10px 12px;
 }
 
+/* Note textarea: dark input with green focus ring. */
 .ip__upload-note {
   width: 100%;
   box-sizing: border-box;
-  padding: 8px 10px;
-  border: 1px solid var(--ip-200);
-  border-radius: 8px;
-  background: var(--ip-bg);
-  font-size: 11px;
+  padding: 12px 14px;
+  border: 1px solid rgba(168, 204, 80, 0.18);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.20);
+  font-size: 13px;
   color: var(--ip-900);
   outline: none;
   resize: vertical;
-  min-height: 44px;
+  min-height: 64px;
   font-family: inherit;
-  transition: border-color 0.15s;
-  margin-bottom: 12px;
+  transition: border-color 0.15s, box-shadow 0.15s, background-color 0.15s;
 }
-
 .ip__upload-note:focus {
   border-color: var(--ip-blue);
-  box-shadow: 0 0 0 3px var(--ip-blue-100);
+  background: rgba(0, 0, 0, 0.25);
+  box-shadow: 0 0 0 3px rgba(168, 204, 80, 0.18);
 }
+.ip__upload-note::placeholder { color: var(--ip-400); }
 
-.ip__upload-note::placeholder {
-  color: var(--ip-300);
-}
-
+/* Footer: cancel + green submit. Submit takes the visual weight. */
 .ip__modal-footer {
   display: flex;
-  gap: 8px;
-  padding: 12px 16px;
-  border-top: 1px solid var(--ip-100);
+  gap: 10px;
+  padding: 14px 20px 18px;
+  border-top: 1px solid rgba(168, 204, 80, 0.12);
+  background: rgba(0, 0, 0, 0.12);
 }
 
 .ip__modal-cancel {
   flex: 1;
-  padding: 10px;
-  border-radius: 8px;
-  font-size: 11px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-size: 13px;
   font-weight: 600;
   cursor: pointer;
-  background: var(--ip-100);
-  border: none;
+  background: rgba(168, 204, 80, 0.06);
+  border: 1px solid rgba(168, 204, 80, 0.18);
   color: var(--ip-600);
-  transition: all 0.15s;
+  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
 }
-
 .ip__modal-cancel:hover {
-  background: var(--ip-200);
+  background: rgba(168, 204, 80, 0.12);
+  color: var(--ip-900);
 }
 
 .ip__modal-submit {
   flex: 2;
-  padding: 10px;
-  border-radius: 8px;
-  font-size: 11px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-size: 13px;
   font-weight: 700;
   cursor: pointer;
-  border: none;
-  background: linear-gradient(145deg, #0f172a 0%, #1e3a5f 50%, #1a331d 100%);
-  color: #fff;
-  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.2);
-  transition: all 0.15s;
+  border: 1px solid rgba(168, 204, 80, 0.5);
+  background: linear-gradient(135deg, var(--ip-blue) 0%, var(--ip-blue-700) 100%);
+  color: #0b1f0c;
+  box-shadow: 0 6px 18px rgba(168, 204, 80, 0.28);
+  transition: transform 0.15s, box-shadow 0.15s, filter 0.15s;
+  letter-spacing: 0.01em;
 }
-
 .ip__modal-submit:hover {
-  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.3);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(168, 204, 80, 0.38);
+  filter: brightness(1.05);
+}
+.ip__modal-submit:active { transform: translateY(0); }
+.ip__modal-submit:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+  filter: grayscale(0.3);
 }
 
-.ip__modal-submit:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
-  box-shadow: none;
+/* Mobile: full-bleed modal, stacked upload buttons, larger touch targets. */
+@media (max-width: 480px) {
+  .ip__overlay { padding: 12px; align-items: flex-end; }
+  .ip__modal   { max-width: none; border-radius: 18px 18px 14px 14px; max-height: calc(100dvh - 24px); }
+  .ip__modal-header  { padding: 16px 16px 12px; }
+  .ip__modal-body    { padding: 16px 16px 6px; gap: 14px; }
+  .ip__modal-footer  { padding: 12px 16px max(16px, env(safe-area-inset-bottom)); }
+  .ip__upload-btns   { grid-template-columns: 1fr; }
+  .ip__upload-btn    { padding: 16px; }
+  .ip__modal-info-main { font-size: 17px; }
 }
 
 /* ── Responsive (non-hero rules — hero has its own breakpoints above) ── */

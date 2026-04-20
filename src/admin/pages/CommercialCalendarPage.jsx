@@ -104,17 +104,6 @@ export default function CommercialCalendarPage() {
         </div>
       </header>
 
-      <button
-        type="button"
-        className="sp-cta-btn"
-        onClick={() => navigate('/admin/call-center')}
-        title="Retour au Centre d'appels CRM"
-      >
-        <span className="sp-cta-btn__icon">📞</span>
-        <span className="sp-cta-btn__text">Centre d'appels</span>
-        <span className="sp-cta-btn__arrow">→</span>
-      </button>
-
       <div className="sp-cat-bar">
         <div className="sp-cat-stats cc-cat-stats">
           <strong>{stats.total}</strong> total

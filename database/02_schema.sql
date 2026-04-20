@@ -8,43 +8,43 @@
 create extension if not exists "pgcrypto";
 
 -- ========= Enums =========
-do $$ begin
+do $zit_auto_1$ begin
   create type app_role as enum ('SUPER_ADMIN','STAFF');
-exception when duplicate_object then null; end $$;
+exception when duplicate_object then null; end $zit_auto_1$;
 
-do $$ begin
+do $zit_auto_2$ begin
   create type parcel_status as enum ('available','reserved','sold');
-exception when duplicate_object then null; end $$;
+exception when duplicate_object then null; end $zit_auto_2$;
 
-do $$ begin
+do $zit_auto_3$ begin
   create type payment_type as enum ('full','installments');
-exception when duplicate_object then null; end $$;
+exception when duplicate_object then null; end $zit_auto_3$;
 
-do $$ begin
+do $zit_auto_4$ begin
   create type plan_status as enum ('active','late','completed');
-exception when duplicate_object then null; end $$;
+exception when duplicate_object then null; end $zit_auto_4$;
 
-do $$ begin
+do $zit_auto_5$ begin
   create type installment_payment_status as enum ('pending','submitted','approved','rejected');
-exception when duplicate_object then null; end $$;
+exception when duplicate_object then null; end $zit_auto_5$;
 
-do $$ begin
+do $zit_auto_6$ begin
   create type appointment_status as enum ('new','pending','confirmed','completed','cancelled');
-exception when duplicate_object then null; end $$;
+exception when duplicate_object then null; end $zit_auto_6$;
 
-do $$ begin
+do $zit_auto_7$ begin
   create type appointment_type as enum (
     'visit','signing','followup','legal_signature','finance','juridique'
   );
-exception when duplicate_object then null; end $$;
+exception when duplicate_object then null; end $zit_auto_7$;
 
-do $$ begin
+do $zit_auto_8$ begin
   create type commission_event_status as enum ('pending','payable','paid','cancelled');
-exception when duplicate_object then null; end $$;
+exception when duplicate_object then null; end $zit_auto_8$;
 
-do $$ begin
+do $zit_auto_9$ begin
   create type payout_request_status as enum ('pending_review','approved','rejected','paid');
-exception when duplicate_object then null; end $$;
+exception when duplicate_object then null; end $zit_auto_9$;
 
 -- ========= Staff / admin users =========
 create table admin_users (
@@ -229,7 +229,7 @@ create index idx_client_phone_identities_client on client_phone_identities(clien
 create index idx_client_phone_identities_auth on client_phone_identities(auth_user_id);
 
 -- O6: phone identity invalidation reason (added idempotently for parallel rollout).
-do $$ begin
+do $zit_auto_10$ begin
   if not exists (
     select 1 from information_schema.columns
     where table_schema = 'public'
@@ -239,7 +239,7 @@ do $$ begin
     alter table public.client_phone_identities
       add column invalidation_reason text;
   end if;
-end $$;
+end $zit_auto_10$;
 
 -- ========= Seller relations / parcel assignments / wallet =========
 create table seller_relations (
@@ -636,26 +636,26 @@ create index idx_user_notifications_unread on user_notifications(user_id, create
 create or replace function public.touch_updated_at()
 returns trigger
 language plpgsql
-as $$
+as $zit_auto_11$
 begin
   new.updated_at = now();
   return new;
 end;
-$$;
+$zit_auto_11$;
 
 -- Normalize admin_users.email to lower(trim(...)) on every write so the
 -- is_active_staff() RLS predicate cannot drift because of casing / whitespace.
 create or replace function public.normalize_admin_user_email()
 returns trigger
 language plpgsql
-as $$
+as $zit_auto_12$
 begin
   if new.email is not null then
     new.email := lower(trim(new.email));
   end if;
   return new;
 end;
-$$;
+$zit_auto_12$;
 
 create trigger trg_admin_users_email_norm
   before insert or update of email on admin_users

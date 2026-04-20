@@ -1,17 +1,32 @@
-import { useMemo, useState, useEffect } from 'react'
+/*
+ * DB schema additions required for the Comptant / m²-priced offer feature.
+ * Run these once before relying on the new fields — the UI tolerates their
+ * absence (the extra keys are simply ignored server-side until added):
+ *
+ *   ALTER TABLE public.project_offers ADD COLUMN mode text NOT NULL DEFAULT 'installments';
+ *   ALTER TABLE public.project_offers ADD COLUMN cash_amount numeric(14,2);
+ *   ALTER TABLE public.project_offers ADD COLUMN price_per_sqm numeric(14,2);
+ *
+ * (table name is `project_offers` — see db.js fetchOffers/upsertOffer).
+ */
+import { useMemo, useState, useEffect, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useProjects, useOffers, useProjectWorkflow } from '../../lib/useSupabase.js'
 import CommissionRulesEditor from '../components/CommissionRulesEditor.jsx'
 import * as db from '../../lib/db.js'
 import { emitInvalidate } from '../../lib/dataEvents.js'
+import { runSafeAction } from '../../lib/runSafeAction.js'
 import AdminModal from '../components/AdminModal.jsx'
+import RenderDataGate from '../../components/RenderDataGate.jsx'
+import EmptyState from '../../components/EmptyState.jsx'
+import { SkeletonDetail } from '../../components/skeletons/index.js'
 import './zitouna-admin-page.css'
 import './projects-admin.css'
 import './project-detail-admin.css'
 
-const EMPTY_PARCEL = { id: '', trees: '', area: '', pricePerTree: '', status: 'available' }
-const EMPTY_PROJECT = { title: '', city: '', region: '', area: '', year: '', mapUrl: '' }
-const EMPTY_OFFER = { label: '', avancePct: '', duration: '', note: '' }
+const EMPTY_PARCEL = { id: '', label: '', trees: '', area: '', pricePerTree: '', status: 'available' }
+const EMPTY_PROJECT = { title: '', city: '', region: '', mapUrl: '' }
+const EMPTY_OFFER = { label: '', mode: 'installments', avancePct: '', duration: '', cashAmount: '', note: '', usePricePerSqm: false, pricePerSqm: '' }
 const EMPTY_CHECK_ITEM = { key: '', label: '', required: true, grantAllowedPagesText: '' }
 const DH = { treeSante: 95, humidity: 65, nutrients: 80 }
 
@@ -22,10 +37,26 @@ function pRev(p) { if (!p.treeBatches?.length) return p.trees * 90; return p.tre
 function sLbl(s) { return s === 'available' ? 'Dispo' : s === 'reserved' ? 'Réservée' : 'Vendue' }
 function pillCls(s) { return s === 'available' ? 'pdp-pill pdp-pill--avail' : s === 'reserved' ? 'pdp-pill pdp-pill--reserved' : 'pdp-pill pdp-pill--sold' }
 
+// Sum of parcel surfaces in m². Plots here expose area_m2 as `.area`.
+function sumParcelArea(plots) {
+  return (plots || []).reduce((s, p) => s + (Number(p.area) || 0), 0)
+}
+// Format that sum as "X Ha" once >= 10 000 m², else "Y m²". '—' if empty.
+function fmtArea(totalM2) {
+  const t = Number(totalM2) || 0
+  if (!t) return '—'
+  if (t >= 10000) {
+    const ha = t / 10000
+    const rounded = ha >= 10 ? Math.round(ha) : Math.round(ha * 10) / 10
+    return `${rounded.toLocaleString('fr-FR')} Ha`
+  }
+  return `${Math.round(t).toLocaleString('fr-FR')} m²`
+}
+
 export default function ProjectDetailPage() {
   const navigate = useNavigate()
   const { projectId } = useParams()
-  const { projects, loading: projectsLoading, refresh: refreshProjects } = useProjects()
+  const { projects, loading: projectsLoading, error: projectsError, refresh: refreshProjects } = useProjects()
   const { offersByProject, refresh: refreshOffers } = useOffers()
   const [modal, setModal] = useState(null)
   const [pf, setPf] = useState(EMPTY_PROJECT)
@@ -35,6 +66,11 @@ export default function ProjectDetailPage() {
   const [editOfferDbId, setEditOfferDbId] = useState(null)
   const [parcelQ, setParcelQ] = useState('')
   const [saving, setSaving] = useState(false)
+  const [opError, setOpError] = useState('')
+  const reportOpError = (msg) => {
+    setOpError(msg)
+    window.setTimeout(() => setOpError(''), 6000)
+  }
   const [healthLocal, setHealthLocal] = useState({})
   // Snapshot of the last-applied health per project — drives the Apply/Cancel
   // buttons (dirty detection) and the cancel-to-saved-values handler.
@@ -58,8 +94,30 @@ export default function ProjectDetailPage() {
   const [wfMsg, setWfMsg] = useState(null)
   const [wfErr, setWfErr] = useState(false)
 
+  // Signature of the last applied workflow snapshot, so the effect below
+  // only writes state when the workflow genuinely changed (project switch or
+  // remote refresh). Without this guard, React 19's `set-state-in-effect` lint
+  // rule flags the effect — and rightly so: the effect would otherwise write
+  // on every render. Ref avoids an extra render cycle vs. a state flag.
+  const appliedWfSigRef = useRef('')
+
   useEffect(() => {
     if (!workflow || !project?.id) return
+    const sig = JSON.stringify({
+      pid: project.id,
+      c: workflow.companyFeePct,
+      n: workflow.notaryFeePct,
+      m: workflow.minimumPayoutThreshold,
+      r: workflow.reservationHours,
+      a: workflow.arabonDefault,
+      cl: workflow.signatureChecklist,
+    })
+    if (appliedWfSigRef.current === sig) return
+    appliedWfSigRef.current = sig
+    // Syncing derived workflow values to editable form state when the
+    // project/workflow changes. The signature ref above dedupes reruns, so
+    // these setState calls only fire on a real workflow change — no cascade.
+    /* eslint-disable react-hooks/set-state-in-effect */
     setWfCompany(Number(workflow.companyFeePct ?? 5))
     setWfNotary(Number(workflow.notaryFeePct ?? 2))
     setWfMinPay(Number(workflow.minimumPayoutThreshold ?? 100))
@@ -72,6 +130,7 @@ export default function ProjectDetailPage() {
       grantAllowedPagesText: Array.isArray(it?.grantAllowedPages) ? it.grantAllowedPages.join(', ') : '',
     }))
     setChecklistItems(normalized)
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [project?.id, workflow])
 
   const saveWorkflowConfig = async () => {
@@ -112,10 +171,21 @@ export default function ProjectDetailPage() {
   const plots = useMemo(() => project?.plots || [], [project?.plots])
   const offers = offersByProject[project?.id] || []
   const totalTrees = plots.reduce((s, p) => s + (p.trees || 0), 0)
+  const totalAreaM2 = useMemo(() => sumParcelArea(plots), [plots])
   const totalValue = plots.reduce((s, p) => s + (Number(p.totalPrice) || 0), 0)
   const totalRevenue = plots.reduce((s, p) => s + pRev(p), 0)
   const avail = plots.filter(p => p.status === 'available').length
-  const filteredPlots = useMemo(() => { const q = parcelQ.trim(); if (!q) return plots; return plots.filter(p => String(p.id).includes(q) || String(p.trees).includes(q) || String(p.area).includes(q)) }, [plots, parcelQ])
+  const filteredPlots = useMemo(() => {
+    const q = parcelQ.trim()
+    if (!q) return plots
+    const qLower = q.toLowerCase()
+    return plots.filter(p =>
+      (p.label && String(p.label).toLowerCase().includes(qLower)) ||
+      String(p.id).includes(q) ||
+      String(p.trees).includes(q) ||
+      String(p.area).includes(q)
+    )
+  }, [plots, parcelQ])
 
   const projHealth = healthLocal[project?.id] || { ...DH }
   const setHealth = (field, val) => { setHealthLocal(prev => ({ ...prev, [project.id]: { ...projHealth, [field]: Number(val) } })) }
@@ -165,150 +235,173 @@ export default function ProjectDetailPage() {
   }
   const avgPrice = plots.length ? totalValue / plots.length : 0
 
-  const openEdit = () => { if (!project) return; setPf({ title: project.title, city: project.city, region: project.region || '', area: project.area || '', year: String(project.year || ''), mapUrl: project.mapUrl || '' }); setModal('edit') }
+  const openEdit = () => { if (!project) return; setPf({ title: project.title, city: project.city, region: project.region || '', mapUrl: project.mapUrl || '' }); setModal('edit') }
   const saveEdit = async () => {
-    setSaving(true)
-    try {
-      await db.upsertProject({ id: project.id, title: pf.title.trim() || project.title, city: pf.city.trim() || project.city, region: pf.region.trim(), area: pf.area.trim() || project.area, year: Number(pf.year) || project.year, mapUrl: pf.mapUrl.trim() })
+    if (saving) return
+    const res = await runSafeAction({
+      setBusy: setSaving, onError: reportOpError, label: 'Enregistrer le projet',
+    }, async () => {
+      // Preserve existing area / year (no longer editable from this form) —
+      // db.upsertProject always writes these columns so we echo the stored
+      // values rather than clobbering them with empty strings / current year.
+      await db.upsertProject({
+        id: project.id,
+        title: pf.title.trim() || project.title,
+        city: pf.city.trim() || project.city,
+        region: pf.region.trim(),
+        area: project.area || '',
+        year: project.year || new Date().getFullYear(),
+        mapUrl: pf.mapUrl.trim(),
+      })
       emitInvalidate('projects')
       await refreshProjects()
-      setModal(null)
-    } catch (e) { console.error('saveEdit', e) }
-    finally { setSaving(false) }
+    })
+    if (res.ok) setModal(null)
   }
   const delProject = async () => {
-    setSaving(true)
-    try {
+    if (saving) return
+    const res = await runSafeAction({
+      setBusy: setSaving, onError: reportOpError, label: 'Supprimer le projet',
+    }, async () => {
       await db.deleteProject(project.id)
       emitInvalidate('projects')
-      navigate('/admin/projects')
-    }
-    catch (e) { console.error('delProject', e) }
-    finally { setSaving(false) }
+    })
+    if (res.ok) navigate('/admin/projects')
   }
 
-  const openAdd = () => { setPcf(EMPTY_PARCEL); setModal('add-parcel') }
+  const openAdd = () => { setPcf({ ...EMPTY_PARCEL, status: 'available' }); setModal('add-parcel') }
   const saveNew = async () => {
-    const pid = Number(pcf.id), t = Number(pcf.trees), a = Number(pcf.area), pp = Number(pcf.pricePerTree)
-    if (!Number.isFinite(pid) || pid <= 0 || !Number.isFinite(t) || t <= 0) return
-    setSaving(true)
-    try {
-      await db.upsertParcelForProject(project.id, { plotNumber: pid, trees: t, area: a > 0 ? a : 0, pricePerTree: pp > 0 ? pp : 0, totalPrice: Math.max(0, t * (pp > 0 ? pp : 0)), status: pcf.status || 'available' })
-      emitInvalidate('projects')
-      await refreshProjects()
-      setModal(null)
-    } catch (e) { console.error('saveNew', e) }
-    finally { setSaving(false) }
-  }
-  const openEditPl = (pl) => { setPcf({ id: String(pl.id), trees: String(pl.trees), area: String(pl.area), pricePerTree: String(pl.pricePerTree), status: pl.status, dbId: pl.dbId }); setModal({ type: 'edit-parcel', plotId: pl.id, plot: pl }) }
-  const saveEditPl = async (pl) => {
-    const t = Number(pcf.trees), a = Number(pcf.area), pp = Number(pcf.pricePerTree)
+    const t = Number(pcf.trees), a = Number(pcf.area)
     if (!Number.isFinite(t) || t <= 0) return
-    setSaving(true)
-    try {
-      await db.upsertParcelForProject(project.id, { dbId: pl.dbId || pcf.dbId, plotNumber: pl.id, trees: t, area: a > 0 ? a : pl.area, pricePerTree: pp > 0 ? pp : pl.pricePerTree, totalPrice: Math.max(0, t * (pp > 0 ? pp : pl.pricePerTree)), status: pcf.status || pl.status })
+    // The user-facing identifier (free-form text, optional but recommended).
+    // Trim + lowercase for storage / comparison; length capped by input.
+    const label = String(pcf.label || '').trim().toLowerCase().slice(0, 16)
+    if (!label) return
+    if (saving) return
+    const res = await runSafeAction({
+      setBusy: setSaving, onError: reportOpError, label: 'Ajouter la parcelle',
+    }, async () => {
+      // New parcels: no price/tree collected in the add form — pricing is
+      // handled later (per-batch). Start with pricePerTree=0 and let the
+      // edit flow / public pricing fill it in.
+      // `plotNumber: 0` asks db.upsertParcelForProject to auto-assign the
+      // next integer for this project (race-safe via unique index).
+      await db.upsertParcelForProject(project.id, { plotNumber: 0, label, trees: t, area: a > 0 ? a : 0, pricePerTree: 0, totalPrice: 0, status: 'available' })
       emitInvalidate('projects')
       await refreshProjects()
-      setModal(null)
-    } catch (e) { console.error('saveEditPl', e) }
-    finally { setSaving(false) }
+    })
+    if (res.ok) setModal(null)
+  }
+  const openEditPl = (pl) => { setPcf({ id: String(pl.id), label: pl.label || '', trees: String(pl.trees), area: String(pl.area), pricePerTree: String(pl.pricePerTree), status: pl.status, dbId: pl.dbId }); setModal({ type: 'edit-parcel', plotId: pl.id, plot: pl }) }
+  const saveEditPl = async (pl) => {
+    const t = Number(pcf.trees), a = Number(pcf.area)
+    if (!Number.isFinite(t) || t <= 0) return
+    if (saving) return
+    // Prix/arbre is no longer editable here — carry over the existing value.
+    const pp = Number(pl.pricePerTree) || 0
+    const label = String(pcf.label || '').trim().toLowerCase().slice(0, 16)
+    const res = await runSafeAction({
+      setBusy: setSaving, onError: reportOpError, label: 'Enregistrer la parcelle',
+    }, async () => {
+      await db.upsertParcelForProject(project.id, { dbId: pl.dbId || pcf.dbId, plotNumber: pl.id, label, trees: t, area: a > 0 ? a : pl.area, pricePerTree: pp, totalPrice: Math.max(0, t * pp), status: pcf.status || pl.status })
+      emitInvalidate('projects')
+      await refreshProjects()
+    })
+    if (res.ok) setModal(null)
   }
   const delPl = async (dbId) => {
-    setSaving(true)
-    try {
+    if (saving) return
+    const res = await runSafeAction({
+      setBusy: setSaving, onError: reportOpError, label: 'Supprimer la parcelle',
+    }, async () => {
       await db.deleteParcelById(dbId)
       emitInvalidate('projects')
       await refreshProjects()
-      setModal(null)
-    }
-    catch (e) { console.error('delPl', e) }
-    finally { setSaving(false) }
+    })
+    if (res.ok) setModal(null)
   }
 
   const openAddO = () => { setOf(EMPTY_OFFER); setEoIdx(-1); setEditOfferDbId(null); setModal('offer') }
-  const openEditO = (o, i) => { setOf({ label: o.name || o.label, avancePct: String(o.downPayment ?? o.avancePct), duration: String(o.duration), note: o.note || '' }); setEoIdx(i); setEditOfferDbId(o.dbId || null); setModal('offer') }
+  const openEditO = (o, i) => {
+    // Old rows predate the `mode` column — treat them as installments.
+    const mode = o.mode === 'cash' ? 'cash' : 'installments'
+    const pricePerSqm = Number(o.pricePerSqm ?? 0)
+    setOf({
+      label: o.name || o.label,
+      mode,
+      avancePct: String(o.downPayment ?? o.avancePct ?? ''),
+      duration: String(o.duration ?? ''),
+      cashAmount: String(o.cashAmount ?? ''),
+      note: o.note || '',
+      usePricePerSqm: pricePerSqm > 0,
+      pricePerSqm: pricePerSqm > 0 ? String(pricePerSqm) : '',
+    })
+    setEoIdx(i); setEditOfferDbId(o.dbId || null); setModal('offer')
+  }
   const saveO = async () => {
     if (!of.label.trim()) return
-    setSaving(true)
-    try {
-      await db.upsertOffer(project.id, { dbId: editOfferDbId, label: of.label.trim(), avancePct: Number(of.avancePct) || 0, duration: Number(of.duration) || 0, note: of.note.trim() })
+    if (saving) return
+    const isCash = of.mode === 'cash'
+    const payload = {
+      dbId: editOfferDbId,
+      label: of.label.trim(),
+      note: of.note.trim(),
+      mode: of.mode,
+      avancePct: isCash ? 0 : (Number(of.avancePct) || 0),
+      duration: isCash ? 0 : (Number(of.duration) || 0),
+      cashAmount: isCash ? (Number(of.cashAmount) || 0) : 0,
+      pricePerSqm: of.usePricePerSqm ? (Number(of.pricePerSqm) || 0) : 0,
+    }
+    const res = await runSafeAction({
+      setBusy: setSaving, onError: reportOpError, label: 'Enregistrer l’offre',
+    }, async () => {
+      await db.upsertOffer(project.id, payload)
       await refreshOffers()
-      setModal(null)
-    } catch (e) { console.error('saveO', e) }
-    finally { setSaving(false) }
+    })
+    if (res.ok) setModal(null)
   }
   const delO = async () => {
     if (!editOfferDbId) return
-    setSaving(true)
-    try { await db.deleteOffer(editOfferDbId); await refreshOffers(); setModal(null) }
-    catch (e) { console.error('delO', e) }
-    finally { setSaving(false) }
+    if (saving) return
+    const res = await runSafeAction({
+      setBusy: setSaving, onError: reportOpError, label: 'Supprimer l’offre',
+    }, async () => {
+      await db.deleteOffer(editOfferDbId)
+      await refreshOffers()
+    })
+    if (res.ok) setModal(null)
   }
 
-  // Distinguish "still loading" from "genuinely deleted". The empty
-  // "Projet introuvable" state should only appear AFTER the fetch settled AND
-  // the project id still has no match — otherwise we briefly flash an empty
-  // state on every hard-refresh, which looked like a bug to the user.
+  // Plan 03 §6.6: a single <RenderDataGate> handles the four states
+  // (loading / error / not-found-after-ready / found). Previously this was
+  // hand-rolled inline and could get stuck on the skeleton if the list never
+  // resolved. The gate is keyed on the projects list; the concrete "not
+  // found" empty state fires only when the fetch is ready but the id does
+  // not resolve.
   if (!project) {
-    if (projectsLoading || projects.length === 0) {
-      return (
-        <div className="zitu-page" dir="ltr"><div className="pdp-root">
-          <button type="button" className="ds-back-btn" onClick={() => navigate('/admin/projects')}>
-            <span className="ds-back-btn__icon">←</span><span className="ds-back-btn__label">Projets</span>
-          </button>
-          {/* Skeleton shimmer while the projects list is still loading */}
-          <div className="pdp-hero pdp-skel">
-            <div className="pdp-hero__visual pdp-skel__box" />
-            <div className="pdp-hero__body">
-              <div className="pdp-skel__line pdp-skel__line--chip" />
-              <div className="pdp-skel__line pdp-skel__line--title" />
-              <div className="pdp-skel__line pdp-skel__line--meta" />
-              <div className="pdp-skel__line pdp-skel__line--stats" />
-              <div className="pdp-skel__line pdp-skel__line--progress" />
-            </div>
-          </div>
-          <div className="pdp-actions pdp-skel">
-            <div className="pdp-skel__line pdp-skel__line--btn" />
-            <div className="pdp-skel__line pdp-skel__line--btn-sm" />
-          </div>
-          <div className="pdp-kpi-strip pdp-skel">
-            {[0, 1, 2, 3].map((i) => (
-              <div key={i} className="pdp-kpi">
-                <div className="pdp-skel__box pdp-skel__box--glyph" />
-                <div className="pdp-kpi__main">
-                  <div className="pdp-skel__line pdp-skel__line--lbl" />
-                  <div className="pdp-skel__line pdp-skel__line--val" />
-                </div>
-              </div>
-            ))}
-          </div>
-          <div className="pdp-tabs pdp-skel">
-            {[0, 1, 2, 3, 4].map((i) => (
-              <div key={i} className="pdp-skel__line pdp-skel__line--tab" />
-            ))}
-          </div>
-          <div className="pdp-section pdp-skel">
-            <div className="pdp-skel__line pdp-skel__line--title" />
-            <div className="pdp-skel__rows">
-              {[0, 1, 2].map((i) => (
-                <div key={i} className="pdp-skel__line pdp-skel__line--row" />
-              ))}
-            </div>
-          </div>
-        </div></div>
-      )
-    }
+    const listReady = !projectsLoading && !projectsError
     return (
       <div className="zitu-page" dir="ltr"><div className="pdp-root">
         <button type="button" className="ds-back-btn" onClick={() => navigate('/admin/projects')}>
           <span className="ds-back-btn__icon">←</span><span className="ds-back-btn__label">Projets</span>
         </button>
-        <div className="pdp-empty">
-          <div className="pdp-empty__icon">📭</div>
-          <strong className="pdp-empty__title">Projet introuvable</strong>
-          <p className="pdp-empty__hint">Ce projet n'existe plus ou a été supprimé.</p>
-          <button type="button" className="pdp-btn pdp-btn--primary" onClick={() => navigate('/admin/projects')}>Retour à la liste</button>
-        </div>
+        <RenderDataGate
+          loading={projectsLoading && projects.length === 0}
+          error={projectsError}
+          data={listReady ? [] : null}
+          onRetry={refreshProjects}
+          skeleton={<SkeletonDetail sections={4} lines={4} />}
+          empty={
+            <EmptyState
+              icon="📭"
+              title="Projet introuvable"
+              hint="Ce projet n'existe plus ou a été supprimé."
+              action={{ label: 'Retour à la liste', onClick: () => navigate('/admin/projects') }}
+            />
+          }
+        >
+          {() => null}
+        </RenderDataGate>
       </div></div>
     )
   }
@@ -339,6 +432,10 @@ export default function ProjectDetailPage() {
           <span className="ds-back-btn__icon">←</span><span className="ds-back-btn__label">Projets</span>
         </button>
 
+        {opError && (
+          <div className="pdp-alert pdp-alert--err" role="alert">{opError}</div>
+        )}
+
         {/* ── Hero ── Map thumbnail + identity + progress */}
         {(() => {
           const engaged = Math.max(0, plots.length - avail)
@@ -368,10 +465,10 @@ export default function ProjectDetailPage() {
                 <p className="pdp-hero__meta">
                   <span className="pdp-hero__meta-icon" aria-hidden>📍</span>
                   <span>{project.city || '—'}{project.region ? ` · ${project.region}` : ''}</span>
-                  {project.area ? (
+                  {totalAreaM2 > 0 ? (
                     <>
                       <span className="pdp-hero__meta-dot" aria-hidden>•</span>
-                      <span>{project.area}</span>
+                      <span>{fmtArea(totalAreaM2)}</span>
                     </>
                   ) : null}
                 </p>
@@ -732,7 +829,7 @@ export default function ProjectDetailPage() {
           <div className="pdp-search-row">
             <div className="pdp-search-wrap">
               <span className="pdp-search-wrap__icon" aria-hidden>🔎</span>
-              <input className="pdp-search" placeholder="Rechercher : n° parcelle, arbres, surface…" value={parcelQ} onChange={e => setParcelQ(e.target.value)} />
+              <input className="pdp-search" placeholder="Rechercher : identifiant, arbres, surface…" value={parcelQ} onChange={e => setParcelQ(e.target.value)} />
             </div>
           </div>
 
@@ -757,7 +854,7 @@ export default function ProjectDetailPage() {
                   <table className="pdp-parcel-table">
                     <thead>
                       <tr>
-                        <th>#</th>
+                        <th>Parcelle</th>
                         <th>Arbres</th>
                         <th>m²</th>
                         <th>Prix</th>
@@ -767,7 +864,7 @@ export default function ProjectDetailPage() {
                     <tbody>
                       {filteredPlots.map(pl => (
                         <tr key={pl.dbId || pl.id} onClick={() => openEditPl(pl)}>
-                          <td className="pdp-td--id">#{pl.id}</td>
+                          <td className="pdp-td--id">{pl.label || pl.id}</td>
                           <td className="pdp-td--strong">{pl.trees}</td>
                           <td>{pl.area}</td>
                           <td className="pdp-td--strong">{(Number(pl.totalPrice) || 0).toLocaleString('fr-FR')}</td>
@@ -809,7 +906,10 @@ export default function ProjectDetailPage() {
             </div>
           ) : (
             <div className="pdp-offers">{offers.map((o, i) => {
-              const pv = avgPrice && o.duration ? { mo: (avgPrice - avgPrice * (o.downPayment ?? o.avancePct ?? 0) / 100) / o.duration } : null
+              const isCash = o.mode === 'cash'
+              const pv = !isCash && avgPrice && o.duration
+                ? { mo: (avgPrice - avgPrice * (o.downPayment ?? o.avancePct ?? 0) / 100) / o.duration }
+                : null
               return (
                 <button key={o.dbId || i} type="button" className="pdp-offer-card" onClick={() => openEditO(o, i)}>
                   <div className="pdp-offer-card__top">
@@ -817,10 +917,20 @@ export default function ProjectDetailPage() {
                     {o.note && <span className="pdp-offer-card__note">{o.note}</span>}
                   </div>
                   <div className="pdp-offer-card__meta">
-                    <span><strong>{o.downPayment ?? o.avancePct}%</strong> avance</span>
-                    <span>·</span>
-                    <span><strong>{o.duration}</strong> mois</span>
-                    {pv && <><span>·</span><span>~<strong>{Math.round(pv.mo).toLocaleString('fr-FR')}</strong> DT/mois</span></>}
+                    {isCash ? (
+                      <>
+                        <span><strong>Comptant</strong></span>
+                        {Number(o.cashAmount) > 0 && (<><span>·</span><span><strong>{Number(o.cashAmount).toLocaleString('fr-FR')}</strong> DT</span></>)}
+                      </>
+                    ) : (
+                      <>
+                        <span><strong>{o.downPayment ?? o.avancePct}%</strong> avance</span>
+                        <span>·</span>
+                        <span><strong>{o.duration}</strong> mois</span>
+                        {pv && <><span>·</span><span>~<strong>{Math.round(pv.mo).toLocaleString('fr-FR')}</strong> DT/mois</span></>}
+                      </>
+                    )}
+                    {Number(o.pricePerSqm) > 0 && (<><span>·</span><span>{Number(o.pricePerSqm).toLocaleString('fr-FR')} DT/m²</span></>)}
                   </div>
                 </button>
               )
@@ -837,9 +947,12 @@ export default function ProjectDetailPage() {
               <div className="zitu-page__field"><label className="zitu-page__field-label">Ville</label><input className="zitu-page__input" value={pf.city} onChange={e => setPf(f => ({ ...f, city: e.target.value }))} /></div>
               <div className="zitu-page__field"><label className="zitu-page__field-label">Région</label><input className="zitu-page__input" value={pf.region} onChange={e => setPf(f => ({ ...f, region: e.target.value }))} /></div>
             </div>
-            <div className="zitu-page__form-grid">
-              <div className="zitu-page__field"><label className="zitu-page__field-label">Superficie</label><input className="zitu-page__input" value={pf.area} onChange={e => setPf(f => ({ ...f, area: e.target.value }))} /></div>
-              <div className="zitu-page__field"><label className="zitu-page__field-label">Année</label><input className="zitu-page__input" type="number" value={pf.year} onChange={e => setPf(f => ({ ...f, year: e.target.value }))} /></div>
+            <div className="zitu-page__field">
+              <label className="zitu-page__field-label">Superficie</label>
+              <div className="zitu-page__input" style={{ display: 'flex', alignItems: 'center', background: '#f8fafc', color: '#0f172a', cursor: 'default' }} aria-readonly="true">
+                {fmtArea(totalAreaM2)}
+              </div>
+              <span className="pdp-field__hint">Calculée automatiquement d'après les parcelles.</span>
             </div>
             <div className="zitu-page__field"><label className="zitu-page__field-label">URL carte</label><input className="zitu-page__input" value={pf.mapUrl} onChange={e => setPf(f => ({ ...f, mapUrl: e.target.value }))} /></div>
             <div className="zitu-page__form-actions">
@@ -853,17 +966,25 @@ export default function ProjectDetailPage() {
         <AdminModal open={modal === 'add-parcel'} onClose={() => setModal(null)} title="Ajouter une parcelle">
           <div className="pdp-modal-body">
             <div className="zitu-page__form-grid">
-              <div className="zitu-page__field"><label className="zitu-page__field-label">N° *</label><input className="zitu-page__input" type="number" placeholder="6" value={pcf.id} onChange={e => setPcf(f => ({ ...f, id: e.target.value }))} /></div>
+              <div className="zitu-page__field">
+                <label className="zitu-page__field-label">Identifiant *</label>
+                <input
+                  className="zitu-page__input"
+                  type="text"
+                  maxLength={16}
+                  placeholder="a1, b1, 1, A-42…"
+                  value={pcf.label}
+                  onChange={e => setPcf(f => ({ ...f, label: e.target.value }))}
+                />
+                <span className="pdp-field__hint">Texte libre, unique dans le projet. Le n° interne est attribué automatiquement.</span>
+              </div>
               <div className="zitu-page__field"><label className="zitu-page__field-label">Arbres *</label><input className="zitu-page__input" type="number" placeholder="50" value={pcf.trees} onChange={e => setPcf(f => ({ ...f, trees: e.target.value }))} /></div>
             </div>
-            <div className="zitu-page__form-grid">
-              <div className="zitu-page__field"><label className="zitu-page__field-label">Surface m²</label><input className="zitu-page__input" type="number" placeholder="400" value={pcf.area} onChange={e => setPcf(f => ({ ...f, area: e.target.value }))} /></div>
-              <div className="zitu-page__field"><label className="zitu-page__field-label">Prix/arbre</label><input className="zitu-page__input" type="number" placeholder="1500" value={pcf.pricePerTree} onChange={e => setPcf(f => ({ ...f, pricePerTree: e.target.value }))} /></div>
-            </div>
-            <div className="zitu-page__field"><label className="zitu-page__field-label">Statut</label><select className="zitu-page__input" value={pcf.status} onChange={e => setPcf(f => ({ ...f, status: e.target.value }))}><option value="available">Disponible</option><option value="reserved">Réservée</option><option value="sold">Vendue</option></select></div>
+            <div className="zitu-page__field"><label className="zitu-page__field-label">Surface m²</label><input className="zitu-page__input" type="number" placeholder="400" value={pcf.area} onChange={e => setPcf(f => ({ ...f, area: e.target.value }))} /></div>
+            <p className="pdp-field__hint" style={{ margin: 0 }}>La nouvelle parcelle est créée avec le statut <strong>Disponible</strong>. Le prix et les lots d'arbres se règlent depuis l'édition.</p>
             <div className="zitu-page__form-actions">
               <button type="button" className="zitu-page__btn" onClick={() => setModal(null)}>Annuler</button>
-              <button type="button" className="zitu-page__btn zitu-page__btn--primary" disabled={!pcf.id || !pcf.trees || saving} onClick={saveNew}>{saving ? 'Ajout…' : 'Ajouter'}</button>
+              <button type="button" className="zitu-page__btn zitu-page__btn--primary" disabled={!pcf.label || !pcf.trees || saving} onClick={saveNew}>{saving ? 'Ajout…' : 'Ajouter'}</button>
             </div>
           </div>
         </AdminModal>
@@ -972,12 +1093,67 @@ export default function ProjectDetailPage() {
         <AdminModal open={modal === 'offer'} onClose={() => setModal(null)} title={eoIdx >= 0 ? "Modifier l'offre" : 'Nouvelle offre'}>
           <div className="pdp-modal-body">
             <div className="zitu-page__field"><label className="zitu-page__field-label">Nom *</label><input className="zitu-page__input" placeholder="Essentiel 20/24" value={of.label} onChange={e => setOf(f => ({ ...f, label: e.target.value }))} /></div>
-            <div className="zitu-page__form-grid">
-              <div className="zitu-page__field"><label className="zitu-page__field-label">Avance %</label><input className="zitu-page__input" type="number" placeholder="20" value={of.avancePct} onChange={e => setOf(f => ({ ...f, avancePct: e.target.value }))} /></div>
-              <div className="zitu-page__field"><label className="zitu-page__field-label">Mois</label><input className="zitu-page__input" type="number" placeholder="24" value={of.duration} onChange={e => setOf(f => ({ ...f, duration: e.target.value }))} /></div>
+
+            {/* Mode de paiement — segmented control. 'cash' collapses the
+                installment fields to a single "Montant total" input. */}
+            <div className="zitu-page__field">
+              <label className="zitu-page__field-label">Mode de paiement</label>
+              <div role="radiogroup" aria-label="Mode de paiement" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                {[
+                  { v: 'cash', lbl: '💵 Comptant' },
+                  { v: 'installments', lbl: '📅 Versements' },
+                ].map((opt) => {
+                  const active = of.mode === opt.v
+                  return (
+                    <button
+                      key={opt.v}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      onClick={() => setOf((f) => ({ ...f, mode: opt.v }))}
+                      className={`pdp-btn${active ? ' pdp-btn--primary' : ''}`}
+                      style={{ justifyContent: 'center' }}
+                    >
+                      {opt.lbl}
+                    </button>
+                  )
+                })}
+              </div>
             </div>
+
+            {of.mode === 'cash' ? (
+              <div className="zitu-page__field">
+                <label className="zitu-page__field-label">Montant total (DT)</label>
+                <input className="zitu-page__input" type="number" placeholder="18000" value={of.cashAmount} onChange={e => setOf(f => ({ ...f, cashAmount: e.target.value }))} />
+                <span className="pdp-field__hint">Prix unique à régler en une fois.</span>
+              </div>
+            ) : (
+              <div className="zitu-page__form-grid">
+                <div className="zitu-page__field"><label className="zitu-page__field-label">Avance %</label><input className="zitu-page__input" type="number" placeholder="20" value={of.avancePct} onChange={e => setOf(f => ({ ...f, avancePct: e.target.value }))} /></div>
+                <div className="zitu-page__field"><label className="zitu-page__field-label">Mois</label><input className="zitu-page__input" type="number" placeholder="24" value={of.duration} onChange={e => setOf(f => ({ ...f, duration: e.target.value }))} /></div>
+              </div>
+            )}
+
             <div className="zitu-page__field"><label className="zitu-page__field-label">Note</label><input className="zitu-page__input" placeholder="Le plus populaire…" value={of.note} onChange={e => setOf(f => ({ ...f, note: e.target.value }))} /></div>
-            {avgPrice > 0 && Number(of.avancePct) > 0 && Number(of.duration) > 0 && (
+
+            {/* Optional m² pricing metadata — the full pricing math isn't wired
+                here yet; we just persist the value so downstream code can use it. */}
+            <label className="pdp-check-row">
+              <input
+                type="checkbox"
+                checked={!!of.usePricePerSqm}
+                onChange={(e) => setOf((f) => ({ ...f, usePricePerSqm: e.target.checked }))}
+              />
+              Calcul au prix du m²
+            </label>
+            {of.usePricePerSqm && (
+              <div className="zitu-page__field">
+                <label className="zitu-page__field-label">Prix / m² (DT)</label>
+                <input className="zitu-page__input" type="number" placeholder="120" value={of.pricePerSqm} onChange={e => setOf(f => ({ ...f, pricePerSqm: e.target.value }))} />
+              </div>
+            )}
+
+            {of.mode !== 'cash' && avgPrice > 0 && Number(of.avancePct) > 0 && Number(of.duration) > 0 && (
               <div className="pdp-offer-preview">
                 <span className="pdp-offer-preview__label">Simulation (parcelle moy. {fmt(avgPrice)})</span>
                 <div className="pdp-offer-preview__row"><span>Avance</span><strong>{fmt(avgPrice * Number(of.avancePct) / 100)}</strong></div>
@@ -1006,20 +1182,45 @@ export default function ProjectDetailPage() {
 
         {epData && (
           <div className="prj-overlay" onClick={() => setModal(null)}><div className="prj-sheet" onClick={e => e.stopPropagation()}>
-            <div className="prj-sheet__head"><h3 className="prj-sheet__title">Parcelle #{epData.plotId}</h3><button type="button" className="prj-sheet__close" onClick={() => setModal(null)}>✕</button></div>
+            <div className="prj-sheet__head">
+              <h3 className="prj-sheet__title">
+                Parcelle {epData.plot?.label || epData.plotId}
+                <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 500, color: '#64748b' }}>N° interne: {epData.plotId}</span>
+              </h3>
+              <button type="button" className="prj-sheet__close" onClick={() => setModal(null)}>✕</button>
+            </div>
             <div className="pdp-modal-body">
+              <div className="zitu-page__field">
+                <label className="zitu-page__field-label">Identifiant</label>
+                <input
+                  className="zitu-page__input"
+                  type="text"
+                  maxLength={16}
+                  placeholder="a1, b1, 1, A-42…"
+                  value={pcf.label}
+                  onChange={e => setPcf(f => ({ ...f, label: e.target.value }))}
+                />
+                <span className="pdp-field__hint">Unique dans le projet. Laisser vide pour revenir au N° interne.</span>
+              </div>
               <div className="zitu-page__form-grid">
                 <div className="zitu-page__field"><label className="zitu-page__field-label">Arbres</label><input className="zitu-page__input" type="number" value={pcf.trees} onChange={e => setPcf(f => ({ ...f, trees: e.target.value }))} /></div>
                 <div className="zitu-page__field"><label className="zitu-page__field-label">Surface m²</label><input className="zitu-page__input" type="number" value={pcf.area} onChange={e => setPcf(f => ({ ...f, area: e.target.value }))} /></div>
               </div>
-              <div className="zitu-page__form-grid">
-                <div className="zitu-page__field"><label className="zitu-page__field-label">Prix/arbre</label><input className="zitu-page__input" type="number" value={pcf.pricePerTree} onChange={e => setPcf(f => ({ ...f, pricePerTree: e.target.value }))} /></div>
-                <div className="zitu-page__field"><label className="zitu-page__field-label">Statut</label><select className="zitu-page__input" value={pcf.status} onChange={e => setPcf(f => ({ ...f, status: e.target.value }))}><option value="available">Disponible</option><option value="reserved">Réservée</option><option value="sold">Vendue</option></select></div>
-              </div>
-              <div className="pdp-edit-preview">
-                <div className="pdp-edit-preview__item"><span>Prix total</span><strong>{fmt(Number(pcf.trees) * Number(pcf.pricePerTree))}</strong></div>
-                <div className="pdp-edit-preview__item"><span>Revenu/an</span><strong>~{pRev(epData.plot).toLocaleString('fr-FR')} DT</strong></div>
-              </div>
+              <div className="zitu-page__field"><label className="zitu-page__field-label">Statut</label><select className="zitu-page__input" value={pcf.status} onChange={e => setPcf(f => ({ ...f, status: e.target.value }))}><option value="available">Disponible</option><option value="reserved">Réservée</option><option value="sold">Vendue</option></select></div>
+              {(() => {
+                // Prix total: sum of batch prices if present, else the stored
+                // total_price. Keeps the preview honest now that Prix/arbre
+                // isn't a single value anymore.
+                const batches = epData.plot.treeBatches || []
+                const batchTotal = batches.reduce((s, b) => s + (Number(b.count) || 0) * (Number(b.pricePerTree) || 0), 0)
+                const totalPrice = batchTotal > 0 ? batchTotal : (Number(epData.plot.totalPrice) || 0)
+                return (
+                  <div className="pdp-edit-preview">
+                    <div className="pdp-edit-preview__item"><span>Prix total</span><strong>{fmt(totalPrice)}</strong></div>
+                    <div className="pdp-edit-preview__item"><span>Revenu/an</span><strong>~{pRev(epData.plot).toLocaleString('fr-FR')} DT</strong></div>
+                  </div>
+                )
+              })()}
               {epData.plot.treeBatches?.length > 0 && (
                 <div className="pdp-batches">
                   <div className="pdp-field__label" style={{ marginBottom: 4 }}>Verger</div>

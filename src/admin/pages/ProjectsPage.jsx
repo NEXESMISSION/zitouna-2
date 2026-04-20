@@ -3,381 +3,419 @@ import { useNavigate } from 'react-router-dom'
 import { useProjects, useOffers } from '../../lib/useSupabase.js'
 import { upsertProject } from '../../lib/db.js'
 import { emitInvalidate } from '../../lib/dataEvents.js'
+import { runSafeAction } from '../../lib/runSafeAction.js'
 import AdminModal from '../components/AdminModal.jsx'
-import './zitouna-admin-page.css'
+import { useToast } from '../components/AdminToast.jsx'
+import RenderDataGate from '../../components/RenderDataGate.jsx'
+import EmptyState from '../../components/EmptyState.jsx'
+import { SkeletonCard } from '../../components/skeletons/index.js'
+import { getPagerPages } from './pager-util.js'
+import './sell-field.css'
 import './projects-admin.css'
 
-const EMPTY_FORM = { title: '', city: '', region: '', area: '', year: String(new Date().getFullYear()), mapUrl: '' }
+const EMPTY_FORM = { title: '', city: '', region: '', mapUrl: '' }
+const PROJECTS_PER_PAGE = 12
 
-// Page-scoped styles for a card grid and a few visual polish pieces the
-// design system tokens don't cover. Kept purely additive & `.pj-` prefixed so
-// it never competes with shared admin CSS or the `.zadm-*` layer.
-const LOCAL_STYLES = `
-.pj-card-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 16px;
+function initials(title) {
+  const parts = String(title || '').trim().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return 'P'
+  return `${parts[0][0] || ''}${parts[1]?.[0] || ''}`.toUpperCase()
 }
-.pj-project-card {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 16px;
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 10px;
-  text-align: left;
-  cursor: pointer;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
-  transition: border-color 120ms cubic-bezier(0.2, 0.8, 0.2, 1),
-              box-shadow 120ms cubic-bezier(0.2, 0.8, 0.2, 1),
-              transform 120ms cubic-bezier(0.2, 0.8, 0.2, 1);
+
+// Decide the accent tone for a project card based on availability health.
+// Empty projects → gray/blue (no data yet), healthy (>50% avail) → green,
+// running low (<=20% avail) → orange, sold out → red.
+function projectTone(total, avail) {
+  if (!total) return 'blue'
+  const ratio = avail / total
+  if (ratio === 0) return 'red'
+  if (ratio <= 0.2) return 'orange'
+  if (ratio >= 0.5) return 'green'
+  return 'blue'
 }
-.pj-project-card:hover {
-  border-color: #2563eb;
-  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
-  transform: translateY(-1px);
+
+// Sum of parcel surfaces (area_m2 — exposed on the UI shape as `plot.area`).
+// Formatted as "X Ha" once >= 10 000 m², otherwise "Y m²". Returns '' when
+// no parcels yet so the caller can substitute a dash.
+function formatProjectArea(plots) {
+  const total = (plots || []).reduce((s, x) => s + (Number(x.area) || 0), 0)
+  if (!total) return ''
+  if (total >= 10000) {
+    const ha = total / 10000
+    const rounded = ha >= 10 ? Math.round(ha) : Math.round(ha * 10) / 10
+    return `${rounded.toLocaleString('fr-FR')} Ha`
+  }
+  return `${Math.round(total).toLocaleString('fr-FR')} m²`
 }
-.pj-project-card:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25);
-  border-color: #2563eb;
+
+function projectBadge(total, avail) {
+  if (!total) return { label: 'Nouveau', tone: 'blue' }
+  if (avail === 0) return { label: 'Complet', tone: 'red' }
+  if (avail / total <= 0.2) return { label: 'Derniers lots', tone: 'orange' }
+  return { label: `${avail} dispo`, tone: 'green' }
 }
-.pj-project-card__head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
-}
-.pj-project-card__title {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 600;
-  color: #0f172a;
-  letter-spacing: -0.01em;
-  line-height: 1.3;
-}
-.pj-project-card__meta {
-  margin: 4px 0 0;
-  font-size: 13px;
-  color: #475569;
-  line-height: 1.45;
-}
-.pj-project-card__pills {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.pj-project-card__foot {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-  padding-top: 12px;
-  border-top: 1px solid #e2e8f0;
-  font-size: 12px;
-  color: #94a3b8;
-}
-.pj-project-card__year {
-  font-weight: 600;
-  color: #0f172a;
-}
-`
 
 export default function ProjectsPage() {
   const navigate = useNavigate()
-  const { projects, loading } = useProjects()
+  const { addToast } = useToast()
+  const { projects, loading, error, refresh } = useProjects()
   const { offersByProject } = useOffers()
   const [query, setQuery] = useState('')
+  const [filter, setFilter] = useState('all') // all | available | soldout | offers
+  const [page, setPage] = useState(1)
   const [showCreate, setShowCreate] = useState(false)
   const [form, setForm] = useState(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
 
+  // Enriched projects w/ aggregates
+  const enriched = useMemo(() => (
+    (projects || []).map((p) => {
+      const pl = p.plots || []
+      const sold = pl.filter((x) => x.status === 'sold').length
+      const reserved = pl.filter((x) => x.status === 'reserved').length
+      const avail = pl.length - sold - reserved
+      const trees = pl.reduce((t, x) => t + (Number(x.trees) || 0), 0)
+      const revenue = pl.reduce((t, x) => t + (x.status === 'sold' ? (Number(x.totalPrice) || 0) : 0), 0)
+      const offers = (offersByProject[p.id] || []).length
+      return { ...p, _sold: sold, _reserved: reserved, _avail: Math.max(0, avail), _plotsTotal: pl.length, _trees: trees, _revenue: revenue, _offers: offers }
+    })
+  ), [projects, offersByProject])
+
+  // Counts for the filter chips, always computed over the full (un-queried) set
+  const counts = useMemo(() => ({
+    all: enriched.length,
+    available: enriched.filter((p) => p._avail > 0).length,
+    soldout: enriched.filter((p) => p._plotsTotal > 0 && p._avail === 0).length,
+    offers: enriched.filter((p) => p._offers > 0).length,
+  }), [enriched])
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return projects
-    return projects.filter(p => (p.title || '').toLowerCase().includes(q) || (p.city || '').toLowerCase().includes(q) || (p.region || '').toLowerCase().includes(q))
-  }, [projects, query])
-
-  const totalParcels = projects.reduce((s, p) => s + (p.plots?.length || 0), 0)
-  const totalTrees = projects.reduce((s, p) => s + (p.plots || []).reduce((t, pl) => t + (pl.trees || 0), 0), 0)
-
-  const createProject = async () => {
-    if (!form.title.trim() || !form.city.trim() || saving) return
-    setSaving(true)
-    try {
-      await upsertProject({
-        title: form.title.trim(),
-        city: form.city.trim(),
-        region: form.region.trim(),
-        area: form.area.trim() || '-',
-        year: Number(form.year.trim()) || new Date().getFullYear(),
-        mapUrl: form.mapUrl.trim(),
+    return enriched
+      .filter((p) => {
+        if (filter === 'available') return p._avail > 0
+        if (filter === 'soldout') return p._plotsTotal > 0 && p._avail === 0
+        if (filter === 'offers') return p._offers > 0
+        return true
       })
-      emitInvalidate('projects')
-      setShowCreate(false)
-      setForm(EMPTY_FORM)
-    } catch (e) {
-      console.error('createProject', e)
-    } finally {
-      setSaving(false)
-    }
-  }
+      .filter((p) => !q
+        || String(p.title || '').toLowerCase().includes(q)
+        || String(p.city || '').toLowerCase().includes(q)
+        || String(p.region || '').toLowerCase().includes(q))
+  }, [enriched, query, filter])
+
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PROJECTS_PER_PAGE))
+  const safePage = Math.min(Math.max(1, page), pageCount)
+  const pagedProjects = useMemo(
+    () => filtered.slice((safePage - 1) * PROJECTS_PER_PAGE, safePage * PROJECTS_PER_PAGE),
+    [filtered, safePage],
+  )
+
+  const totalParcels = enriched.reduce((s, p) => s + p._plotsTotal, 0)
+  const totalTrees = enriched.reduce((s, p) => s + p._trees, 0)
 
   const canSubmit = Boolean(form.title.trim() && form.city.trim()) && !saving
   const hasQuery = query.trim().length > 0
 
-  return (
-    <div className="zadm-page" dir="ltr">
-      <style>{LOCAL_STYLES}</style>
+  const onQueryChange = (e) => { setQuery(e.target.value); setPage(1) }
+  const onFilterChange = (v) => { setFilter(v); setPage(1) }
 
-      <header className="zadm-page__head">
-        <div className="zadm-page__head-text">
-          <h1 className="zadm-page__title">Projets &amp; parcelles</h1>
-          <p className="zadm-page__subtitle">Vue d’ensemble de tous les projets fonciers</p>
+  const createProject = async () => {
+    if (!canSubmit) return
+    const res = await runSafeAction(
+      {
+        setBusy: setSaving,
+        onError: (msg) => addToast(msg, 'error'),
+        label: 'Créer le projet',
+      },
+      async () => {
+        // Superficie is computed from parcels at read time (no input on create).
+        // year_started defaults server-side to current year; we no longer expose it.
+        await upsertProject({
+          title: form.title.trim(),
+          city: form.city.trim(),
+          region: form.region.trim(),
+          mapUrl: form.mapUrl.trim(),
+        })
+        emitInvalidate('projects')
+      },
+    )
+    if (res.ok) {
+      addToast('Projet créé', 'success')
+      setShowCreate(false)
+      setForm(EMPTY_FORM)
+    }
+  }
+
+  // Plan 03 §3.1: keep the inline `showSkeletons` only for small hero-level
+  // KPI placeholders (<strong>). The main project grid is now gated by
+  // <RenderDataGate> below so we never flash the "Aucun projet" empty state
+  // before the first fetch resolves.
+  const kpiLoading = loading && enriched.length === 0
+
+  return (
+    <div className="sell-field" dir="ltr">
+      <button type="button" className="sp-back-btn" onClick={() => navigate('/admin')}>
+        <span className="sp-back-btn__icon-wrap" aria-hidden>←</span>
+        <span>Retour</span>
+      </button>
+
+      <header className="sp-hero">
+        <div className="sp-hero__avatar" aria-hidden style={{ background: 'rgba(255,255,255,0.14)' }}>
+          <span style={{ fontSize: 20 }}>🌳</span>
         </div>
-        <div className="zadm-page__head-actions">
-          <button
-            type="button"
-            className="zadm-btn zadm-btn--ghost zadm-btn--sm"
-            onClick={() => navigate('/admin')}
-          >
-            ← Retour
-          </button>
-          <button
-            type="button"
-            className="zadm-btn zadm-btn--primary"
-            onClick={() => { setForm(EMPTY_FORM); setShowCreate(true) }}
-          >
-            + Nouveau projet
-          </button>
+        <div className="sp-hero__info">
+          <h1 className="sp-hero__name">Projets &amp; parcelles</h1>
+          <p className="sp-hero__role">Vue d'ensemble de tous les projets fonciers</p>
         </div>
+        <div className="sp-hero__kpis">
+          <span className="sp-hero__kpi-num">
+            {kpiLoading ? <span className="sk-num sk-num--wide" /> : enriched.length}
+          </span>
+          <span className="sp-hero__kpi-label">projet{enriched.length > 1 ? 's' : ''}</span>
+        </div>
+        <button
+          type="button"
+          className="pa-hero-action"
+          onClick={() => { setForm(EMPTY_FORM); setShowCreate(true) }}
+          disabled={saving}
+          title="Créer un nouveau projet"
+        >
+          <span aria-hidden>＋</span>
+          <span>Nouveau</span>
+        </button>
       </header>
 
-      <div className="zadm-page__body">
+      <div className="sp-cat-bar">
+        <div className="sp-cat-stats">
+          <strong>{kpiLoading ? <span className="sk-num" /> : enriched.length}</strong> projet{enriched.length > 1 ? 's' : ''}
+          <span className="sp-cat-stat-dot" />
+          <strong>{kpiLoading ? <span className="sk-num" /> : totalParcels}</strong> parcelles
+          <span className="sp-cat-stat-dot" />
+          <strong>{kpiLoading ? <span className="sk-num" /> : totalTrees.toLocaleString('fr-FR')}</strong> arbres
+        </div>
+        <div className="sp-cat-filters">
+          <input
+            className="sp-cat-search"
+            placeholder="Rechercher un projet, une ville, une région…"
+            value={query}
+            onChange={onQueryChange}
+            aria-label="Rechercher un projet"
+          />
+          <select
+            className="sp-cat-select"
+            value={filter}
+            onChange={(e) => onFilterChange(e.target.value)}
+            aria-label="Filtrer les projets"
+          >
+            <option value="all">Tous ({counts.all})</option>
+            <option value="available">Disponibles ({counts.available})</option>
+            <option value="soldout">Complets ({counts.soldout})</option>
+            <option value="offers">Avec offres ({counts.offers})</option>
+          </select>
+        </div>
+      </div>
 
-        {/* KPI overview */}
-        <section className="zadm-kpi-grid" aria-label="Indicateurs globaux">
-          <div className="zadm-kpi">
-            <span className="zadm-kpi__label">Projets</span>
-            <span className="zadm-kpi__value">{projects.length}</span>
-          </div>
-          <div className="zadm-kpi">
-            <span className="zadm-kpi__label">Parcelles</span>
-            <span className="zadm-kpi__value">{totalParcels}</span>
-          </div>
-          <div className="zadm-kpi">
-            <span className="zadm-kpi__label">Arbres</span>
-            <span className="zadm-kpi__value">{totalTrees.toLocaleString('fr-FR')}</span>
-          </div>
-        </section>
-
-        {/* Filters */}
-        <section className="zadm-card">
-          <div className="zadm-card__body">
-            <div className="zadm-filters" role="search">
-              <div className="zadm-search">
-                <span className="zadm-search__icon" aria-hidden>🔎</span>
-                <input
-                  type="search"
-                  className="zadm-search__input"
-                  placeholder="Rechercher un projet, une ville, une région…"
-                  value={query}
-                  onChange={e => setQuery(e.target.value)}
-                  aria-label="Rechercher un projet"
-                />
-              </div>
-              {hasQuery && (
-                <button
-                  type="button"
-                  className="zadm-btn zadm-btn--ghost zadm-btn--sm"
-                  onClick={() => setQuery('')}
-                >
-                  Effacer
-                </button>
-              )}
-              <div className="zadm-spacer" />
-              <span className="zadm-muted" style={{ fontSize: 13 }}>
-                {filtered.length} résultat{filtered.length !== 1 ? 's' : ''}
-              </span>
-            </div>
-          </div>
-        </section>
-
-        {/* Projects list */}
-        {loading ? (
-          <div className="zadm-loading" role="status" aria-live="polite">
-            <span className="zadm-loading__spinner" aria-hidden />
-            <span>Chargement des projets…</span>
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="zadm-empty" role="status">
-            <div className="zadm-empty__icon" aria-hidden>📭</div>
-            {hasQuery ? (
-              <>
-                <p className="zadm-empty__title">Aucun projet trouvé</p>
-                <p className="zadm-empty__hint">Aucun résultat pour « {query} ». Essayez un autre mot-clé.</p>
-                <div className="zadm-empty__actions">
-                  <button type="button" className="zadm-btn zadm-btn--secondary" onClick={() => setQuery('')}>
-                    Effacer la recherche
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-                <p className="zadm-empty__title">Aucun projet — créer le premier</p>
-                <p className="zadm-empty__hint">Commencez par ajouter votre premier projet foncier.</p>
-                <div className="zadm-empty__actions">
-                  <button
-                    type="button"
-                    className="zadm-btn zadm-btn--primary"
-                    onClick={() => { setForm(EMPTY_FORM); setShowCreate(true) }}
-                  >
-                    + Créer un projet
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        ) : (
-          <section className="pj-card-grid" aria-label="Liste des projets">
-            {filtered.map(project => {
-              const pl = project.plots || []
-              const sold = pl.filter(p => p.status === 'sold').length
-              const avail = pl.length - sold
-              const offers = offersByProject[project.id] || []
-              const locLabel = `${project.city || ''}${project.region ? `, ${project.region}` : ''}`
-              return (
-                <button
-                  key={project.id}
-                  type="button"
-                  className="pj-project-card"
-                  onClick={() => navigate(`/admin/projects/${project.id}`)}
-                  aria-label={`Ouvrir le projet ${project.title}`}
-                  title={`Ouvrir ${project.title}`}
-                >
-                  <div className="pj-project-card__head">
+      <div className="sp-cards">
+        <RenderDataGate
+          loading={kpiLoading}
+          error={error}
+          data={filtered}
+          onRetry={refresh}
+          skeleton={<SkeletonCard cards={6} />}
+          empty={
+            <EmptyState
+              icon="📭"
+              title={hasQuery || filter !== 'all' ? 'Aucun projet trouvé.' : 'Aucun projet — créez le premier.'}
+              hint={hasQuery || filter !== 'all' ? 'Essayez un autre terme ou réinitialisez les filtres.' : undefined}
+              action={
+                !hasQuery && filter === 'all'
+                  ? {
+                      label: '＋ Créer un projet',
+                      onClick: () => { setForm(EMPTY_FORM); setShowCreate(true) },
+                    }
+                  : undefined
+              }
+            />
+          }
+        >
+          {() => pagedProjects.map((p) => {
+            const tone = projectTone(p._plotsTotal, p._avail)
+            const badge = projectBadge(p._plotsTotal, p._avail)
+            const loc = `${p.city || ''}${p.region ? `, ${p.region}` : ''}`
+            const areaLabel = formatProjectArea(p.plots)
+            return (
+              <button
+                key={p.id}
+                type="button"
+                className={`sp-card sp-card--${tone}`}
+                onClick={() => navigate(`/admin/projects/${p.id}`)}
+                aria-label={`Ouvrir le projet ${p.title}`}
+                title={`Ouvrir ${p.title}`}
+              >
+                <div className="sp-card__head">
+                  <div className="sp-card__user">
+                    <span className="pa-card-thumb" aria-hidden>
+                      {p.mapUrl
+                        ? <iframe loading="lazy" src={p.mapUrl} title="" tabIndex={-1} />
+                        : initials(p.title)}
+                    </span>
                     <div style={{ minWidth: 0 }}>
-                      <h3 className="pj-project-card__title zadm-truncate">{project.title}</h3>
-                      <p className="pj-project-card__meta zadm-truncate">
-                        {locLabel || '—'} · {project.area || '—'}
+                      <p className="sp-card__name">{p.title}</p>
+                      <p className="sp-card__sub">
+                        {loc || '—'}{areaLabel ? ` · ${areaLabel}` : ''}
                       </p>
                     </div>
                   </div>
-                  <div className="pj-project-card__pills" aria-hidden>
-                    <span className="zadm-pill zadm-pill--neutral" title={`${pl.length} parcelles au total`}>
-                      {pl.length} parc.
-                    </span>
-                    <span className="zadm-pill zadm-pill--success" title={`${avail} parcelles disponibles`}>
-                      {avail} dispo
-                    </span>
-                    {offers.length > 0 && (
-                      <span className="zadm-pill zadm-pill--primary" title={`${offers.length} offres actives`}>
-                        {offers.length} offres
-                      </span>
-                    )}
+                  <span className={`sp-badge sp-badge--${badge.tone}`}>{badge.label}</span>
+                </div>
+
+                <div className="sp-card__body" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
+                  <div className="pa-stats">
+                    <div className="pa-stat">
+                      <span className="pa-stat__lbl">Parcelles</span>
+                      <span className="pa-stat__val">{p._plotsTotal}</span>
+                    </div>
+                    <div className="pa-stat pa-stat--green">
+                      <span className="pa-stat__lbl">Dispo</span>
+                      <span className="pa-stat__val">{p._avail}</span>
+                    </div>
+                    <div className="pa-stat pa-stat--red">
+                      <span className="pa-stat__lbl">Vendues</span>
+                      <span className="pa-stat__val">{p._sold}</span>
+                    </div>
+                    <div className="pa-stat pa-stat--blue">
+                      <span className="pa-stat__lbl">Arbres</span>
+                      <span className="pa-stat__val">{p._trees.toLocaleString('fr-FR')}</span>
+                    </div>
                   </div>
-                  <div className="pj-project-card__foot">
-                    <span className="pj-project-card__year">{project.year}</span>
-                    <span aria-hidden>›</span>
-                  </div>
-                </button>
-              )
-            })}
-          </section>
-        )}
+                  {(p._revenue > 0 || p._offers > 0) && (
+                    <div className="sp-card__info" style={{ justifyContent: 'space-between' }}>
+                      {p._revenue > 0 ? (
+                        <span>
+                          Recettes <strong style={{ color: '#0f172a' }}>{p._revenue.toLocaleString('fr-FR')} TND</strong>
+                        </span>
+                      ) : <span />}
+                      {p._offers > 0 && (
+                        <span className="sp-card__prepaid">{p._offers} offre{p._offers > 1 ? 's' : ''}</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </button>
+            )
+          })}
+        </RenderDataGate>
       </div>
 
-      {/* Create modal */}
-      <AdminModal
-        open={showCreate}
-        onClose={() => setShowCreate(false)}
-        title="Nouveau projet"
-        footer={(
-          <>
-            <button type="button" className="zadm-btn zadm-btn--ghost" onClick={() => setShowCreate(false)}>
-              Annuler
-            </button>
-            <button type="button" className="zadm-btn zadm-btn--primary" disabled={!canSubmit} onClick={createProject}>
-              {saving ? 'Création…' : 'Créer le projet'}
-            </button>
-          </>
-        )}
-      >
-        <div className="zadm-form">
-          <p className="zadm-form__help">Les champs marqués d’un * sont obligatoires.</p>
-
-          <div className="zadm-form__row">
-            <label className="zadm-form__label" htmlFor="pj-title">Nom du projet *</label>
-            <input
-              id="pj-title"
-              className="zadm-form__input"
-              placeholder="Ex : Domaine El Yasmine"
-              value={form.title}
-              onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
-            />
-          </div>
-
-          <div className="zadm-form__row">
-            <label className="zadm-form__label" htmlFor="pj-city">Ville *</label>
-            <input
-              id="pj-city"
-              className="zadm-form__input"
-              placeholder="Ex : Borj Cedria"
-              value={form.city}
-              onChange={e => setForm(f => ({ ...f, city: e.target.value }))}
-            />
-          </div>
-
-          <div className="zadm-form__grid">
-            <div className="zadm-form__row">
-              <label className="zadm-form__label" htmlFor="pj-region">Région</label>
-              <input
-                id="pj-region"
-                className="zadm-form__input"
-                placeholder="Ex : Ben Arous"
-                value={form.region}
-                onChange={e => setForm(f => ({ ...f, region: e.target.value }))}
-              />
-            </div>
-            <div className="zadm-form__row">
-              <label className="zadm-form__label" htmlFor="pj-area">Superficie</label>
-              <input
-                id="pj-area"
-                className="zadm-form__input"
-                placeholder="Ex : 25 Ha"
-                value={form.area}
-                onChange={e => setForm(f => ({ ...f, area: e.target.value }))}
-              />
-            </div>
-          </div>
-
-          <div className="zadm-form__grid">
-            <div className="zadm-form__row">
-              <label className="zadm-form__label" htmlFor="pj-year">Année</label>
-              <input
-                id="pj-year"
-                className="zadm-form__input"
-                type="number"
-                placeholder="2026"
-                value={form.year}
-                onChange={e => setForm(f => ({ ...f, year: e.target.value }))}
-              />
-            </div>
-            <div className="zadm-form__row">
-              <label className="zadm-form__label" htmlFor="pj-map">URL de la carte</label>
-              <input
-                id="pj-map"
-                className="zadm-form__input"
-                placeholder="https://…"
-                value={form.mapUrl}
-                onChange={e => setForm(f => ({ ...f, mapUrl: e.target.value }))}
-              />
-              <span className="zadm-form__help">Lien Google Maps (optionnel).</span>
-            </div>
-          </div>
+      {!kpiLoading && filtered.length > PROJECTS_PER_PAGE && (
+        <div className="sp-pager" role="navigation" aria-label="Pagination">
+          <button
+            type="button"
+            className="sp-pager__btn sp-pager__btn--nav"
+            disabled={safePage <= 1}
+            onClick={() => setPage(Math.max(1, safePage - 1))}
+            aria-label="Page précédente"
+          >
+            ‹
+          </button>
+          {getPagerPages(safePage, pageCount).map((pg, i) =>
+            pg === '…' ? (
+              <span key={`dots-${i}`} className="sp-pager__ellipsis" aria-hidden>…</span>
+            ) : (
+              <button
+                key={pg}
+                type="button"
+                className={`sp-pager__btn${pg === safePage ? ' sp-pager__btn--active' : ''}`}
+                onClick={() => setPage(pg)}
+                aria-current={pg === safePage ? 'page' : undefined}
+              >
+                {pg}
+              </button>
+            ),
+          )}
+          <button
+            type="button"
+            className="sp-pager__btn sp-pager__btn--nav"
+            disabled={safePage >= pageCount}
+            onClick={() => setPage(Math.min(pageCount, safePage + 1))}
+            aria-label="Page suivante"
+          >
+            ›
+          </button>
+          <span className="sp-pager__info">
+            {(safePage - 1) * PROJECTS_PER_PAGE + 1}–{Math.min(safePage * PROJECTS_PER_PAGE, filtered.length)} / {filtered.length}
+          </span>
         </div>
-      </AdminModal>
+      )}
+
+      {/* Create modal */}
+      {showCreate && (
+        <AdminModal
+          open
+          onClose={() => { if (!saving) setShowCreate(false) }}
+          title="Nouveau projet"
+        >
+          <div className="sp-detail">
+            <div className="sp-detail__section">
+              <div className="sp-detail__section-title">Informations</div>
+              <ProjectForm form={form} onChange={setForm} />
+            </div>
+            <div className="sp-detail__actions">
+              <button
+                type="button"
+                className="sp-detail__btn"
+                onClick={() => setShowCreate(false)}
+                disabled={saving}
+              >
+                Annuler
+              </button>
+              <button
+                type="button"
+                className="sp-detail__btn sp-detail__btn--edit"
+                disabled={!canSubmit}
+                onClick={createProject}
+              >
+                {saving ? 'Création…' : 'Créer le projet'}
+              </button>
+            </div>
+          </div>
+        </AdminModal>
+      )}
+
     </div>
+  )
+}
+
+/* ───────────────────── helpers / sub-renderers ───────────────────── */
+
+function ProjectForm({ form, onChange }) {
+  const set = (k) => (e) => onChange((f) => ({ ...f, [k]: e.target.value }))
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <Field id="pj-title" label="Nom du projet *">
+        <input id="pj-title" className="sp-cat-search" placeholder="Ex : Domaine El Yasmine" value={form.title} onChange={set('title')} />
+      </Field>
+      <Field id="pj-city" label="Ville *">
+        <input id="pj-city" className="sp-cat-search" placeholder="Ex : Borj Cedria" value={form.city} onChange={set('city')} />
+      </Field>
+      <Field id="pj-region" label="Région">
+        <input id="pj-region" className="sp-cat-search" placeholder="Ex : Ben Arous" value={form.region} onChange={set('region')} />
+      </Field>
+      <Field id="pj-map" label="URL de la carte (Google Maps)">
+        <input id="pj-map" className="sp-cat-search" placeholder="https://…" value={form.mapUrl} onChange={set('mapUrl')} />
+      </Field>
+    </div>
+  )
+}
+
+function Field({ id, label, children }) {
+  return (
+    <label htmlFor={id} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <span style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '.03em' }}>
+        {label}
+      </span>
+      {children}
+    </label>
   )
 }

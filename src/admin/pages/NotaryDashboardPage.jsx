@@ -135,7 +135,15 @@ export default function NotaryDashboardPage() {
         const nPct = Number(fee.notaryFeePct ?? 2) / 100
         const companyFee = Math.round(total * cPct)
         const notaryFee = Math.round(total * nPct)
-        const remaining = Math.max(0, total - deposit)
+        const isInst = sale.paymentType === 'installments'
+        const downPct = Number(sale.offerDownPayment) || 0
+        const firstInstallment = isInst && downPct > 0 ? Math.round(total * downPct / 100) : total
+        // Araboun (deposit) is an advance on the 1st installment — Finance
+        // collects (firstInstallment − deposit) at validation, so after the
+        // notary step the total collected equals firstInstallment itself
+        // (NOT deposit + firstInstallment — that would double-count the araboun).
+        const alreadyCollected = Math.max(deposit, firstInstallment)
+        const remaining = Math.max(0, total - alreadyCollected)
         return {
           ...sale,
           client,
@@ -227,12 +235,22 @@ export default function NotaryDashboardPage() {
     : false
 
   const completeSale = async () => {
-    if (!selectedSale || !selectedAllDocsChecked) return
+    if (!selectedSale || !selectedAllDocsChecked || saving) return
     if (!selectedSale.financeValidatedAt && !selectedSale.financeConfirmedAt) {
       setWarningNotice('Paiement finance non validé. La confirmation de règlement est obligatoire avant la finalisation notariale.')
       return
     }
     setSaving(true)
+    // Safety net: if any await stalls (slow Supabase, realtime reconnect, RLS
+    // hiccup), release the button after 30s so the user can retry instead of
+    // being stuck on "Validation…" forever.
+    const watchdog = window.setTimeout(() => {
+      setSaving(false)
+      setWarningNotice("La finalisation n'a pas répondu à temps. Vérifiez votre connexion puis réessayez.")
+    }, 30000)
+    const withStep = async (label, fn) => {
+      try { return await fn() } catch (e) { const err = new Error(`${label}: ${e?.message || e}`); err.cause = e; throw err }
+    }
     try {
       const now = new Date().toISOString()
       const actorId = adminUser?.id || null
@@ -258,9 +276,35 @@ export default function NotaryDashboardPage() {
           finalizedBy: actorId,
         },
       }
-      const saved = await updateSale(selectedSale.id, patch)
+      const saved = await withStep('updateSale', () => updateSale(selectedSale.id, patch))
       const saleRow = { ...selectedSale, ...patch, ...(saved || {}) }
-      await db.insertCommissionEventsForCompletedSale(saleRow, actorId, adminUser?.email || '')
+      await withStep('insertCommissionEvents', () =>
+        db.insertCommissionEventsForCompletedSale(saleRow, actorId, adminUser?.email || ''),
+      )
+
+      // Sale-based pyramid: this sale just completed at notary, so the buyer
+      // enters the seller's pyramid as a direct child. Upsert is idempotent
+      // — if the buyer already has a parent (their first purchase already
+      // fixed the link) or inserting would form a cycle (reverse sale up
+      // the existing chain), the upsert rejects and we log it. Either way
+      // the commission events above were already computed against the graph
+      // AS-OF-THIS-MOMENT, so this link only affects FUTURE sales.
+      try {
+        const buyerId = saleRow.clientId
+        const sellerId = saleRow.sellerClientId
+        if (buyerId && sellerId && String(buyerId) !== String(sellerId)) {
+          const res = await db.upsertSellerRelation({
+            childClientId: buyerId,
+            parentClientId: sellerId,
+            sourceSaleId: saleRow.id,
+          })
+          if (!res?.ok) {
+            console.info('[notary] seller relation not created:', res?.reason, { buyerId, sellerId, saleId: saleRow.id })
+          }
+        }
+      } catch (e) {
+        console.warn('[notary] upsertSellerRelation (buyer→seller) failed:', e?.message || e)
+      }
 
       if (String(saleRow.paymentType || '').toLowerCase() === 'installments') {
         const dest = String(saleRow.postNotaryDestination || '').toLowerCase()
@@ -286,8 +330,12 @@ export default function NotaryDashboardPage() {
         : wf?.signatureChecklist || []
       let grantClientId = saleRow.clientId
       if (saleRow.buyerAuthUserId) {
-        const linked = await db.fetchClientIdByAuthUserId(saleRow.buyerAuthUserId)
-        if (linked) grantClientId = linked
+        try {
+          const linked = await db.fetchClientIdByAuthUserId(saleRow.buyerAuthUserId)
+          if (linked) grantClientId = linked
+        } catch (e) {
+          console.warn('[notary] fetchClientIdByAuthUserId failed — falling back to sale.clientId:', e?.message || e)
+        }
       }
       for (const item of checklistItems) {
         const dk = DOC_KEY_FROM_WF[item.key] || item.key
@@ -295,14 +343,18 @@ export default function NotaryDashboardPage() {
         const pages = item.grantAllowedPages || item.grant_allowed_pages
         if (Array.isArray(pages) && grantClientId) {
           for (const pk of pages) {
-            await db.grantPageAccessLive({
-              clientId: grantClientId,
-              pageKey: pk,
-              sourceSaleId: selectedSale.id,
-              sourceChecklistKey: item.key,
-              actorUserId: actorId,
-              actorEmail: adminUser?.email || '',
-            })
+            try {
+              await db.grantPageAccessLive({
+                clientId: grantClientId,
+                pageKey: pk,
+                sourceSaleId: selectedSale.id,
+                sourceChecklistKey: item.key,
+                actorUserId: actorId,
+                actorEmail: adminUser?.email || '',
+              })
+            } catch (e) {
+              console.warn('[notary] grantPageAccessLive failed — sale finalized, grant deferred:', e?.message || e, { pageKey: pk })
+            }
           }
         }
       }
@@ -310,7 +362,11 @@ export default function NotaryDashboardPage() {
       setNotice(`Vente ${selectedSale.code || selectedSale.id} finalisée avec succès.`)
       setSelectedSale(null)
       setTimeout(() => setNotice(''), 2600)
+    } catch (e) {
+      console.error('[notary] completeSale failed:', e)
+      setWarningNotice(`Échec de la finalisation: ${e?.message || 'erreur inconnue'}. Vérifiez votre connexion et réessayez.`)
     } finally {
+      window.clearTimeout(watchdog)
       setSaving(false)
     }
   }
@@ -350,7 +406,7 @@ export default function NotaryDashboardPage() {
         </div>
         <div className="sp-hero__kpis">
           <span className="sp-hero__kpi-num">
-            {showSkeletons ? <span className="sp-sk-num sp-sk-num--wide" /> : dossiers.length}
+            {showSkeletons ? <span className="sk-num sk-num--wide" /> : dossiers.length}
           </span>
           <span className="sp-hero__kpi-label">dossier{dossiers.length > 1 ? 's' : ''}</span>
         </div>
@@ -358,11 +414,11 @@ export default function NotaryDashboardPage() {
 
       <div className="sp-cat-bar">
         <div className="sp-cat-stats">
-          <strong>{showSkeletons ? <span className="sp-sk-num" /> : dossiers.length}</strong> total
+          <strong>{showSkeletons ? <span className="sk-num" /> : dossiers.length}</strong> total
           <span className="sp-cat-stat-dot" />
-          <strong>{showSkeletons ? <span className="sp-sk-num" /> : readyCount}</strong> prêt{readyCount > 1 ? 's' : ''}
+          <strong>{showSkeletons ? <span className="sk-num" /> : readyCount}</strong> prêt{readyCount > 1 ? 's' : ''}
           <span className="sp-cat-stat-dot" />
-          <strong>{showSkeletons ? <span className="sp-sk-num" /> : lockedCount}</strong> bloqué{lockedCount > 1 ? 's' : ''}
+          <strong>{showSkeletons ? <span className="sk-num" /> : lockedCount}</strong> bloqué{lockedCount > 1 ? 's' : ''}
         </div>
         <div className="sp-cat-filters">
           <input
@@ -381,17 +437,17 @@ export default function NotaryDashboardPage() {
             <div key={`sk-${i}`} className="sp-card sp-card--skeleton" aria-hidden>
               <div className="sp-card__head">
                 <div className="sp-card__user">
-                  <span className="sp-card__initials sp-sk-box" />
+                  <span className="sp-card__initials sk-box" />
                   <div style={{ flex: 1 }}>
-                    <p className="sp-sk-line sp-sk-line--title" />
-                    <p className="sp-sk-line sp-sk-line--sub" />
+                    <p className="sk-line sk-line--title" />
+                    <p className="sk-line sk-line--sub" />
                   </div>
                 </div>
-                <span className="sp-sk-line sp-sk-line--badge" />
+                <span className="sk-line sk-line--badge" />
               </div>
               <div className="sp-card__body">
-                <span className="sp-sk-line sp-sk-line--price" />
-                <span className="sp-sk-line sp-sk-line--info" />
+                <span className="sk-line sk-line--price" />
+                <span className="sk-line sk-line--info" />
               </div>
             </div>
           ))
@@ -544,10 +600,17 @@ export default function NotaryDashboardPage() {
                 </strong>
               </div>
               <div className="sp-detail__row"><span>Avance reçue</span><strong>{fmtMoney(selectedSale.deposit)}</strong></div>
+              {selectedSale.paymentType === 'installments' && (Number(selectedSale.offerDownPayment) || 0) > 0 && (
+                <div className="sp-detail__row">
+                  <span>1er versement ({Number(selectedSale.offerDownPayment)}%) encaissé</span>
+                  <strong>{fmtMoney(Math.round(selectedSale.total * Number(selectedSale.offerDownPayment) / 100))}</strong>
+                </div>
+              )}
               <div className="sp-detail__row"><span>Frais société</span><strong>{fmtMoney(selectedSale.companyFee)}</strong></div>
               <div className="sp-detail__row"><span>Frais notaire</span><strong>{fmtMoney(selectedSale.notaryFee)}</strong></div>
               <div className="sp-detail__row sp-detail__row--highlight">
-                <span>Reste à encaisser</span><strong>{fmtMoney(selectedSale.remaining)}</strong>
+                <span>{selectedSale.paymentType === 'installments' ? 'Capital restant (échéances)' : 'Reste à encaisser'}</span>
+                <strong>{fmtMoney(selectedSale.remaining)}</strong>
               </div>
             </div>
 

@@ -9,22 +9,7 @@
       html[data-theme="admin"], html[data-theme="admin"] body, html[data-theme="admin"] #root { background: #f8fafc; }
       html[data-theme="auth"],  html[data-theme="auth"]  body, html[data-theme="auth"]  #root { background: #0b150c; }
     </style>
-    <script>
-      (function () {
-        try {
-          var p = location.pathname || '';
-          var theme = 'dark';
-          if (p.indexOf('/admin') === 0) theme = 'admin';
-          else if (p === '/login' || p === '/register' || p === '/forgot-password' || p === '/reset-password') theme = 'auth';
-          document.documentElement.setAttribute('data-theme', theme);
-          var color = theme === 'admin' ? '#f8fafc' : '#071009';
-          var meta = document.createElement('meta');
-          meta.name = 'theme-color';
-          meta.content = color;
-          document.head.appendChild(meta);
-        } catch (e) {}
-      })();
-    </script>
+    <script src="/theme-init.js"></script>
     <title>webapp-zitounat</title>
   </head>
   <body>

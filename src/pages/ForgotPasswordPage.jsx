@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../lib/AuthContext.jsx'
+import { ErrorPanel } from '../components/ErrorPanel.jsx'
 import appLogo from '../../logo-header2.png'
 import { IconUser } from '../LoginDecor.jsx'
 
@@ -65,7 +66,15 @@ export default function ForgotPasswordPage() {
           </p>
         </div>
 
-        {error ? <div className="auth-alert auth-alert--error">{error}</div> : null}
+        {error ? (
+          <ErrorPanel
+            error={error}
+            title="Envoi impossible"
+            hint={error}
+            onRetry={() => setError('')}
+            retryLabel="Réessayer"
+          />
+        ) : null}
         {success ? <div className="auth-alert auth-alert--ok">{success}</div> : null}
 
         <form className="form login-form" onSubmit={handleSubmit}>
@@ -88,6 +97,16 @@ export default function ForgotPasswordPage() {
           <button type="submit" className="submit-button login-submit" disabled={loading}>
             {loading ? 'Envoi en cours…' : 'Envoyer le lien de récupération'}
           </button>
+          {loading ? (
+            <p
+              className="login-status"
+              role="status"
+              aria-live="polite"
+              style={{ marginTop: 8, textAlign: 'center', opacity: 0.75, fontSize: 13 }}
+            >
+              Envoi en cours…
+            </p>
+          ) : null}
         </form>
 
         <div className="forgot-bottom">
