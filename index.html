@@ -1,16 +1,48 @@
 <!doctype html>
-<html lang="en">
+<html lang="fr">
   <head>
     <meta charset="UTF-8" />
+
+    <!-- Responsive / PWA viewport. `viewport-fit=cover` enables env(safe-area-inset-*)
+         on iOS notch devices; our pwa-responsive.css picks those values up. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+
+    <!-- Color scheme hints: Chrome tab bar, Safari status bar, Android address bar. -->
+    <meta name="theme-color" content="#0b150c" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f8fafc" media="(prefers-color-scheme: light)" />
+    <meta name="color-scheme" content="dark light" />
+
+    <!-- iOS web app behaviour: full-screen when launched from Home Screen. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Zitouna" />
+
+    <!-- Social / search discovery. -->
+    <meta name="description" content="Zitouna Garden — gestion des ventes, coordination et suivi des parcelles d'oliviers." />
+
+    <!-- Icons. favicon.svg doubles as the PWA icon (declared in manifest). -->
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="apple-touch-icon" href="/favicon.svg" />
+    <link rel="mask-icon" href="/favicon.svg" color="#95c13d" />
+
+    <!-- PWA manifest. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+
     <style>
-      html, body, #root { background: #071009; min-height: 100vh; }
+      html, body, #root { background: #071009; min-height: 100vh; min-height: 100dvh; }
       html[data-theme="admin"], html[data-theme="admin"] body, html[data-theme="admin"] #root { background: #f8fafc; }
       html[data-theme="auth"],  html[data-theme="auth"]  body, html[data-theme="auth"]  #root { background: #0b150c; }
+      /* Prevent the 300ms iOS tap delay + suppress tap highlight colour globally.
+         Our buttons use :active / :hover / :focus for feedback. */
+      html { -webkit-tap-highlight-color: transparent; }
+      /* Eliminate accidental horizontal scroll caused by oversized pre-render
+         content or rogue overflowing children. pwa-responsive.css locks the
+         inner tree too. */
+      body { overflow-x: hidden; overscroll-behavior-y: contain; }
     </style>
     <script src="/theme-init.js"></script>
-    <title>webapp-zitounat</title>
+    <title>Zitouna Garden</title>
   </head>
   <body>
     <div id="root"></div>

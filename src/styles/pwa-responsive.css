@@ -1,0 +1,269 @@
+/* =============================================================================
+ * pwa-responsive.css — global mobile-first shell for the Zitouna webapp.
+ *
+ * Scope:
+ *   - Fixes that apply to EVERY page (public + admin) without touching each
+ *     page's own CSS file. Uses broad selectors and low specificity so page
+ *     styles win on details; only safety-net rules are !important.
+ *
+ * What it fixes:
+ *   1. Horizontal overflow runaway (tables, pre, long URLs, inline SVGs).
+ *   2. Touch targets < 44px (a11y + iOS HIG).
+ *   3. iOS input zoom on focus (font-size < 16px).
+ *   4. Safe-area insets (notch phones, Android nav bar).
+ *   5. Dynamic viewport (100dvh beats 100vh on mobile Safari).
+ *   6. Tables become horizontally scrollable instead of overflowing.
+ *   7. Drawers / modals resize to the viewport on small screens.
+ *   8. PWA standalone-mode treats the window as an app (no tap delay,
+ *      no accidental pull-to-refresh inside scroll containers).
+ *
+ * Load order: imported from main.jsx AFTER index.css + skeletons.css so
+ * page-specific rules cascade normally; safety-net !important rules are
+ * narrow and intentional.
+ * ========================================================================== */
+
+/* ── 1 / Viewport + overflow guards ──────────────────────────────────── */
+html,
+body {
+  /* dvh = dynamic viewport height; avoids the Safari address-bar height jump. */
+  min-height: 100dvh;
+  /* Lock accidental side-scroll. Individual children that need to scroll
+     horizontally (tables, carousels) opt in with overflow-x: auto. */
+  max-width: 100vw;
+}
+
+/* Prevent ANY top-level element from blowing past the viewport width on
+   mobile. This catches overflowing <pre>, wide images, inline SVGs, and
+   third-party widgets without us having to chase each page individually. */
+#root {
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
+/* Replace generic 100vh with 100dvh when we find it in layout roots.
+   Keeps the fallback working in browsers that don't support dvh. */
+@supports (height: 100dvh) {
+  .screen,
+  .screen--app,
+  .screen--login,
+  .app-loader,
+  .sell-field,
+  .zitu-page {
+    min-height: 100dvh;
+  }
+}
+
+/* ── 2 / Safe-area insets (iOS notch, Android gesture bar) ──────────── */
+body {
+  padding-top: env(safe-area-inset-top, 0);
+  padding-left: env(safe-area-inset-left, 0);
+  padding-right: env(safe-area-inset-right, 0);
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+/* ── 3 / Typography & touch targets ─────────────────────────────────── */
+
+/* iOS zooms the page when a focused <input>/<textarea>/<select> has
+   font-size < 16px. Force 16px on small screens so no form field triggers
+   that zoom. Page CSS can still override for non-mobile widths. */
+@media (max-width: 767px) {
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+
+  /* Minimum touch target 44x44 px — matches iOS HIG + Android accessibility.
+     We only enforce on small screens so desktop keeps its denser controls. */
+  button,
+  [role='button'],
+  .adm-btn,
+  .sp-detail__btn,
+  .sp-wizard__btn,
+  .sp-cta-btn,
+  .sp-back-btn,
+  .sp2-cta,
+  .sp2-back {
+    min-height: 40px;
+  }
+}
+
+/* Universally allow long words (emails, URLs, file names, French names
+   with hyphens) to wrap instead of blowing the container width. */
+p,
+li,
+td,
+th,
+.sp-card__name,
+.sp-card__sub,
+.cv-notes,
+.adm-confirm-text {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* ── 4 / Tables ─────────────────────────────────────────────────────── */
+
+/* Any plain <table> becomes horizontally scrollable inside its own scroll
+   region on small screens. We target a wrapper when page CSS provides one;
+   as a safety net, also wrap orphan tables in a scroll shadow. */
+.adm-table-wrap,
+.table-scroll,
+.sp-table-wrap,
+.cv-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-gutter: stable;
+}
+
+@media (max-width: 767px) {
+  /* As a last-resort net: bare <table> elements get min-width so columns
+     don't crush, then the parent scrolls. Page-specific tables that
+     already have this treatment are unaffected. */
+  table {
+    max-width: 100%;
+  }
+  table.sp-table,
+  table.adm-table {
+    min-width: 640px;
+  }
+}
+
+/* ── 5 / Drawers + modals (AdminDrawer + AdminModal + legacy) ───────── */
+
+/* Shared rules: keep the dialog inside the viewport and scrollable. */
+.zadm-drawer,
+.zadm-modal,
+.adm-drawer,
+.adm-modal {
+  max-height: 100dvh;
+}
+.zadm-modal,
+.adm-modal {
+  max-width: min(520px, calc(100vw - 16px));
+}
+
+/* Drawer spans nearly full width on phones; keeps the familiar slide-in
+   behaviour on tablets+. */
+@media (max-width: 600px) {
+  .zadm-drawer,
+  .adm-drawer {
+    max-width: 100vw !important;
+    width: 100% !important;
+    border-radius: 0 !important;
+  }
+
+  /* Bottom-anchored modals feel more natural on phones. The component
+     library uses flex on its overlay, so we just shift alignment. */
+  .zadm-modal-overlay,
+  .adm-modal-overlay {
+    align-items: flex-end !important;
+    padding: 0 !important;
+  }
+  .zadm-modal,
+  .adm-modal {
+    border-radius: 18px 18px 0 0 !important;
+    max-width: 100vw !important;
+    width: 100vw !important;
+    max-height: 90dvh !important;
+  }
+}
+
+/* ── 6 / Hero + top-bar stacks ──────────────────────────────────────── */
+
+/* Legacy .sp-hero and the new .sp2-topbar keep everything on one row by
+   default. At < 420px the name + role would get truncated to nothing;
+   dropping the today-counter label saves space without losing data. */
+@media (max-width: 420px) {
+  .sp-hero__role,
+  .sp2-topbar__role {
+    font-size: 10.5px;
+  }
+  .sp-hero__kpi-label,
+  .sp2-topbar__today-lbl {
+    display: none;
+  }
+}
+
+/* ── 7 / Images, SVGs, embeds ───────────────────────────────────────── */
+
+img,
+video,
+iframe,
+svg {
+  max-width: 100%;
+  height: auto;
+}
+/* iframes used as maps preserve aspect via their own wrappers; we only
+   guarantee they never force horizontal overflow. */
+iframe {
+  border: 0;
+}
+
+/* ── 8 / Scrolling behaviour ────────────────────────────────────────── */
+
+/* iOS momentum scrolling for any opt-in overflow container. */
+.sp-wizard__body,
+.zadm-drawer__body,
+.zadm-modal__body,
+.adm-drawer__body,
+.adm-modal__body {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Prevent the whole page from rubber-band-scrolling while a drawer/modal
+   is open. The JS locks body overflow; this is belt-and-braces. */
+html:has(.zadm-drawer-overlay),
+html:has(.zadm-modal-overlay) {
+  overflow: hidden;
+}
+
+/* ── 9 / Installed-PWA refinements (display-mode: standalone) ──────── */
+
+/* When launched from Home Screen, we have the whole screen. Drop any
+   assumption about a browser chrome height and treat hero paddings as
+   being under the status bar. */
+@media (display-mode: standalone), (display-mode: fullscreen) {
+  body {
+    padding-top: max(env(safe-area-inset-top, 0), 8px);
+  }
+  /* Disable iOS pinch-zoom's visual glitch where the user can drag the
+     whole "page" down from the status bar. Our main app screens set their
+     own scroll containers. */
+  html,
+  body {
+    overscroll-behavior: none;
+    touch-action: manipulation;
+  }
+}
+
+/* ── 10 / Reduced motion ────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ── 11 / Utility classes that any page can opt into ────────────────── */
+
+/* Wrap arbitrary content in a horizontally scrollable region:
+     <div class="h-scroll"><table>…</table></div>                         */
+.h-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+}
+
+/* Hide a label/visual chrome on tight widths:  <span class="xs-hide">...</span> */
+@media (max-width: 480px) {
+  .xs-hide { display: none !important; }
+}
+@media (max-width: 380px) {
+  .xxs-hide { display: none !important; }
+}

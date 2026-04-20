@@ -1,0 +1,49 @@
+{
+  "name": "Zitouna Garden",
+  "short_name": "Zitouna",
+  "description": "Gestion des ventes, coordination et suivi des parcelles d'oliviers Zitounat Bladi.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "portrait-primary",
+  "background_color": "#071009",
+  "theme_color": "#0b150c",
+  "lang": "fr",
+  "dir": "ltr",
+  "categories": ["business", "productivity", "finance"],
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Tableau de bord",
+      "short_name": "Dashboard",
+      "url": "/dashboard",
+      "description": "Vue synthèse de mon portefeuille"
+    },
+    {
+      "name": "Mes échéances",
+      "short_name": "Échéances",
+      "url": "/installments",
+      "description": "Liste des échéances à venir"
+    },
+    {
+      "name": "Admin",
+      "short_name": "Admin",
+      "url": "/admin",
+      "description": "Espace administration"
+    }
+  ]
+}
