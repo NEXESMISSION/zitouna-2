@@ -2,7 +2,7 @@ import { NAV_ITEMS, pathnameMatchesAllowed } from '../admin/adminNavConfig.js'
 
 /**
  * Staff session: allowedPages === null means all admin routes.
- * allowedPages === [] means only projects + explicit entries (very locked).
+ * allowedPages === [] means no nav items (the dashboard/profile are still reachable).
  */
 export function hasFullPageAccess(allowedPages) {
   return allowedPages === null || allowedPages === undefined
@@ -34,7 +34,7 @@ export function isClientSuspended(client) {
 
 export function navItemsForSession(allowedPages) {
   if (hasFullPageAccess(allowedPages)) return NAV_ITEMS
-  if (!Array.isArray(allowedPages)) return NAV_ITEMS.filter((n) => n.to === '/admin/projects')
+  if (!Array.isArray(allowedPages)) return []
   const set = new Set(allowedPages)
-  return NAV_ITEMS.filter((item) => item.to === '/admin/projects' || set.has(item.to))
+  return NAV_ITEMS.filter((item) => set.has(item.to))
 }

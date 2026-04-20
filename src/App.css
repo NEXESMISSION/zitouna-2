@@ -5932,14 +5932,9 @@
   }
 }
 
-/* Prevent iOS/Android browser auto-zoom when focusing fields */
-@media (max-width: 900px) {
-  input,
-  select,
-  textarea {
-    font-size: 16px !important;
-  }
-}
+/* Note: iOS focus-zoom is handled centrally in styles/pwa-responsive.css § 3
+   with higher specificity so page-level `font-size: 13px !important` inputs
+   still get promoted to 16px on mobile. */
 
 /* ── Admin workflow shell (multi-role back office) ── */
 .admin-layout-head {

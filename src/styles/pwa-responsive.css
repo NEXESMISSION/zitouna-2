@@ -63,14 +63,52 @@ body {
 
 /* ── 3 / Typography & touch targets ─────────────────────────────────── */
 
-/* iOS zooms the page when a focused <input>/<textarea>/<select> has
-   font-size < 16px. Force 16px on small screens so no form field triggers
-   that zoom. Page CSS can still override for non-mobile widths. */
-@media (max-width: 767px) {
+/* iOS Safari (and some Android browsers) zoom the page when a focused
+   <input>/<textarea>/<select> has computed font-size < 16px. We therefore
+   force 16px on every form field up to 900px (covers phones, small tablets,
+   and landscape iPhones).
+
+   Page CSS in this repo often declares `font-size: 13px !important` on
+   class chains like `.sell-field .adm-input` (specificity 0,2,0). To win,
+   we need equal-or-higher specificity AND !important, so we:
+     1. enumerate every known input class in the app, and
+     2. use attribute-chain `input[type][type]` to raise the bare selector's
+        specificity to 0,2,1 without narrowing what it matches.
+   Anything new that slips through still hits the plain input/textarea/select
+   safety net. */
+@media (max-width: 900px) {
   input,
+  input[type],
+  input[type][type],
   textarea,
-  select {
-    font-size: 16px;
+  textarea[class],
+  select,
+  select[class],
+  /* Known input-shaped classes across the admin + public shells. Prefix
+     `html` is added where page CSS uses 2-class chains (e.g. `.sell-field
+     .adm-input`) with !important — we need to beat 0,2,0 since page CSS
+     loads after this file and wins on ties. */
+  .adm-input,
+  .adm-select,
+  .adm-textarea,
+  html .sell-field .adm-input,
+  html .sell-field .adm-select,
+  html .sell-field .adm-textarea,
+  .zadm-form__input,
+  .zadm-form__select,
+  .zadm-form__textarea,
+  .zadm-search__input,
+  .prj-search__input,
+  .prj-form__input,
+  .pp__search-input,
+  .plans-dash__search-input,
+  .login-input input,
+  .search-input,
+  .plot-search-input,
+  .quickpick-count-input,
+  .sp-wizard__input,
+  .um-field__input {
+    font-size: 16px !important;
   }
 
   /* Minimum touch target 44x44 px — matches iOS HIG + Android accessibility.

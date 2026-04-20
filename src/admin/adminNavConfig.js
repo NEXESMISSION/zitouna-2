@@ -45,16 +45,18 @@ export const NAV_ITEMS = [
 
 /**
  * Check if a nav item is accessible for the given allowedPages.
- * Projects is always visible.
  * allowedPages === null means all pages (unrestricted admin).
+ * Every nav item — including Projets & parcelles — is gated by the explicit list.
  */
 export function isNavItemAllowed(itemPath, allowedPages) {
   const normItem = normalizeAdminPagePath(itemPath)
-  if (normItem === '/admin/projects' || normItem.startsWith('/admin/projects/')) return true
   if (normItem === '/admin/users' || normItem.startsWith('/admin/users/')) return allowedPages === null
   if (allowedPages === null || allowedPages === undefined) return true
   if (!Array.isArray(allowedPages)) return false
-  return allowedPages.some((p) => normalizeAdminPagePath(p) === normItem)
+  return allowedPages.some((p) => {
+    const base = normalizeAdminPagePath(p)
+    return normItem === base || normItem.startsWith(`${base}/`)
+  })
 }
 
 export function navItemsForUser(allowedPages) {
@@ -67,7 +69,6 @@ export function pathnameMatchesAllowed(pathname, allowedPages) {
   /** Staff full access uses `null` from DB. `undefined` = caller did not provide a staff profile — deny by default. */
   if (allowedPages === undefined) return false
   if (allowedPages === null) return true
-  if (path.startsWith('/admin/projects')) return true
   if (path === '/admin' || path === '/admin/profile' || path === '/admin/dashboard') return true
   /** Super-admin only (aligned with isNavItemAllowed for Utilisateurs). */
   if (path === '/admin/users' || path.startsWith('/admin/users/')) return false
