@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import './my-referral-tree.css'
 
 // Compact per-user referral tree driven by the user's own commission_events.
@@ -139,8 +139,12 @@ function buildTree(myId, ledger) {
   return { root, totalNodes, totalEarnings }
 }
 
-function TreeNode({ node, expandedDefault }) {
-  const [open, setOpen] = useState(Boolean(expandedDefault))
+function TreeNode({ node, expandAll = false }) {
+  // In expand-all mode (fullscreen popup) every node starts open. In the
+  // inline card we only auto-open the first two levels so the compact view
+  // doesn't become a wall of names.
+  const defaultOpen = expandAll ? true : node.depth < 2
+  const [open, setOpen] = useState(defaultOpen)
   const hasKids = node.children && node.children.length > 0
   const initials = String(node.name || '—')
     .trim()
@@ -178,7 +182,7 @@ function TreeNode({ node, expandedDefault }) {
       {hasKids && open ? (
         <ul className="mrt-children">
           {node.children.map((c) => (
-            <TreeNode key={c.id} node={c} expandedDefault={node.depth < 2} />
+            <TreeNode key={c.id} node={c} expandAll={expandAll} />
           ))}
         </ul>
       ) : null}
@@ -191,6 +195,8 @@ export default function MyReferralTree({ myClientId, myName, ledger, loading = f
     () => buildTree(myClientId, ledger),
     [myClientId, ledger],
   )
+  const [expanded, setExpanded] = useState(false)
+
   const myInitials = String(myName || 'Moi')
     .trim()
     .split(/\s+/)
@@ -199,11 +205,24 @@ export default function MyReferralTree({ myClientId, myName, ledger, loading = f
     .join('')
     .toUpperCase() || 'M'
 
+  // Lock body scroll + close on Escape while the fullscreen tree is open.
+  useEffect(() => {
+    if (!expanded) return
+    const onKey = (e) => { if (e.key === 'Escape') setExpanded(false) }
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    window.addEventListener('keydown', onKey)
+    return () => {
+      document.body.style.overflow = prevOverflow
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [expanded])
+
   if (loading) {
     return (
       <div className="mrt" aria-busy="true">
         <div className="mrt__header">
-          <h3 className="mrt__title">Mon arbre de parrainage</h3>
+          <h3 className="mrt__title">Mon arbre de commissions</h3>
         </div>
         <div className="mrt__stats">
           {[0, 1, 2].map((i) => (
@@ -230,35 +249,27 @@ export default function MyReferralTree({ myClientId, myName, ledger, loading = f
 
   const isEmpty = !myClientId || root.length === 0
 
-  return (
-    <div className="mrt">
-      <div className="mrt__header">
-        <h3 className="mrt__title">Mon arbre de commissions</h3>
-        {!isEmpty && (
-          <span className="mrt__subtitle">
-            {totalNodes} personne{totalNodes > 1 ? 's' : ''} · {fmtMoney(totalEarnings)} générés
-          </span>
-        )}
-      </div>
-
-      {!isEmpty && (
-        <div className="mrt__stats">
-          <div className="mrt__stat">
-            <span className="mrt__stat-num">{root.length}</span>
-            <span className="mrt__stat-lbl">Filleul{root.length > 1 ? 's' : ''} directs</span>
-          </div>
-          <div className="mrt__stat">
-            <span className="mrt__stat-num">{totalNodes}</span>
-            <span className="mrt__stat-lbl">Total du réseau</span>
-          </div>
-          <div className="mrt__stat mrt__stat--good">
-            <span className="mrt__stat-num">{fmtMoney(totalEarnings)}</span>
-            <span className="mrt__stat-lbl">Total généré</span>
-          </div>
+  const renderStats = () => (
+    !isEmpty && (
+      <div className="mrt__stats">
+        <div className="mrt__stat">
+          <span className="mrt__stat-num">{root.length}</span>
+          <span className="mrt__stat-lbl">Filleul{root.length > 1 ? 's' : ''} directs</span>
         </div>
-      )}
+        <div className="mrt__stat">
+          <span className="mrt__stat-num">{totalNodes}</span>
+          <span className="mrt__stat-lbl">Total du réseau</span>
+        </div>
+        <div className="mrt__stat mrt__stat--good">
+          <span className="mrt__stat-num">{fmtMoney(totalEarnings)}</span>
+          <span className="mrt__stat-lbl">Total généré</span>
+        </div>
+      </div>
+    )
+  )
 
-      {/* Personal root card — "you" sit at the top of your tree. */}
+  const renderBody = (expandAll) => (
+    <>
       <div className="mrt-me">
         <span className="mrt-me__avatar" aria-hidden>{myInitials}</span>
         <div className="mrt-me__body">
@@ -284,10 +295,76 @@ export default function MyReferralTree({ myClientId, myName, ledger, loading = f
       ) : (
         <ul className="mrt-root mrt-root--attached">
           {root.map((n) => (
-            <TreeNode key={n.id} node={n} expandedDefault />
+            <TreeNode key={n.id} node={n} expandAll={expandAll} />
           ))}
         </ul>
       )}
-    </div>
+    </>
+  )
+
+  return (
+    <>
+      <div className="mrt">
+        <div className="mrt__header">
+          <h3 className="mrt__title">Mon arbre de commissions</h3>
+          <div className="mrt__header-right">
+            {!isEmpty && (
+              <span className="mrt__subtitle">
+                {totalNodes} personne{totalNodes > 1 ? 's' : ''} · {fmtMoney(totalEarnings)}
+              </span>
+            )}
+            <button
+              type="button"
+              className="mrt__expand-btn"
+              onClick={() => setExpanded(true)}
+              aria-label="Agrandir l'arbre"
+              title="Agrandir l'arbre"
+            >
+              <span aria-hidden>⛶</span>
+              <span className="mrt__expand-btn-text">Agrandir</span>
+            </button>
+          </div>
+        </div>
+
+        {renderStats()}
+        {renderBody(false)}
+      </div>
+
+      {expanded && (
+        <div
+          className="mrt-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Arbre de commissions en plein écran"
+          onClick={(e) => { if (e.target === e.currentTarget) setExpanded(false) }}
+        >
+          <div className="mrt-modal__panel">
+            <header className="mrt-modal__head">
+              <div>
+                <h2 className="mrt-modal__title">Mon arbre de commissions</h2>
+                {!isEmpty && (
+                  <p className="mrt-modal__subtitle">
+                    {totalNodes} personne{totalNodes > 1 ? 's' : ''} dans votre réseau · {fmtMoney(totalEarnings)} générés
+                  </p>
+                )}
+              </div>
+              <button
+                type="button"
+                className="mrt-modal__close"
+                onClick={() => setExpanded(false)}
+                aria-label="Fermer"
+                title="Fermer (Échap)"
+              >
+                ✕
+              </button>
+            </header>
+            <div className="mrt-modal__body">
+              {renderStats()}
+              {renderBody(true)}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   )
 }
