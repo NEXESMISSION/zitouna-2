@@ -1018,6 +1018,13 @@ begin
     raise exception 'INVALID_AMOUNT' using errcode = '22023';
   end if;
 
+  -- Serialize concurrent payout requests from the same beneficiary. Without
+  -- this lock, two parallel calls can both read the same "unclaimed" payable
+  -- events and insert duplicate claim rows, letting the client double-book
+  -- the same balance across two pending requests. The lock is scoped to the
+  -- transaction and released automatically at COMMIT/ROLLBACK.
+  perform pg_advisory_xact_lock(hashtext('payout:' || v_client_id::text));
+
   -- Idempotency: same key from same client returns the prior request id.
   if coalesce(trim(p_idempotency_key), '') <> '' then
     select (metadata->>'request_id')::uuid

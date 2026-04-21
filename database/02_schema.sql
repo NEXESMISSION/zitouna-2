@@ -423,7 +423,19 @@ create table installment_payment_receipts (
   receipt_url text not null default '',
   file_name text not null default '',
   note text not null default '',
-  created_at timestamptz not null default now()
+  created_at timestamptz not null default now(),
+  -- Reject javascript:/data:/file: schemes etc. — receipts must be empty
+  -- or an https URL (localhost http allowed for dev only).
+  constraint installment_payment_receipts_receipt_url_safe check (
+    receipt_url = ''
+    or (
+      length(receipt_url) <= 1024
+      and (
+        receipt_url like 'https://%'
+        or receipt_url like 'http://localhost%'
+      )
+    )
+  )
 );
 
 create index idx_installment_payment_receipts_payment on installment_payment_receipts(payment_id);

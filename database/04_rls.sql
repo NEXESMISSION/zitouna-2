@@ -264,7 +264,22 @@ create policy client_update_own_payment_submit on public.installment_payments
       where p.id = public.installment_payments.plan_id
         and p.client_id = public.current_client_id()
     )
-    and public.installment_payments.status in ('pending','submitted','rejected')
+    -- Status self-transitions are limited to submission only. Approval and
+    -- rejection are staff decisions — they must not appear in the client
+    -- allow-list, otherwise a buyer could short-circuit admin queues.
+    and public.installment_payments.status in ('pending','submitted')
+    -- Pin every column except receipt_url, status, and updated_at so the
+    -- client cannot tamper with amount/due_date/approved_at before
+    -- submitting. Mirrors the pattern used in client_update_safe_self
+    -- (public.clients). A mismatch aborts the UPDATE.
+    and public.installment_payments.amount                is not distinct from (select amount                from public.installment_payments where id = public.installment_payments.id)
+    and public.installment_payments.due_date              is not distinct from (select due_date              from public.installment_payments where id = public.installment_payments.id)
+    and public.installment_payments.month_no              is not distinct from (select month_no              from public.installment_payments where id = public.installment_payments.id)
+    and public.installment_payments.plan_id               is not distinct from (select plan_id               from public.installment_payments where id = public.installment_payments.id)
+    and public.installment_payments.approved_at           is not distinct from (select approved_at           from public.installment_payments where id = public.installment_payments.id)
+    and public.installment_payments.rejected_note         is not distinct from (select rejected_note         from public.installment_payments where id = public.installment_payments.id)
+    and public.installment_payments.auto_paid_from_wallet is not distinct from (select auto_paid_from_wallet from public.installment_payments where id = public.installment_payments.id)
+    and public.installment_payments.created_at            is not distinct from (select created_at            from public.installment_payments where id = public.installment_payments.id)
   );
 
 -- installment_payment_receipts

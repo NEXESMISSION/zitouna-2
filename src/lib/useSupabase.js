@@ -1065,22 +1065,19 @@ export function usePublicProjectDetail(projectId) {
         setLoading(false)
       }
     })()
-    // RESEARCH 04 §8: parcel_tree_batches has no project_id column to filter
-    // on, so this used to subscribe unfiltered → any tree batch change in
-    // the whole DB triggered a refresh on every PlotPage. Throttle the
-    // wildcard listener to at most once per 2s to prevent refresh storms
-    // while keeping counts reasonably fresh.
-    let lastBatchRefresh = 0
+    // Audit H3 — parcel_tree_batches has no project_id column, so the
+    // previous subscription had to be unfiltered: every tree-batch change
+    // anywhere in the DB woke up every open PlotPage. That's N×M realtime
+    // fanout plus a weak information-disclosure vector on a public page.
+    // Drop the batch listener entirely. Consequence: tree-batch edits made
+    // by staff no longer auto-refresh this public view; counts catch up on
+    // the next navigation or parcels-row update. Acceptable for a browse
+    // surface — admin pages that need live batch updates subscribe
+    // locally with a scoped filter.
     const channel = supabase
       .channel(`realtime-public-project-${id}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'projects', filter: `id=eq.${id}` }, () => void refresh())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'parcels', filter: `project_id=eq.${id}` }, () => void refresh())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'parcel_tree_batches' }, () => {
-        const now = Date.now()
-        if (now - lastBatchRefresh < 2000) return
-        lastBatchRefresh = now
-        void refresh()
-      })
       .subscribe((status, err) => {
         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
           console.warn(`[usePublicProjectDetail:${id}] realtime`, status, err?.message || '')
