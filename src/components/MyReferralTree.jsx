@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import MyReferralTreeGraph from './MyReferralTreeGraph.jsx'
 import './my-referral-tree.css'
 
 // Compact per-user referral tree driven by the user's own commission_events.
@@ -249,86 +250,54 @@ export default function MyReferralTree({ myClientId, myName, ledger, loading = f
 
   const isEmpty = !myClientId || root.length === 0
 
-  const renderStats = () => (
-    !isEmpty && (
-      <div className="mrt__stats">
-        <div className="mrt__stat">
-          <span className="mrt__stat-num">{root.length}</span>
-          <span className="mrt__stat-lbl">Filleul{root.length > 1 ? 's' : ''} directs</span>
-        </div>
-        <div className="mrt__stat">
-          <span className="mrt__stat-num">{totalNodes}</span>
-          <span className="mrt__stat-lbl">Total du réseau</span>
-        </div>
-        <div className="mrt__stat mrt__stat--good">
-          <span className="mrt__stat-num">{fmtMoney(totalEarnings)}</span>
-          <span className="mrt__stat-lbl">Total généré</span>
-        </div>
-      </div>
-    )
-  )
-
-  const renderBody = (expandAll) => (
-    <>
-      <div className="mrt-me">
-        <span className="mrt-me__avatar" aria-hidden>{myInitials}</span>
-        <div className="mrt-me__body">
-          <div className="mrt-me__name">{myName || 'Vous'}</div>
-          <div className="mrt-me__meta">
-            {isEmpty
-              ? 'Racine de votre réseau — personne en dessous pour l’instant.'
-              : `Racine · ${root.length} filleul${root.length > 1 ? 's' : ''} directs`}
-          </div>
-        </div>
-        <span className="mrt-me__tag">Vous</span>
-      </div>
-
-      {isEmpty ? (
-        <div className="mrt__empty">
-          <div className="mrt__empty-emoji" aria-hidden>🌱</div>
-          <p className="mrt__empty-title">Aucun filleul pour l'instant.</p>
-          <p className="mrt__empty-desc">
-            Dès qu'une personne que vous avez parrainée achètera une parcelle,
-            elle apparaîtra ici avec ses propres filleuls.
-          </p>
-        </div>
-      ) : (
-        <ul className="mrt-root mrt-root--attached">
-          {root.map((n) => (
-            <TreeNode key={n.id} node={n} expandAll={expandAll} />
-          ))}
-        </ul>
-      )}
-    </>
-  )
-
   return (
     <>
-      <div className="mrt">
+      <button
+        type="button"
+        className="mrt mrt--clickable"
+        onClick={() => setExpanded(true)}
+        aria-label="Ouvrir l'arbre de commissions"
+      >
         <div className="mrt__header">
           <h3 className="mrt__title">Mon arbre de commissions</h3>
-          <div className="mrt__header-right">
-            {!isEmpty && (
-              <span className="mrt__subtitle">
-                {totalNodes} personne{totalNodes > 1 ? 's' : ''} · {fmtMoney(totalEarnings)}
-              </span>
-            )}
-            <button
-              type="button"
-              className="mrt__expand-btn"
-              onClick={() => setExpanded(true)}
-              aria-label="Agrandir l'arbre"
-              title="Agrandir l'arbre"
-            >
-              <span aria-hidden>⛶</span>
-              <span className="mrt__expand-btn-text">Agrandir</span>
-            </button>
-          </div>
+          <span className="mrt__chev" aria-hidden>⛶</span>
         </div>
 
-        {renderStats()}
-        {renderBody(false)}
-      </div>
+        {!isEmpty && (
+          <div className="mrt__stats">
+            <div className="mrt__stat">
+              <span className="mrt__stat-num">{root.length}</span>
+              <span className="mrt__stat-lbl">Filleul{root.length > 1 ? 's' : ''} directs</span>
+            </div>
+            <div className="mrt__stat">
+              <span className="mrt__stat-num">{totalNodes}</span>
+              <span className="mrt__stat-lbl">Réseau total</span>
+            </div>
+            <div className="mrt__stat mrt__stat--good">
+              <span className="mrt__stat-num">{fmtMoney(totalEarnings)}</span>
+              <span className="mrt__stat-lbl">TND générés</span>
+            </div>
+          </div>
+        )}
+
+        <div className="mrt-me">
+          <span className="mrt-me__avatar" aria-hidden>{myInitials}</span>
+          <div className="mrt-me__body">
+            <div className="mrt-me__name">{myName || 'Vous'}</div>
+            <div className="mrt-me__meta">
+              {isEmpty
+                ? 'Aucun filleul pour l’instant'
+                : `${root.length} filleul${root.length > 1 ? 's' : ''} direct${root.length > 1 ? 's' : ''}`}
+            </div>
+          </div>
+          <span className="mrt-me__tag">Vous</span>
+        </div>
+
+        <span className="mrt__cta">
+          {isEmpty ? 'Ouvrir l’arbre' : 'Voir l’arbre complet'}
+          <span aria-hidden>→</span>
+        </span>
+      </button>
 
       {expanded && (
         <div
@@ -338,7 +307,7 @@ export default function MyReferralTree({ myClientId, myName, ledger, loading = f
           aria-label="Arbre de commissions en plein écran"
           onClick={(e) => { if (e.target === e.currentTarget) setExpanded(false) }}
         >
-          <div className="mrt-modal__panel">
+          <div className="mrt-modal__panel mrt-modal__panel--graph">
             <header className="mrt-modal__head">
               <div>
                 <h2 className="mrt-modal__title">Mon arbre de commissions</h2>
@@ -358,9 +327,25 @@ export default function MyReferralTree({ myClientId, myName, ledger, loading = f
                 ✕
               </button>
             </header>
-            <div className="mrt-modal__body">
-              {renderStats()}
-              {renderBody(true)}
+            <div className="mrt-modal__body mrt-modal__body--graph">
+              {isEmpty ? (
+                <div className="mrt__empty" style={{ margin: 'auto' }}>
+                  <div className="mrt__empty-emoji" aria-hidden>🌱</div>
+                  <p className="mrt__empty-title">Aucun filleul pour l'instant.</p>
+                  <p className="mrt__empty-desc">
+                    Dès qu'une personne que vous avez parrainée achètera une parcelle,
+                    elle apparaîtra ici avec ses propres filleuls.
+                  </p>
+                </div>
+              ) : (
+                <MyReferralTreeGraph
+                  myClientId={myClientId}
+                  myName={myName}
+                  root={root}
+                  totalNodes={totalNodes}
+                  totalEarnings={totalEarnings}
+                />
+              )}
             </div>
           </div>
         </div>

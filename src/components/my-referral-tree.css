@@ -1,274 +1,149 @@
 /* src/components/my-referral-tree.css
    ─────────────────────────────────────────────────────────────────
-   Compact per-user referral tree rendered on the customer dashboard.
-   Designed to sit inside a dark-themed card (dashboard-page.css) so
-   it uses the olive / slate palette shared with the rest of that
-   page. Admin variant (if needed later) can override surface colors
-   scoped under .adm-shell.
+   Dashboard commission-tree summary card. The whole card is a
+   single button that opens the pan/zoom graph popup — no inline
+   tree, no separate "expand" button. Tight paddings + small type
+   so it sits well inside the commissions tab on mobile.
    ───────────────────────────────────────────────────────────────── */
 
 .mrt {
   background: rgba(22, 41, 23, 0.55);
   border: 1px solid rgba(168, 204, 80, 0.22);
-  border-radius: 14px;
-  padding: 16px 18px;
+  border-radius: 12px;
+  padding: 12px;
   color: #d7e5d8;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
+  width: 100%;
+  font-family: inherit;
+  text-align: left;
+}
+.mrt--clickable {
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+.mrt--clickable:hover {
+  background: rgba(22, 41, 23, 0.7);
+  border-color: rgba(168, 204, 80, 0.38);
+}
+.mrt--clickable:active { transform: scale(0.998); }
+.mrt--clickable:focus-visible {
+  outline: 2px solid rgba(168, 204, 80, 0.6);
+  outline-offset: 2px;
 }
 
 .mrt__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-.mrt__header-right {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
+  gap: 8px;
 }
 .mrt__title {
   margin: 0;
-  font-size: 16px;
+  font-size: 13.5px;
   font-weight: 700;
   color: #eef3d7;
   letter-spacing: -0.01em;
 }
-.mrt__subtitle {
-  font-size: 12.5px;
-  color: rgba(215, 229, 216, 0.65);
-}
-.mrt__expand-btn {
+.mrt__chev {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: rgba(168, 204, 80, 0.15);
+  color: #eef3d7;
+  font-size: 12px;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border-radius: 8px;
-  background: rgba(168, 204, 80, 0.15);
-  border: 1px solid rgba(168, 204, 80, 0.35);
-  color: #eef3d7;
-  font-size: 12.5px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
-  font-family: inherit;
-}
-.mrt__expand-btn:hover {
-  background: rgba(168, 204, 80, 0.28);
-  border-color: rgba(168, 204, 80, 0.55);
-}
-.mrt__expand-btn:active { transform: scale(0.97); }
-.mrt__expand-btn > span:first-child { font-size: 14px; line-height: 1; }
-@media (max-width: 420px) {
-  .mrt__expand-btn-text { display: none; }
-  .mrt__expand-btn { padding: 6px 10px; }
+  justify-content: center;
+  flex: 0 0 24px;
 }
 
+/* 3-stat pill row — compact grid, stacks to 1 col on very narrow. */
 .mrt__stats {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
+  gap: 6px;
 }
-@media (max-width: 520px) {
-  .mrt__stats { grid-template-columns: 1fr; }
+@media (max-width: 380px) {
+  .mrt__stats { grid-template-columns: 1fr 1fr; }
 }
 .mrt__stat {
   background: rgba(168, 204, 80, 0.08);
-  border: 1px solid rgba(168, 204, 80, 0.22);
-  border-radius: 10px;
-  padding: 10px 12px;
+  border: 1px solid rgba(168, 204, 80, 0.2);
+  border-radius: 8px;
+  padding: 7px 9px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
+  min-width: 0;
 }
-.mrt__stat--good { background: rgba(34, 197, 94, 0.12); border-color: rgba(34, 197, 94, 0.32); }
-.mrt__stat-num { font-size: 18px; font-weight: 800; color: #eef3d7; line-height: 1.1; }
-.mrt__stat-lbl { font-size: 11px; color: rgba(215, 229, 216, 0.6); text-transform: uppercase; letter-spacing: 0.04em; }
-.mrt__stat-sk { min-height: 54px; }
-
-.mrt__empty {
-  padding: 22px 8px;
-  text-align: center;
-  color: rgba(215, 229, 216, 0.7);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-}
-.mrt__empty-emoji { font-size: 28px; opacity: 0.85; }
-.mrt__empty-title { margin: 2px 0 0; font-size: 14px; font-weight: 700; color: #eef3d7; }
-.mrt__empty-desc { margin: 0; font-size: 12.5px; line-height: 1.5; max-width: 46ch; }
-
-/* ── Tree shape ───────────────────────────────────────────────── */
-.mrt-root {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.mrt-children {
-  list-style: none;
-  margin: 4px 0 0 18px;
-  padding: 0 0 0 14px;
-  border-left: 1px dashed rgba(168, 204, 80, 0.3);
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.mrt-node { position: relative; }
-
-.mrt-card {
-  display: grid;
-  grid-template-columns: 22px 32px 1fr auto;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 10px;
-  border-radius: 10px;
-  background: rgba(168, 204, 80, 0.05);
-  border: 1px solid rgba(168, 204, 80, 0.18);
-  transition: background 0.15s ease, border-color 0.15s ease;
-}
-.mrt-card:hover { background: rgba(168, 204, 80, 0.1); border-color: rgba(168, 204, 80, 0.28); }
-.mrt-card--sk { background: rgba(168, 204, 80, 0.04); }
-
-.mrt-card__toggle {
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
-  background: rgba(168, 204, 80, 0.18);
-  color: #eef3d7;
-  border: 0;
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 1;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.15s ease;
-}
-.mrt-card__toggle:hover { background: rgba(168, 204, 80, 0.3); }
-.mrt-card__toggle--leaf {
-  background: transparent;
-  color: rgba(215, 229, 216, 0.35);
-  cursor: default;
-}
-.mrt-card__toggle--leaf:hover { background: transparent; }
-
-.mrt-card__avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, rgba(168, 204, 80, 0.45) 0%, rgba(34, 197, 94, 0.5) 100%);
-  color: #0b1f0c;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
+.mrt__stat--good { background: rgba(34, 197, 94, 0.12); border-color: rgba(34, 197, 94, 0.3); }
+.mrt__stat-num {
+  font-size: 14px;
   font-weight: 800;
-  letter-spacing: 0.02em;
-}
-
-.mrt-card__body { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.mrt-card__name {
-  font-size: 13.5px;
-  font-weight: 600;
   color: #eef3d7;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.mrt-card__meta {
-  font-size: 11.5px;
+.mrt__stat-lbl {
+  font-size: 10px;
   color: rgba(215, 229, 216, 0.6);
-  display: flex;
-  gap: 4px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-.mrt-card__phone { direction: ltr; font-variant-numeric: tabular-nums; }
-
-.mrt-card__amount {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
-.mrt-card__amount strong {
-  font-size: 13px;
-  font-weight: 800;
-  color: #eef3d7;
-  font-variant-numeric: tabular-nums;
-}
-.mrt-card__amount span {
-  font-size: 10.5px;
-  color: rgba(215, 229, 216, 0.55);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
+.mrt__stat-sk { min-height: 42px; }
 
-/* Generation tint so the depth is visually obvious. */
-.mrt-node--d1 > .mrt-card { border-color: rgba(168, 204, 80, 0.32); }
-.mrt-node--d2 > .mrt-card { border-color: rgba(245, 158, 11, 0.32); }
-.mrt-node--d3 > .mrt-card { border-color: rgba(234, 88, 12, 0.32); }
-.mrt-node--d4 > .mrt-card { border-color: rgba(139, 92, 246, 0.28); }
-.mrt-node--d5 > .mrt-card { border-color: rgba(148, 163, 184, 0.28); }
-
-/* "You" root card — the user sits at the top of their own tree so the
-   hierarchy feels personal and complete. */
 .mrt-me {
   display: grid;
-  grid-template-columns: 44px 1fr auto;
+  grid-template-columns: 34px 1fr auto;
   align-items: center;
-  gap: 12px;
-  padding: 12px 14px;
-  border-radius: 12px;
-  background: linear-gradient(135deg, rgba(34, 197, 94, 0.18) 0%, rgba(168, 204, 80, 0.22) 100%);
-  border: 1px solid rgba(34, 197, 94, 0.45);
-  box-shadow: 0 4px 12px rgba(34, 197, 94, 0.12);
-  position: relative;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.16) 0%, rgba(168, 204, 80, 0.2) 100%);
+  border: 1px solid rgba(34, 197, 94, 0.38);
 }
 .mrt-me__avatar {
-  width: 44px;
-  height: 44px;
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
   background: linear-gradient(135deg, #22c55e 0%, #a8cc50 100%);
   color: #0b1f0c;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 800;
-  letter-spacing: 0.02em;
-  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.2);
 }
-.mrt-me__body { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.mrt-me__body { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .mrt-me__name {
-  font-size: 14.5px;
-  font-weight: 800;
+  font-size: 13px;
+  font-weight: 700;
   color: #eef3d7;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  letter-spacing: -0.01em;
 }
 .mrt-me__meta {
-  font-size: 12px;
-  color: rgba(215, 229, 216, 0.75);
+  font-size: 11px;
+  color: rgba(215, 229, 216, 0.7);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .mrt-me__tag {
-  padding: 4px 10px;
+  padding: 2px 8px;
   border-radius: 999px;
   background: rgba(34, 197, 94, 0.28);
   color: #eef3d7;
-  font-size: 11px;
+  font-size: 9.5px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
@@ -276,26 +151,58 @@
   white-space: nowrap;
 }
 
-/* Connector from the "you" card to the first row of direct filleuls. */
-.mrt-root--attached {
-  position: relative;
-  margin-top: 4px;
-  padding-left: 22px;
-  border-left: 1px dashed rgba(168, 204, 80, 0.4);
-  margin-left: 22px;
+.mrt__cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 2px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(168, 204, 80, 0.12);
+  border: 1px dashed rgba(168, 204, 80, 0.4);
+  color: #eef3d7;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
 }
-.mrt-root--attached::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: -5px;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: rgba(168, 204, 80, 0.5);
+.mrt--clickable:hover .mrt__cta {
+  background: rgba(168, 204, 80, 0.22);
+  border-style: solid;
 }
+.mrt__cta > span { font-size: 13px; line-height: 1; }
 
-/* ── Fullscreen modal (Agrandir) ─────────────────────────────── */
+/* Loading / empty fallbacks (still used by the loading branch + modal). */
+.mrt__empty {
+  padding: 18px 8px;
+  text-align: center;
+  color: rgba(215, 229, 216, 0.7);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.mrt__empty-emoji { font-size: 26px; opacity: 0.85; }
+.mrt__empty-title { margin: 2px 0 0; font-size: 13px; font-weight: 700; color: #eef3d7; }
+.mrt__empty-desc { margin: 0; font-size: 12px; line-height: 1.5; max-width: 42ch; }
+
+/* Nested list (still used by the inline loading skeleton — kept minimal). */
+.mrt-root { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.mrt-node { position: relative; }
+.mrt-card {
+  display: grid;
+  grid-template-columns: 22px 30px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: rgba(168, 204, 80, 0.05);
+  border: 1px solid rgba(168, 204, 80, 0.18);
+}
+.mrt-card--sk { background: rgba(168, 204, 80, 0.04); }
+.mrt-card__toggle, .mrt-card__avatar, .mrt-card__body, .mrt-card__amount { font-size: 12px; }
+
+/* ── Fullscreen modal (graph view) ───────────────────────────── */
 .mrt-modal {
   position: fixed;
   inset: 0;
@@ -306,7 +213,7 @@
   display: flex;
   align-items: stretch;
   justify-content: center;
-  padding: 24px;
+  padding: 16px;
   animation: mrt-fade-in 0.15s ease-out;
 }
 @keyframes mrt-fade-in {
@@ -317,7 +224,7 @@
 .mrt-modal__panel {
   background: #0f1a10;
   border: 1px solid rgba(168, 204, 80, 0.25);
-  border-radius: 18px;
+  border-radius: 14px;
   width: min(1100px, 100%);
   max-height: 100%;
   display: flex;
@@ -335,39 +242,39 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
-  padding: 18px 22px 14px;
+  gap: 10px;
+  padding: 12px 14px;
   border-bottom: 1px solid rgba(168, 204, 80, 0.18);
   background: linear-gradient(180deg, rgba(168, 204, 80, 0.08) 0%, transparent 100%);
 }
 .mrt-modal__title {
   margin: 0;
-  font-size: 18px;
+  font-size: 14.5px;
   font-weight: 800;
   color: #eef3d7;
   letter-spacing: -0.01em;
 }
 .mrt-modal__subtitle {
-  margin: 4px 0 0;
-  font-size: 13px;
+  margin: 2px 0 0;
+  font-size: 11.5px;
   color: rgba(215, 229, 216, 0.7);
 }
 .mrt-modal__close {
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
   background: rgba(168, 204, 80, 0.12);
   border: 1px solid rgba(168, 204, 80, 0.28);
   color: #eef3d7;
-  font-size: 16px;
+  font-size: 13px;
   font-weight: 700;
   line-height: 1;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  flex: 0 0 36px;
-  transition: background 0.15s ease, border-color 0.15s ease;
+  flex: 0 0 30px;
+  font-family: inherit;
 }
 .mrt-modal__close:hover {
   background: rgba(168, 204, 80, 0.22);
@@ -377,25 +284,22 @@
 .mrt-modal__body {
   flex: 1;
   overflow-y: auto;
-  overflow-x: auto;
-  padding: 18px 22px 22px;
+  padding: 14px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
 }
-
-/* Inside the modal the tree has room to breathe — override a few compact
-   dimensions so names/amounts aren't clipped. */
-.mrt-modal__body .mrt-card {
-  padding: 10px 12px;
+/* Graph mode: the canvas stretches, toolbar handles its own layout. */
+.mrt-modal__panel--graph { height: min(92vh, 860px); }
+.mrt-modal__body--graph {
+  padding: 10px;
+  overflow: hidden;
+  display: flex;
 }
-.mrt-modal__body .mrt-card__name { font-size: 14px; white-space: normal; }
-.mrt-modal__body .mrt-card__amount strong { font-size: 14px; }
-.mrt-modal__body .mrt-me { padding: 14px 16px; }
-.mrt-modal__body .mrt-me__name { font-size: 16px; }
 
 @media (max-width: 640px) {
-  .mrt-modal { padding: 12px; }
-  .mrt-modal__head { padding: 14px 16px 12px; }
-  .mrt-modal__body { padding: 14px 16px 16px; }
+  .mrt-modal { padding: 8px; }
+  .mrt-modal__head { padding: 10px 12px; }
+  .mrt-modal__body { padding: 10px; }
+  .mrt-modal__body--graph { padding: 8px; }
 }
