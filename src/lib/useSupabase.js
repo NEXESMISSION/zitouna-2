@@ -152,7 +152,7 @@ function observeChannel(label) {
 // ----------------------------------------------------------------------------
 let _initialAuthPromise = null
 let _initialAuthTimedOut = false
-let _gateResolvedVia = null // 'event' | 'no-session' | 'failsafe' | null
+let _gateResolvedVia = null // 'event' | 'storage' | 'no-session' | 'failsafe' | null
 let _lastAuthChangeAt = 0
 function buildInitialAuthPromise() {
   return new Promise((resolve) => {
@@ -188,12 +188,26 @@ function buildInitialAuthPromise() {
     })
 
     // Path B — synchronous storage check. `getSession()` reads the cached
-    // JWT from localStorage without a network call. Anon users get an
-    // immediate resolution; authenticated users wait for Path A to deliver
-    // `INITIAL_SESSION` (Supabase always emits it on next tick).
+    // JWT from localStorage without a network call. Three outcomes:
+    //   • No session at all → anon user, resolve 'no-session'.
+    //   • Session present AND not near expiry → resolve 'storage' now;
+    //     no reason to wait for INITIAL_SESSION when the JWT is already
+    //     in hand and usable. This is the hard-refresh fast-path: skips
+    //     the 100-8000 ms wait for the event bus to fire on a cold page
+    //     load, which is what was stretching the skeleton out.
+    //   • Session present BUT expired / expiring in <60 s → still wait
+    //     for Path A to deliver TOKEN_REFRESHED so fetches don't run
+    //     with a stale JWT and hit 401 → retry storm.
     supabase.auth.getSession().then(({ data }) => {
-      if (!data?.session) finish('no-session')
-      // else: wait for INITIAL_SESSION. Do NOT resolve on a timer.
+      const session = data?.session
+      if (!session) { finish('no-session'); return }
+      const expiresAt = Number(session.expires_at || 0) * 1000 // s → ms
+      const fresh = !expiresAt || expiresAt - Date.now() > 60_000
+      if (fresh) {
+        _lastAuthChangeAt = Date.now()
+        finish('storage')
+      }
+      // else: JWT near expiry — wait for TOKEN_REFRESHED via Path A.
     }).catch(() => {
       // Broken client — unblock so the UI can render an error instead of
       // hanging. Treat this as a failsafe resolution so revive logic kicks
@@ -205,9 +219,9 @@ function buildInitialAuthPromise() {
     // a very long stretch of skeleton for the user to look at when
     // INITIAL_SESSION never fires (rare, but happens after sleep/wake on
     // mobile Chrome). 2026-04 fix (SKELETON_LOADING_ANALYTICS §Strategy C):
-    // shorten to 8 s. Still conservative — path A + B together resolve in
-    // <500 ms in >99% of loads — and it puts the effective first-paint
-    // ceiling at 8 s + 5 s fetch = ~13 s worst case (down from ~23 s).
+    // shorten to 8 s. With the Path B fast-path added, hard refresh on a
+    // valid session typically resolves in <20 ms; this failsafe now only
+    // catches the TOKEN_REFRESHED-wait edge case.
     failsafeTimer = window.setTimeout(() => finish('failsafe'), 8_000)
   })
 }
@@ -403,11 +417,14 @@ function createCachedStore({ key, fetcher, realtimeTables = [], staleMs = DEFAUL
       let authOk = false
       try {
         await awaitInitialAuth()
-        // _gateResolvedVia landed in Phase 1; only `event` and `no-session`
-        // indicate a definitive answer. When resolution was via the 15 s
-        // failsafe, we treat the fetch as no-auth so reviveStale can revive
-        // it once a real session arrives.
-        authOk = _gateResolvedVia === 'event'
+        // _gateResolvedVia landed in Phase 1; 'event' (INITIAL_SESSION/
+        // SIGNED_IN fired) and 'storage' (fresh JWT found in localStorage
+        // via the Path B fast-path) both indicate a real authenticated
+        // session is driving the fetch. 'no-session' means anon (also
+        // definitive — no point reviving). Only 'failsafe' is ambiguous,
+        // so that's the one we leave as no-auth to let reviveStale retry
+        // once a real session arrives.
+        authOk = _gateResolvedVia === 'event' || _gateResolvedVia === 'storage'
       } catch { authOk = false }
       if (myGen !== fetchGen) return
 
@@ -1506,7 +1523,7 @@ const _useInstallmentsScopedStore = createScopedStore({
   // uses the returned `{ok}` flag only to classify `emptyFromNoAuth`.
   awaitAuth: async () => {
     await awaitInitialAuth()
-    return { ok: _gateResolvedVia === 'event' }
+    return { ok: _gateResolvedVia === 'event' || _gateResolvedVia === 'storage' }
   },
 })
 export function useInstallmentsScoped(filters = {}) {

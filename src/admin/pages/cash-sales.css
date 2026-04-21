@@ -38,6 +38,77 @@
   line-height: 1.5;
 }
 
+/* ── Search bar (with icon prefix + clear button) ────────────────────── */
+.cs-filters { gap: 10px; }
+.cs-search {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+}
+.cs-search__icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 13px;
+  color: #94a3b8;
+  pointer-events: none;
+  line-height: 1;
+}
+.cs-search__input.sp-cat-search {
+  padding-left: 36px;
+  padding-right: 36px;
+  min-height: 44px;
+  font-size: 13.5px;
+  font-weight: 500;
+  border-radius: 12px;
+  border-color: #e2e8f0;
+  background: #ffffff;
+  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+}
+.cs-search__input.sp-cat-search:focus {
+  border-color: #059669;
+  box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.12);
+  background: #f0fdf4;
+}
+.cs-search__clear {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: #f1f5f9;
+  color: #64748b;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s;
+}
+.cs-search__clear:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+/* Green tint for the shared light EmptyState when on the cash page.
+   Base styles come from sell-field.css (.sell-field .empty-state); here
+   we only recolor the icon badge and primary action to match cs-theme. */
+.sell-field.cs-page .empty-state__icon {
+  background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+  border-color: #a7f3d0;
+  color: #059669;
+  box-shadow: 0 2px 8px rgba(5, 150, 105, 0.12);
+}
+.sell-field.cs-page .empty-state__btn--primary {
+  background: linear-gradient(135deg, #059669 0%, #047857 100%);
+}
+
 /* Detail modal — green banner instead of the default blue sp-detail banner */
 .sell-field .sp-detail.cs-detail .sp-detail__banner {
   background: linear-gradient(135deg, #059669 0%, #047857 100%);

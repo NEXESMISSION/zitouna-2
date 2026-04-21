@@ -1,14 +1,13 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useAuth } from '../../lib/AuthContext.jsx'
 import { useSales } from '../../lib/useSupabase.js'
-import { runSafeAction } from '../../lib/runSafeAction.js'
 import AdminModal from '../components/AdminModal.jsx'
 import SaleSnapshotTracePanel from '../components/SaleSnapshotTracePanel.jsx'
 import RenderDataGate from '../../components/RenderDataGate.jsx'
 import { getPagerPages } from './pager-util.js'
 import './sell-field.css'
 import './service-juridique.css'
+import './finance-dashboard.css'
 
 const PER_PAGE = 15
 
@@ -33,6 +32,20 @@ function normalizePlotIds(sale) {
 function toIsoDate(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
+function startOfMonth(d) { return new Date(d.getFullYear(), d.getMonth(), 1) }
+function addMonths(d, n) { return new Date(d.getFullYear(), d.getMonth() + n, 1) }
+function monthGrid(anchor) {
+  const first = startOfMonth(anchor)
+  const startWeekday = (first.getDay() + 6) % 7
+  const daysInMonth = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate()
+  const cells = []
+  let day = 1 - startWeekday
+  for (let i = 0; i < 42; i += 1) {
+    cells.push({ date: new Date(first.getFullYear(), first.getMonth(), day), inMonth: day >= 1 && day <= daysInMonth })
+    day += 1
+  }
+  return cells
+}
 function juridiqueScheduleFromSale(iso) {
   if (!iso) return { date: '', time: '' }
   const d = new Date(iso)
@@ -48,29 +61,28 @@ function juridiqueScheduleFromSale(iso) {
 // ---------------------------------------------------------------------------
 export default function ServiceJuridiquePage() {
   const navigate = useNavigate()
-  const { adminUser } = useAuth()
-  const { sales, loading: salesLoading, update: salesUpdate } = useSales()
+  const { sales, loading: salesLoading } = useSales()
 
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [page, setPage] = useState(1)
   const [selectedId, setSelectedId] = useState(null)
-  const [saving, setSaving] = useState(false)
-  const [toast, setToast] = useState(null)
-
-  const showToast = (msg, ok = true) => {
-    setToast({ msg, ok })
-    window.setTimeout(() => setToast(null), 2800)
-  }
+  const [view, setView] = useState('calendar')
+  const [monthAnchor, setMonthAnchor] = useState(() => startOfMonth(new Date()))
+  const [selectedDate, setSelectedDate] = useState(() => toIsoDate(new Date()))
 
   const todayIso = useMemo(() => new Date().toISOString().slice(0, 10), [])
 
   // ── Filter: sales awaiting Juridique validation ───────────────────────────
+  // Data-driven filter: any active sale with a Juridique appointment booked
+  // and not yet validated by the legal team. Doesn't require a specific
+  // status string — the RDV being planned in Coordination is the signal
+  // that juridique needs visibility on the file.
   const legalEntries = useMemo(() => {
     return (sales || [])
       .filter((s) => {
         const st = String(s.status || '')
-        if (st !== 'pending_finance' && st !== 'pending_legal') return false
+        if (['cancelled', 'rejected', 'completed'].includes(st)) return false
         if (!s.coordinationJuridiqueAt) return false
         if (s.juridiqueValidatedAt) return false
         return true
@@ -155,24 +167,19 @@ export default function ServiceJuridiquePage() {
     [selectedId, legalEntries],
   )
 
-  // ── Actions ───────────────────────────────────────────────────────────────
-  async function stampReadyForNotary() {
-    if (!selected?.id || saving) return
-    const res = await runSafeAction({
-      setBusy: setSaving,
-      onError: (msg) => showToast(msg, false),
-      label: 'Valider le dossier juridique',
-    }, async () => {
-      await salesUpdate(selected.id, {
-        juridiqueValidatedAt: new Date().toISOString(),
-        juridiqueValidatedBy: adminUser?.id || null,
-      })
-    })
-    if (res.ok) {
-      showToast('Dossier validé — transféré au notaire.')
-      setSelectedId(null)
+  // ── Calendar derived ──────────────────────────────────────────────────────
+  const entriesByDate = useMemo(() => {
+    const m = new Map()
+    for (const e of legalEntries) {
+      if (!e.date) continue
+      if (!m.has(e.date)) m.set(e.date, [])
+      m.get(e.date).push(e)
     }
-  }
+    return m
+  }, [legalEntries])
+  const monthCells = useMemo(() => monthGrid(monthAnchor), [monthAnchor])
+  const dayAgenda = useMemo(() => entriesByDate.get(selectedDate) || [], [entriesByDate, selectedDate])
+  const monthLabel = monthAnchor.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
 
   const onQueryChange = (e) => { setQuery(e.target.value); setPage(1) }
   const onStatusFilterChange = (key) => { setStatusFilter(key); setPage(1) }
@@ -242,8 +249,31 @@ export default function ServiceJuridiquePage() {
             </button>
           ))}
         </div>
+        <div className="fv-chips" role="tablist" aria-label="Vue">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === 'list'}
+            className={`fv-chip${view === 'list' ? ' fv-chip--active' : ''}`}
+            onClick={() => setView('list')}
+          >
+            Liste
+            <span className="fv-chip__count">{filtered.length}</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={view === 'calendar'}
+            className={`fv-chip${view === 'calendar' ? ' fv-chip--active' : ''}`}
+            onClick={() => setView('calendar')}
+          >
+            Calendrier
+          </button>
+        </div>
       </div>
 
+      {view === 'list' && (
+      <>
       <div className="sp-cards">
         <RenderDataGate
           loading={showSkeletons}
@@ -372,6 +402,86 @@ export default function ServiceJuridiquePage() {
           </span>
         </div>
       )}
+      </>
+      )}
+
+      {view === 'calendar' && (
+        <section className="fv-cal">
+          <div className="fv-cal__nav">
+            <button type="button" className="fv-cal__nav-btn" onClick={() => setMonthAnchor((d) => addMonths(d, -1))} aria-label="Mois précédent">‹</button>
+            <span className="fv-cal__month">{monthLabel}</span>
+            <button type="button" className="fv-cal__nav-btn" onClick={() => setMonthAnchor((d) => addMonths(d, 1))} aria-label="Mois suivant">›</button>
+          </div>
+          <div className="fv-cal__week">
+            {['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'].map((d) => (
+              <span key={d} className="fv-cal__weekday">{d}</span>
+            ))}
+          </div>
+          <div className="fv-cal__grid">
+            {monthCells.map((cell) => {
+              const iso = toIsoDate(cell.date)
+              const count = (entriesByDate.get(iso) || []).length
+              const isSel = iso === selectedDate
+              return (
+                <button
+                  key={`${iso}-${cell.inMonth ? 'in' : 'out'}`}
+                  type="button"
+                  className={`fv-cal__day${cell.inMonth ? '' : ' fv-cal__day--muted'}${isSel ? ' fv-cal__day--sel' : ''}`}
+                  onClick={() => setSelectedDate(iso)}
+                >
+                  <span className="fv-cal__day-num">{cell.date.getDate()}</span>
+                  {count > 0 ? <span className="fv-cal__day-dot">{count}</span> : null}
+                </button>
+              )
+            })}
+          </div>
+          <div className="fv-cal__agenda">
+            <div className="fv-cal__agenda-head">{fmtDate(selectedDate)}</div>
+            {dayAgenda.length === 0 ? (
+              <div className="sp-empty" style={{ marginTop: 8 }}>
+                <span className="sp-empty__emoji" aria-hidden>📭</span>
+                <div className="sp-empty__title">Aucun rendez-vous juridique ce jour.</div>
+              </div>
+            ) : (
+              <div className="sp-cards">
+                {dayAgenda.map((entry) => {
+                  const st = entryStatus(entry)
+                  const tone = st === 'today' ? 'orange' : st === 'overdue' ? 'red' : 'blue'
+                  return (
+                    <button
+                      key={entry.id}
+                      type="button"
+                      className={`sp-card sp-card--${tone}`}
+                      onClick={() => setSelectedId(entry.id)}
+                      aria-label={`Ouvrir le dossier de ${entry.clientName}`}
+                    >
+                      <div className="sp-card__head">
+                        <div className="sp-card__user">
+                          <span className="sp-card__initials">{initials(entry.clientName)}</span>
+                          <div style={{ minWidth: 0 }}>
+                            <p className="sp-card__name">{entry.clientName}</p>
+                            <p className="sp-card__sub">{entry.projectTitle} · Parcelle {entry.plotLabel}</p>
+                          </div>
+                        </div>
+                        <span className={`sp-badge sp-badge--${tone}`}>{entry.time}</span>
+                      </div>
+                      <div className="sp-card__body">
+                        <div className="sp-card__price">
+                          <span className="sp-card__amount">{(entry.priceTotal || 0).toLocaleString('fr-FR')}</span>
+                          <span className="sp-card__currency">TND</span>
+                        </div>
+                        <div className="sp-card__info">
+                          <span>{entry.paymentType}</span>
+                        </div>
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        </section>
+      )}
 
       {selected && (
         <AdminModal open onClose={() => setSelectedId(null)} title="">
@@ -438,33 +548,12 @@ export default function ServiceJuridiquePage() {
                 type="button"
                 className="sp-detail__btn"
                 onClick={() => setSelectedId(null)}
-                disabled={saving}
               >
                 Fermer
-              </button>
-              <button
-                type="button"
-                className="sp-detail__btn sp-detail__btn--edit"
-                onClick={stampReadyForNotary}
-                disabled={saving}
-                title="Marque ce dossier comme conforme et le transfère au notaire"
-              >
-                {saving ? 'Enregistrement…' : 'Valider — Prêt pour le notaire'}
               </button>
             </div>
           </div>
         </AdminModal>
-      )}
-
-      {toast && (
-        <div
-          className={`sj-toast${toast.ok ? ' sj-toast--ok' : ' sj-toast--err'}`}
-          role="status"
-          onClick={() => setToast(null)}
-        >
-          <span className="sj-toast__icon" aria-hidden>{toast.ok ? '✓' : '✕'}</span>
-          <span className="sj-toast__msg">{toast.msg}</span>
-        </div>
       )}
     </div>
   )

@@ -125,7 +125,8 @@ export default function RecouvrementV2Page() {
       </button>
 
       <header className="recouvrement-page__hero">
-        <div>
+        <div className="recouvrement-page__hero-icon" aria-hidden>⚠️</div>
+        <div className="recouvrement-page__hero-main">
           <h1 className="recouvrement-page__title">Recouvrement 2+ mois</h1>
           <p className="recouvrement-page__sub">
             Paiements non réglés depuis au moins {OVERDUE_MONTHS} mois — capture automatique.
@@ -137,33 +138,50 @@ export default function RecouvrementV2Page() {
           onClick={() => refresh?.()}
           title="Rafraîchir"
         >
-          ↻ Rafraîchir
+          <span className="recouvrement-page__refresh-icon" aria-hidden>↻</span>
+          <span>Rafraîchir</span>
         </button>
       </header>
 
       <div className="recouvrement-page__kpis">
         <div className="recouvrement-page__kpi recouvrement-page__kpi--danger">
+          <span className="recouvrement-page__kpi-icon" aria-hidden>⏱</span>
           <span className="recouvrement-page__kpi-label">Retards détectés</span>
           <span className="recouvrement-page__kpi-value">{filtered.length}</span>
         </div>
         <div className="recouvrement-page__kpi">
+          <span className="recouvrement-page__kpi-icon" aria-hidden>👤</span>
           <span className="recouvrement-page__kpi-label">Clients concernés</span>
           <span className="recouvrement-page__kpi-value">{affectedClients}</span>
         </div>
         <div className="recouvrement-page__kpi recouvrement-page__kpi--amount">
+          <span className="recouvrement-page__kpi-icon" aria-hidden>💰</span>
           <span className="recouvrement-page__kpi-label">Montant total</span>
           <span className="recouvrement-page__kpi-value">{fmtMoney(totalOverdueAmount)}</span>
         </div>
       </div>
 
       <div className="recouvrement-page__toolbar">
-        <input
-          type="search"
-          className="recouvrement-page__search"
-          placeholder="Rechercher par client, projet, téléphone, parcelle…"
-          value={query}
-          onChange={(e) => { setQuery(e.target.value); setPage(1) }}
-        />
+        <div className="recouvrement-page__search-wrap">
+          <span className="recouvrement-page__search-icon" aria-hidden>🔍</span>
+          <input
+            type="search"
+            className="recouvrement-page__search"
+            placeholder="Rechercher par client, projet, téléphone, parcelle…"
+            value={query}
+            onChange={(e) => { setQuery(e.target.value); setPage(1) }}
+          />
+          {query && (
+            <button
+              type="button"
+              className="recouvrement-page__search-clear"
+              onClick={() => { setQuery(''); setPage(1) }}
+              aria-label="Effacer la recherche"
+            >
+              ✕
+            </button>
+          )}
+        </div>
       </div>
 
       <RenderDataGate
@@ -173,6 +191,7 @@ export default function RecouvrementV2Page() {
         skeleton="table"
         empty={
           <EmptyState
+            icon="✅"
             title="Aucun paiement en retard de 2 mois ou plus."
             description="Tous les échéanciers sont à jour dans cette fenêtre."
           />

@@ -99,7 +99,7 @@ export default function CashSalesPage() {
   const onSearchChange = (e) => { setSearch(e.target.value); setPage(1) }
 
   return (
-    <div className="sell-field" dir="ltr">
+    <div className="sell-field cs-page" dir="ltr">
       <button type="button" className="sp-back-btn" onClick={() => navigate(-1)}>
         <span className="sp-back-btn__icon-wrap" aria-hidden>←</span>
         <span>Retour</span>
@@ -129,14 +129,27 @@ export default function CashSalesPage() {
           <span className="sp-cat-stat-dot" />
           <strong>{showSkeletons ? <span className="sk-num sk-num--wide" /> : totalAmount.toLocaleString('fr-FR')}</strong> TND
         </div>
-        <div className="sp-cat-filters">
-          <input
-            className="sp-cat-search"
-            placeholder="Rechercher client, projet, parcelle…"
-            aria-label="Rechercher une vente"
-            value={search}
-            onChange={onSearchChange}
-          />
+        <div className="sp-cat-filters cs-filters">
+          <div className="cs-search">
+            <span className="cs-search__icon" aria-hidden>🔍</span>
+            <input
+              className="sp-cat-search cs-search__input"
+              placeholder="Rechercher client, projet, parcelle…"
+              aria-label="Rechercher une vente"
+              value={search}
+              onChange={onSearchChange}
+            />
+            {search && (
+              <button
+                type="button"
+                className="cs-search__clear"
+                onClick={() => { setSearch(''); setPage(1) }}
+                aria-label="Effacer la recherche"
+              >
+                ✕
+              </button>
+            )}
+          </div>
         </div>
       </div>
 

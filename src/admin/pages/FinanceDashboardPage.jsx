@@ -95,10 +95,20 @@ export default function FinanceDashboardPage() {
   }
 
   // ---- Pending sales queue -------------------------------------------------
+  // Data-driven filter: any active sale that has a Finance appointment booked
+  // and hasn't been validated by finance yet. Avoids relying on status-string
+  // transitions that can be skipped (e.g. juridique planned before finance,
+  // legacy 'pending' rows aliased to pending_finance, etc.).
   const pendingSales = useMemo(() => {
     const q = query.trim().toLowerCase()
     return (sales || [])
-      .filter((s) => String(s.status || '') === 'pending_finance')
+      .filter((s) => {
+        const st = String(s.status || '')
+        if (['cancelled', 'rejected', 'completed'].includes(st)) return false
+        if (!s.coordinationFinanceAt) return false
+        if (s.financeValidatedAt || s.financeConfirmedAt) return false
+        return true
+      })
       .filter((s) => {
         if (!q) return true
         const hay = `${s.clientName || ''} ${s.projectTitle || ''} ${s.code || s.id || ''} ${normalizePlotIds(s).join(',')}`.toLowerCase()
@@ -120,9 +130,27 @@ export default function FinanceDashboardPage() {
 
   // ---- KPIs ---------------------------------------------------------------
   const kpis = useMemo(() => {
-    const total = pendingSales.reduce((sum, s) => sum + (Number(s.agreedPrice) || 0), 0)
-    const advance = pendingSales.reduce((sum, s) => sum + (Number(s.deposit) || 0), 0)
-    return { count: pendingSales.length, total, advance, due: Math.max(0, total - advance) }
+    let total = 0
+    let advance = 0
+    let companyFees = 0
+    let notaryFees = 0
+    for (const s of pendingSales) {
+      const agreed = Number(s.agreedPrice) || 0
+      const dep = Number(s.deposit) || 0
+      total += agreed
+      advance += dep
+      const { company, notary } = feeRatesFromSale(s)
+      companyFees += agreed * company
+      notaryFees += agreed * notary
+    }
+    return {
+      count: pendingSales.length,
+      total,
+      advance,
+      due: Math.max(0, total - advance),
+      companyFees: Math.round(companyFees),
+      notaryFees: Math.round(notaryFees),
+    }
   }, [pendingSales])
 
   // ---- Pager --------------------------------------------------------------
@@ -246,6 +274,14 @@ export default function FinanceDashboardPage() {
           <strong>{showSkeletons ? <span className="sk-num sk-num--wide" /> : kpis.total.toLocaleString('fr-FR')}</strong> TND total
           <span className="sp-cat-stat-dot" />
           <strong>{showSkeletons ? <span className="sk-num sk-num--wide" /> : kpis.advance.toLocaleString('fr-FR')}</strong> TND avance
+          <span className="sp-cat-stat-dot" />
+          <strong title="Somme des frais société (commission Zitouna) sur les dossiers en attente">
+            {showSkeletons ? <span className="sk-num sk-num--wide" /> : kpis.companyFees.toLocaleString('fr-FR')}
+          </strong> TND frais société
+          <span className="sp-cat-stat-dot" />
+          <strong title="Somme des frais notaire transférés sur les dossiers en attente">
+            {showSkeletons ? <span className="sk-num sk-num--wide" /> : kpis.notaryFees.toLocaleString('fr-FR')}
+          </strong> TND frais notaire
         </div>
         <div className="sp-cat-filters">
           <input
@@ -437,6 +473,27 @@ export default function FinanceDashboardPage() {
           const firstInstallment = isInst && downPct > 0 ? Math.round(agreed * downPct / 100) : agreed
           const due = Math.max(0, firstInstallment - advance)
           const net = Math.max(0, due - companyFee - notaryFee)
+
+          // Projected monthly schedule for "Échelonné" sales. The real plan is
+          // only generated at notary stage, so this is a preview based on the
+          // frozen offer terms anchored at the Finance RDV (or today as
+          // fallback). Matches `ensureInstallmentPlanFromSale`: month 1 due =
+          // anchor, month N due = anchor + (duration - 1) months.
+          const duration = Math.max(0, Number(s.offerDuration) || 0)
+          const principal = Math.max(0, agreed - firstInstallment)
+          const monthly = isInst && duration > 0 ? Math.round(principal / duration) : 0
+          const scheduleAnchor = (() => {
+            const raw = s.financeValidatedAt || s.financeConfirmedAt || s.coordinationFinanceAt
+            const d = raw ? new Date(raw) : new Date()
+            return Number.isNaN(d.getTime()) ? new Date() : d
+          })()
+          const addMonthsDate = (d, n) => {
+            const copy = new Date(d)
+            copy.setMonth(copy.getMonth() + n)
+            return copy
+          }
+          const firstMonthlyDue = isInst && duration > 0 ? addMonthsDate(scheduleAnchor, 0) : null
+          const lastMonthlyDue = isInst && duration > 0 ? addMonthsDate(scheduleAnchor, duration - 1) : null
           return (
             <div className="sp-detail fv-detail">
               <div className="sp-detail__banner">
@@ -501,6 +558,22 @@ export default function FinanceDashboardPage() {
                       <span>Capital restant</span>
                       <strong>{fmtMoney(Math.max(0, agreed - firstInstallment))}</strong>
                     </div>
+                    {duration > 0 && (
+                      <>
+                        <div className="sp-detail__row">
+                          <span>Durée échelonnement</span>
+                          <strong>{duration} mois · {fmtMoney(monthly)} / mois</strong>
+                        </div>
+                        <div className="sp-detail__row">
+                          <span>1ère mensualité (prévue)</span>
+                          <strong>{fmtDate(firstMonthlyDue?.toISOString())}</strong>
+                        </div>
+                        <div className="sp-detail__row">
+                          <span>Dernière mensualité (prévue)</span>
+                          <strong>{fmtDate(lastMonthlyDue?.toISOString())}</strong>
+                        </div>
+                      </>
+                    )}
                   </>
                 )}
                 <div className="sp-detail__row"><span>Acompte reçu</span><strong>{fmtMoney(advance)}</strong></div>

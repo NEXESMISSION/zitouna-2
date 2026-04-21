@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useClients, useSales } from '../../lib/useSupabase.js'
+import { useAdminUsers, useClients, useSales } from '../../lib/useSupabase.js'
 import { useAuth } from '../../lib/AuthContext.jsx'
 import * as db from '../../lib/db.js'
 import AdminModal from '../components/AdminModal.jsx'
@@ -28,6 +28,14 @@ function fmtDate(iso) {
   } catch {
     return String(iso)
   }
+}
+
+function fmtDateTime(iso) {
+  if (!iso) return '—'
+  try {
+    const d = new Date(iso)
+    return `${d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' })} ${d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`
+  } catch { return String(iso) }
 }
 
 function normalizePlotIds(sale) {
@@ -79,6 +87,13 @@ export default function NotaryDashboardPage() {
   const { adminUser } = useAuth()
   const { sales, loading: salesLoading, update: updateSale } = useSales()
   const { clients } = useClients()
+  const { adminUsers } = useAdminUsers()
+
+  const sellerById = useMemo(() => {
+    const m = new Map()
+    for (const u of adminUsers || []) m.set(String(u.id), u)
+    return m
+  }, [adminUsers])
   const [query, setQuery] = useState('')
   const [page, setPage] = useState(1)
   const [selectedSale, setSelectedSale] = useState(null)
@@ -572,72 +587,188 @@ export default function NotaryDashboardPage() {
               </p>
             </div>
 
-            <div className="sp-detail__section">
-              <div className="sp-detail__section-title">Client</div>
-              <div className="sp-detail__row"><span>Nom</span><strong>{selectedSale.clientName || '—'}</strong></div>
-              <div className="sp-detail__row"><span>CIN</span><strong style={{ direction: 'ltr' }}>{selectedSale.client?.cin || '—'}</strong></div>
-              <div className="sp-detail__row"><span>Téléphone</span><strong style={{ direction: 'ltr' }}>{selectedSale.client?.phone || '—'}</strong></div>
-              {selectedSale.client?.email && (
-                <div className="sp-detail__row"><span>Email</span><strong style={{ wordBreak: 'break-all' }}>{selectedSale.client.email}</strong></div>
-              )}
-            </div>
+            {(() => {
+              const seller = sellerById.get(String(selectedSale.agentId || selectedSale.managerId || ''))
+              const isInst = selectedSale.paymentType === 'installments'
+              const downPct = Number(selectedSale.offerDownPayment) || 0
+              const duration = Math.max(0, Number(selectedSale.offerDuration) || 0)
+              const firstInstallment = isInst && downPct > 0
+                ? Math.round((selectedSale.total || 0) * downPct / 100)
+                : (selectedSale.total || 0)
+              const principal = Math.max(0, (selectedSale.total || 0) - firstInstallment)
+              const monthly = isInst && duration > 0 ? Math.round(principal / duration) : 0
+              const scheduleAnchor = (() => {
+                const raw = selectedSale.financeValidatedAt
+                  || selectedSale.financeConfirmedAt
+                  || selectedSale.coordinationFinanceAt
+                const d = raw ? new Date(raw) : new Date()
+                return Number.isNaN(d.getTime()) ? new Date() : d
+              })()
+              const addMonthsDate = (d, n) => {
+                const copy = new Date(d)
+                copy.setMonth(copy.getMonth() + n)
+                return copy
+              }
+              const firstMonthlyDue = isInst && duration > 0 ? addMonthsDate(scheduleAnchor, 0) : null
+              const lastMonthlyDue = isInst && duration > 0 ? addMonthsDate(scheduleAnchor, duration - 1) : null
+              const offerLabel = selectedSale.offerName || (isInst ? 'Échelonné' : 'Comptant')
+
+              return (
+                <>
+                  <div className="sp-detail__section">
+                    <div className="sp-detail__section-title">Acheteur</div>
+                    <div className="sp-detail__row"><span>Nom</span><strong>{selectedSale.clientName || selectedSale.client?.name || '—'}</strong></div>
+                    <div className="sp-detail__row"><span>Téléphone</span><strong style={{ direction: 'ltr' }}>{selectedSale.clientPhone || selectedSale.client?.phone || selectedSale.buyerPhoneNormalized || '—'}</strong></div>
+                    {(selectedSale.clientEmail || selectedSale.client?.email) && (
+                      <div className="sp-detail__row"><span>Email</span><strong style={{ wordBreak: 'break-all' }}>{selectedSale.clientEmail || selectedSale.client?.email}</strong></div>
+                    )}
+                    <div className="sp-detail__row"><span>CIN</span><strong style={{ direction: 'ltr' }}>{selectedSale.clientCin || selectedSale.client?.cin || '—'}</strong></div>
+                  </div>
+
+                  <div className="sp-detail__section">
+                    <div className="sp-detail__section-title">Vendeur</div>
+                    <div className="sp-detail__row"><span>Nom</span><strong>{seller?.name || 'Commercial'}</strong></div>
+                    <div className="sp-detail__row"><span>Email</span><strong style={{ wordBreak: 'break-all' }}>{seller?.email || '—'}</strong></div>
+                    <div className="sp-detail__row"><span>Téléphone</span><strong style={{ direction: 'ltr' }}>{seller?.phone || '—'}</strong></div>
+                  </div>
+
+                  <div className="sp-detail__section">
+                    <div className="sp-detail__section-title">Vente</div>
+                    <div className="sp-detail__row"><span>Projet</span><strong>{selectedSale.projectTitle || '—'}</strong></div>
+                    <div className="sp-detail__row"><span>Parcelle(s)</span><strong>{selectedSale.plotIds.map((id) => `#${id}`).join(', ') || '—'}</strong></div>
+                    <div className="sp-detail__row"><span>Offre</span><strong>{offerLabel}</strong></div>
+                    <div className="sp-detail__row"><span>Mode paiement</span><strong>{isInst ? 'Échelonné' : 'Comptant'}</strong></div>
+                    {isInst && (duration > 0 || downPct > 0) && (
+                      <div className="sp-detail__row">
+                        <span>Durée</span>
+                        <strong>{duration} mois · {downPct}% apport</strong>
+                      </div>
+                    )}
+                    <div className="sp-detail__row"><span>Date création</span><strong>{fmtDate(selectedSale.createdAt)}</strong></div>
+                  </div>
+
+                  <div className="sp-detail__section">
+                    <div className="sp-detail__section-title">Coordination</div>
+                    <div className="sp-detail__row"><span>RDV Finance</span><strong>{fmtDateTime(selectedSale.coordinationFinanceAt)}</strong></div>
+                    <div className="sp-detail__row"><span>RDV Juridique</span><strong>{fmtDateTime(selectedSale.coordinationJuridiqueAt)}</strong></div>
+                    {selectedSale.juridiqueValidatedAt && (
+                      <div className="sp-detail__row">
+                        <span>Juridique validé</span>
+                        <strong style={{ color: '#059669' }}>{fmtDate(selectedSale.juridiqueValidatedAt)}</strong>
+                      </div>
+                    )}
+                    {selectedSale.coordinationNotes && (
+                      <p className="fv-detail__notes" style={{ whiteSpace: 'pre-wrap', marginTop: 6 }}>
+                        {selectedSale.coordinationNotes}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="sp-detail__section">
+                    <div className="sp-detail__section-title">Finance</div>
+                    <div className="sp-detail__row">
+                      <span>Paiement validé</span>
+                      <strong style={{ color: (selectedSale.financeValidatedAt || selectedSale.financeConfirmedAt) ? '#059669' : '#d97706' }}>
+                        {(selectedSale.financeValidatedAt || selectedSale.financeConfirmedAt)
+                          ? fmtDate(selectedSale.financeValidatedAt || selectedSale.financeConfirmedAt)
+                          : 'En attente'}
+                      </strong>
+                    </div>
+                    <div className="sp-detail__row"><span>Prix de vente</span><strong>{fmtMoney(selectedSale.total)}</strong></div>
+                    <div className="sp-detail__row"><span>Avance reçue</span><strong>{fmtMoney(selectedSale.deposit)}</strong></div>
+                    {isInst && downPct > 0 && (
+                      <div className="sp-detail__row">
+                        <span>1er versement ({downPct}%) encaissé</span>
+                        <strong>{fmtMoney(firstInstallment)}</strong>
+                      </div>
+                    )}
+                    <div className="sp-detail__row"><span>Frais société</span><strong>{fmtMoney(selectedSale.companyFee)}</strong></div>
+                    <div className="sp-detail__row"><span>Frais notaire</span><strong>{fmtMoney(selectedSale.notaryFee)}</strong></div>
+                    <div className="sp-detail__row sp-detail__row--highlight">
+                      <span>{isInst ? 'Capital restant (échéances)' : 'Reste à encaisser'}</span>
+                      <strong>{fmtMoney(selectedSale.remaining)}</strong>
+                    </div>
+                    {isInst && duration > 0 && (
+                      <>
+                        <div className="sp-detail__row">
+                          <span>Échéancier</span>
+                          <strong>{duration} mois · {fmtMoney(monthly)} / mois</strong>
+                        </div>
+                        <div className="sp-detail__row">
+                          <span>1ère mensualité (prévue)</span>
+                          <strong>{fmtDate(firstMonthlyDue?.toISOString())}</strong>
+                        </div>
+                        <div className="sp-detail__row">
+                          <span>Dernière mensualité (prévue)</span>
+                          <strong>{fmtDate(lastMonthlyDue?.toISOString())}</strong>
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  {(selectedSale.reservationStatus || selectedSale.reservationExpiresAt) && (
+                    <div className="sp-detail__section">
+                      <div className="sp-detail__section-title">Réservation</div>
+                      {selectedSale.reservationStatus && (
+                        <div className="sp-detail__row"><span>Statut</span><strong>{selectedSale.reservationStatus}</strong></div>
+                      )}
+                      {selectedSale.reservationExpiresAt && (
+                        <div className="sp-detail__row"><span>Expiration</span><strong>{fmtDate(selectedSale.reservationExpiresAt)}</strong></div>
+                      )}
+                      {selectedSale.reservationReleasedAt && (
+                        <div className="sp-detail__row"><span>Libérée le</span><strong>{fmtDate(selectedSale.reservationReleasedAt)}</strong></div>
+                      )}
+                    </div>
+                  )}
+                </>
+              )
+            })()}
 
             <div className="sp-detail__section">
-              <div className="sp-detail__section-title">Vente</div>
-              <div className="sp-detail__row"><span>Projet</span><strong>{selectedSale.projectTitle || '—'}</strong></div>
-              <div className="sp-detail__row"><span>Parcelles</span><strong>{selectedSale.plotIds.map((id) => `#${id}`).join(', ') || '—'}</strong></div>
-              <div className="sp-detail__row"><span>Mode</span><strong>{selectedSale.paymentType === 'installments' ? 'Échelonné' : 'Comptant'}</strong></div>
-            </div>
-
-            <div className="sp-detail__section">
-              <div className="sp-detail__section-title">Finance</div>
-              <div className="sp-detail__row">
-                <span>Paiement validé</span>
-                <strong style={{ color: (selectedSale.financeValidatedAt || selectedSale.financeConfirmedAt) ? '#059669' : '#d97706' }}>
-                  {(selectedSale.financeValidatedAt || selectedSale.financeConfirmedAt)
-                    ? fmtDate(selectedSale.financeValidatedAt || selectedSale.financeConfirmedAt)
-                    : 'En attente'}
-                </strong>
+              <div className="nd-checklist__head">
+                <div className="sp-detail__section-title" style={{ margin: 0 }}>Documents à signer</div>
+                <span className="nd-checklist__progress">
+                  {notaryChecklistRows.filter((i) => Boolean(selectedDocs[i.docKey])).length}
+                  <span>/{notaryChecklistRows.length}</span>
+                </span>
               </div>
-              <div className="sp-detail__row"><span>Avance reçue</span><strong>{fmtMoney(selectedSale.deposit)}</strong></div>
-              {selectedSale.paymentType === 'installments' && (Number(selectedSale.offerDownPayment) || 0) > 0 && (
-                <div className="sp-detail__row">
-                  <span>1er versement ({Number(selectedSale.offerDownPayment)}%) encaissé</span>
-                  <strong>{fmtMoney(Math.round(selectedSale.total * Number(selectedSale.offerDownPayment) / 100))}</strong>
-                </div>
-              )}
-              <div className="sp-detail__row"><span>Frais société</span><strong>{fmtMoney(selectedSale.companyFee)}</strong></div>
-              <div className="sp-detail__row"><span>Frais notaire</span><strong>{fmtMoney(selectedSale.notaryFee)}</strong></div>
-              <div className="sp-detail__row sp-detail__row--highlight">
-                <span>{selectedSale.paymentType === 'installments' ? 'Capital restant (échéances)' : 'Reste à encaisser'}</span>
-                <strong>{fmtMoney(selectedSale.remaining)}</strong>
-              </div>
-            </div>
-
-            <div className="sp-detail__section">
-              <div className="sp-detail__section-title">Documents à signer</div>
               <div className="nd-checklist">
                 {notaryChecklistRows.map((item) => {
                   const checked = Boolean(selectedDocs[item.docKey])
+                  const isArabicTitle = /[\u0600-\u06FF]/.test(String(item.title || ''))
                   return (
                     <label
                       key={item.docKey}
-                      className={`nd-check ${checked ? 'nd-check--on' : ''} ${item.required ? '' : 'nd-check--optional'}`}
+                      className={[
+                        'nd-check',
+                        checked ? 'nd-check--on' : '',
+                        item.required ? 'nd-check--req' : 'nd-check--opt',
+                        !checked && !item.required ? 'nd-check--skip' : '',
+                      ].filter(Boolean).join(' ')}
                     >
+                      <span className={`nd-check__box${checked ? ' nd-check__box--on' : ''}`} aria-hidden>
+                        {checked ? '✓' : ''}
+                      </span>
                       <input
                         type="checkbox"
+                        className="nd-check__input"
                         checked={checked}
                         onChange={() => toggleDoc(item.docKey)}
                         aria-label={`${item.title} ${item.required ? '(requis)' : '(optionnel)'}`}
                       />
+                      <span className="nd-check__icon" aria-hidden>📄</span>
                       <span className="nd-check__body">
-                        <span className="nd-check__title">
+                        <span
+                          className="nd-check__title"
+                          dir={isArabicTitle ? 'rtl' : 'ltr'}
+                          style={isArabicTitle ? { textAlign: 'right' } : undefined}
+                        >
                           {item.title}
-                          <span className={`nd-check__tag ${item.required ? 'nd-check__tag--req' : 'nd-check__tag--opt'}`}>
-                            {item.required ? 'Requis' : 'Optionnel'}
-                          </span>
                         </span>
                         {item.desc && <span className="nd-check__desc">{item.desc}</span>}
+                      </span>
+                      <span className={`nd-check__tag ${item.required ? 'nd-check__tag--req' : 'nd-check__tag--opt'}`}>
+                        {item.required ? 'Requis' : (checked ? 'Inclus' : 'Option')}
                       </span>
                     </label>
                   )

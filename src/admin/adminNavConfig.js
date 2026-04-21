@@ -18,8 +18,8 @@ export const NAV_ITEMS = [
   { to: '/admin/sell', label: 'Ventes', icon: 'shopping-bag' },
   { to: '/admin/coordination', label: 'Coordination', icon: 'calendar-check' },
   { to: '/admin/finance', label: 'Finance', icon: 'dollar-sign' },
-  { to: '/admin/juridique', label: 'Juridique', icon: 'scale' },
   { to: '/admin/legal', label: 'Notaire', icon: 'shield' },
+  { to: '/admin/juridique', label: 'Juridique', icon: 'scale' },
 
   // Clients & paiements
   { to: '/admin/clients', label: 'Clients', icon: 'users' },

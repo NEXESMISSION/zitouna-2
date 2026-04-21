@@ -133,6 +133,7 @@ export async function fetchProjects() {
     title: p.title,
     city: p.city,
     region: p.region || '',
+    address: p.address || '',
     area: p.area || '',
     year: p.year_started || '',
     description: p.description || '',
@@ -302,6 +303,7 @@ export async function fetchPublicProjectById(projectId) {
     title: p.title,
     city: p.city,
     region: p.region || '',
+    address: p.address || '',
     area: p.area || '',
     year: p.year_started || '',
     description: p.description || '',
@@ -406,6 +408,9 @@ export async function fetchProjectWorkflowConfig(projectId) {
     companyFeePct: Number(s.company_fee_pct ?? 5),
     notaryFeePct: Number(s.notary_fee_pct ?? 2),
     minimumPayoutThreshold: Number(s.minimum_payout_threshold ?? 100),
+    defaultAdvanceAmount: s.default_advance_amount != null ? Number(s.default_advance_amount) : null,
+    installmentsFirstDueDate: s.installments_first_due_date || '',
+    installmentsEndDate: s.installments_end_date || '',
     signatureChecklist,
     commissionRules,
   }
@@ -425,6 +430,12 @@ export async function upsertProjectWorkflowSettingsFromShape(projectId, wf) {
     company_fee_pct: Number(wf.companyFeePct ?? 5),
     notary_fee_pct: Number(wf.notaryFeePct ?? 2),
     minimum_payout_threshold: Number(wf.minimumPayoutThreshold ?? 0),
+    default_advance_amount:
+      wf.defaultAdvanceAmount === '' || wf.defaultAdvanceAmount == null
+        ? null
+        : Number(wf.defaultAdvanceAmount),
+    installments_first_due_date: wf.installmentsFirstDueDate || null,
+    installments_end_date: wf.installmentsEndDate || null,
   }
   const res = await db().from('project_workflow_settings').upsert(row, { onConflict: 'project_id' })
   throwIfError(res, 'upsertProjectWorkflowSettingsFromShape')
@@ -502,6 +513,7 @@ export async function fetchProjectsScopedByIds(projectIds = []) {
     title: p.title,
     city: p.city,
     region: p.region || '',
+    address: p.address || '',
     area: p.area || '',
     year: p.year_started || '',
     description: p.description || '',
@@ -692,6 +704,7 @@ export async function upsertProject(project) {
     title: project.title || '',
     city: project.city || '',
     region: project.region || '',
+    address: project.address || '',
     area: project.area || '',
     year_started: Number(project.year || new Date().getFullYear()),
     description: project.description || '',

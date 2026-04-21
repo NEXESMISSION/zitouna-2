@@ -51,6 +51,59 @@
   display: none !important;
 }
 
+/* ── Shared EmptyState re-theme for the light admin shell ──────────────
+   The shared `<EmptyState>` in App.css targets the dark app background;
+   under the white `.sell-field` shell it reads washed-out. This base
+   override re-skins it for the light bg. Individual pages can tint it
+   further (e.g. cash-sales.css recolors the badge green). */
+.sell-field .empty-state {
+  padding: 40px 20px;
+  gap: 10px;
+  color: #64748b;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+.sell-field .empty-state__icon {
+  width: 64px;
+  height: 64px;
+  font-size: 28px;
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  border: 1px solid #bfdbfe;
+  color: #1d4ed8;
+  margin-bottom: 4px;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.10);
+}
+.sell-field .empty-state__title {
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  max-width: 40ch;
+}
+.sell-field .empty-state__hint {
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.55;
+  max-width: 44ch;
+}
+.sell-field .empty-state__btn--primary {
+  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+  color: #fff;
+  border-color: transparent;
+}
+.sell-field .empty-state__btn--ghost {
+  color: #475569;
+  border-color: #cbd5e1;
+  background: transparent;
+}
+.sell-field .empty-state__btn--ghost:hover {
+  color: #0f172a;
+  border-color: #94a3b8;
+  filter: none;
+}
+
 /* ── Override admin styles inside sell page ── */
 .sell-field .adm-btn--primary {
   background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%) !important;

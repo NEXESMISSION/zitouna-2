@@ -13,37 +13,68 @@
 
 .recouvrement-page__hero {
   display: flex;
-  justify-content: space-between;
-  align-items: flex-end;
-  gap: 12px;
-  margin-bottom: 18px;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 20px;
+  padding: 16px 18px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #fff1f2 0%, #ffffff 55%, #ffffff 100%);
+  border: 1px solid #fecdd3;
+  box-shadow: 0 2px 10px rgba(244, 63, 94, 0.06);
   flex-wrap: wrap;
+}
+.recouvrement-page__hero-icon {
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #fecaca 0%, #fca5a5 100%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.18);
+}
+.recouvrement-page__hero-main {
+  flex: 1;
+  min-width: 200px;
 }
 .recouvrement-page__title {
   font-size: 22px;
   font-weight: 800;
   margin: 0 0 4px;
   letter-spacing: -0.01em;
+  color: #0f172a;
 }
 .recouvrement-page__sub {
   font-size: 13px;
   color: #64748b;
   margin: 0;
+  line-height: 1.45;
 }
 .recouvrement-page__refresh {
-  padding: 8px 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
   border-radius: 10px;
-  border: 1px solid #e2e8f0;
-  background: #fff;
-  font-size: 12px;
-  font-weight: 600;
-  color: #334155;
+  border: 1.5px solid #fecaca;
+  background: #ffffff;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #b91c1c;
   cursor: pointer;
-  transition: background-color 0.15s, border-color 0.15s;
+  transition: background-color 0.15s, border-color 0.15s, transform 0.08s;
 }
 .recouvrement-page__refresh:hover {
-  background: #f8fafc;
-  border-color: #cbd5e1;
+  background: #fef2f2;
+  border-color: #fca5a5;
+}
+.recouvrement-page__refresh:active { transform: translateY(1px); }
+.recouvrement-page__refresh-icon {
+  font-size: 14px;
+  line-height: 1;
+  display: inline-block;
 }
 
 .recouvrement-page__kpis {
@@ -53,21 +84,53 @@
   margin-bottom: 16px;
 }
 .recouvrement-page__kpi {
-  padding: 14px 16px;
+  position: relative;
+  padding: 14px 16px 14px 52px;
   border-radius: 14px;
   background: #fff;
   border: 1px solid #e2e8f0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
+  min-height: 78px;
+  justify-content: center;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+}
+.recouvrement-page__kpi:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.05);
+  transform: translateY(-1px);
+}
+.recouvrement-page__kpi-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: #f1f5f9;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  line-height: 1;
 }
 .recouvrement-page__kpi--danger {
   background: linear-gradient(180deg, #fef2f2 0%, #ffffff 100%);
   border-color: #fecaca;
 }
+.recouvrement-page__kpi--danger .recouvrement-page__kpi-icon {
+  background: #fee2e2;
+  color: #b91c1c;
+}
 .recouvrement-page__kpi--amount {
   background: linear-gradient(180deg, #f0fdf4 0%, #ffffff 100%);
   border-color: #bbf7d0;
+}
+.recouvrement-page__kpi--amount .recouvrement-page__kpi-icon {
+  background: #dcfce7;
+  color: #047857;
 }
 .recouvrement-page__kpi-label {
   font-size: 10px;
@@ -81,6 +144,7 @@
   font-weight: 800;
   color: #0f172a;
   letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
 }
 .recouvrement-page__kpi--danger .recouvrement-page__kpi-value { color: #b91c1c; }
 .recouvrement-page__kpi--amount .recouvrement-page__kpi-value { color: #065f46; }
@@ -88,19 +152,96 @@
 .recouvrement-page__toolbar {
   margin-bottom: 14px;
 }
+.recouvrement-page__search-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.recouvrement-page__search-icon {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 14px;
+  color: #94a3b8;
+  pointer-events: none;
+  line-height: 1;
+}
 .recouvrement-page__search {
   width: 100%;
-  padding: 10px 14px;
+  padding: 12px 44px;
   border-radius: 12px;
-  border: 1px solid #e2e8f0;
+  border: 1.5px solid #e2e8f0;
   background: #fff;
   font-size: 14px;
+  font-weight: 500;
+  color: #0f172a;
   outline: none;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  min-height: 46px;
+  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
 }
+.recouvrement-page__search::placeholder { color: #94a3b8; }
 .recouvrement-page__search:focus {
-  border-color: #0f766e;
-  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
+  border-color: #dc2626;
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.10);
+  background: #fffbfb;
+}
+.recouvrement-page__search-clear {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: #f1f5f9;
+  color: #64748b;
+  border-radius: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s;
+}
+.recouvrement-page__search-clear:hover {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+/* Re-skin the shared EmptyState on this page with a success/green accent. */
+.recouvrement-page .empty-state {
+  padding: 44px 20px;
+  gap: 10px;
+  color: #64748b;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+.recouvrement-page .empty-state__icon {
+  width: 68px;
+  height: 68px;
+  font-size: 30px;
+  background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+  border: 1px solid #a7f3d0;
+  color: #059669;
+  margin-bottom: 4px;
+  box-shadow: 0 2px 8px rgba(5, 150, 105, 0.12);
+}
+.recouvrement-page .empty-state__title {
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  max-width: 40ch;
+}
+.recouvrement-page .empty-state__hint {
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.55;
+  max-width: 44ch;
 }
 
 .recouvrement-page__list {

@@ -52,7 +52,7 @@ function sumBatchTrees(list) {
   return (list || []).reduce((s, b) => s + (Number(b.count) || 0), 0)
 }
 
-const EMPTY_PROJECT = { title: '', city: '', region: '', mapUrl: '' }
+const EMPTY_PROJECT = { title: '', city: '', region: '', address: '', mapUrl: '' }
 const EMPTY_OFFER = { label: '', mode: 'installments', avancePct: '', duration: '', cashAmount: '', note: '', usePricePerSqm: false, pricePerSqm: '' }
 const EMPTY_CHECK_ITEM = { key: '', label: '', required: true, grantAllowedPagesText: '' }
 const DH = { treeSante: 95, humidity: 65, nutrients: 80 }
@@ -116,6 +116,9 @@ export default function ProjectDetailPage() {
   const [wfMinPay, setWfMinPay] = useState(100)
   const [wfResH, setWfResH] = useState(48)
   const [wfArabon, setWfArabon] = useState(50)
+  const [wfAdvance, setWfAdvance] = useState('')
+  const [wfFirstDue, setWfFirstDue] = useState('')
+  const [wfEndDue, setWfEndDue] = useState('')
   const [checklistItems, setChecklistItems] = useState([])
   const [wfMsg, setWfMsg] = useState(null)
   const [wfErr, setWfErr] = useState(false)
@@ -136,6 +139,9 @@ export default function ProjectDetailPage() {
       m: workflow.minimumPayoutThreshold,
       r: workflow.reservationHours,
       a: workflow.arabonDefault,
+      av: workflow.defaultAdvanceAmount,
+      fd: workflow.installmentsFirstDueDate,
+      ed: workflow.installmentsEndDate,
       cl: workflow.signatureChecklist,
     })
     if (appliedWfSigRef.current === sig) return
@@ -149,6 +155,9 @@ export default function ProjectDetailPage() {
     setWfMinPay(Number(workflow.minimumPayoutThreshold ?? 100))
     setWfResH(Number(workflow.reservationHours ?? 48))
     setWfArabon(Number(workflow.arabonDefault ?? 50))
+    setWfAdvance(workflow.defaultAdvanceAmount == null ? '' : String(workflow.defaultAdvanceAmount))
+    setWfFirstDue(workflow.installmentsFirstDueDate || '')
+    setWfEndDue(workflow.installmentsEndDate || '')
     const normalized = (workflow.signatureChecklist || []).map((it) => ({
       key: String(it?.key || '').trim(),
       label: String(it?.label || '').trim(),
@@ -184,7 +193,17 @@ export default function ProjectDetailPage() {
       return
     }
     try {
-      await updateWorkflow({ companyFeePct: wfCompany, notaryFeePct: wfNotary, minimumPayoutThreshold: wfMinPay, reservationHours: wfResH, arabonDefault: wfArabon, signatureChecklist: checklist })
+      await updateWorkflow({
+        companyFeePct: wfCompany,
+        notaryFeePct: wfNotary,
+        minimumPayoutThreshold: wfMinPay,
+        reservationHours: wfResH,
+        arabonDefault: wfArabon,
+        defaultAdvanceAmount: wfAdvance === '' ? null : Number(wfAdvance),
+        installmentsFirstDueDate: wfFirstDue || null,
+        installmentsEndDate: wfEndDue || null,
+        signatureChecklist: checklist,
+      })
       setWfErr(false)
       setWfMsg("Enregistré. S'applique aux nouvelles ventes (les ventes existantes gardent leur configuration d’origine).")
     } catch (e) {
@@ -261,7 +280,7 @@ export default function ProjectDetailPage() {
   }
   const avgPrice = plots.length ? totalValue / plots.length : 0
 
-  const openEdit = () => { if (!project) return; setPf({ title: project.title, city: project.city, region: project.region || '', mapUrl: project.mapUrl || '' }); setModal('edit') }
+  const openEdit = () => { if (!project) return; setPf({ title: project.title, city: project.city, region: project.region || '', address: project.address || '', mapUrl: project.mapUrl || '' }); setModal('edit') }
   const saveEdit = async () => {
     if (saving) return
     const res = await runSafeAction({
@@ -275,6 +294,7 @@ export default function ProjectDetailPage() {
         title: pf.title.trim() || project.title,
         city: pf.city.trim() || project.city,
         region: pf.region.trim(),
+        address: pf.address.trim(),
         area: project.area || '',
         year: project.year || new Date().getFullYear(),
         mapUrl: pf.mapUrl.trim(),
@@ -558,7 +578,7 @@ export default function ProjectDetailPage() {
                 <h1 className="pdp-hero__title">{project.title}</h1>
                 <p className="pdp-hero__meta">
                   <span className="pdp-hero__meta-icon" aria-hidden>📍</span>
-                  <span>{project.city || '—'}{project.region ? ` · ${project.region}` : ''}</span>
+                  <span>{project.address ? project.address : `${project.city || '—'}${project.region ? ` · ${project.region}` : ''}`}</span>
                   {totalAreaM2 > 0 ? (
                     <>
                       <span className="pdp-hero__meta-dot" aria-hidden>•</span>
@@ -1048,6 +1068,7 @@ export default function ProjectDetailPage() {
               </div>
               <span className="pdp-field__hint">Calculée automatiquement d'après les parcelles.</span>
             </div>
+            <div className="zitu-page__field"><label className="zitu-page__field-label">Adresse</label><input className="zitu-page__input" placeholder="Ex : 12 rue des Oliviers, Borj Cedria" value={pf.address || ''} onChange={e => setPf(f => ({ ...f, address: e.target.value }))} /></div>
             <div className="zitu-page__field"><label className="zitu-page__field-label">URL carte</label><input className="zitu-page__input" value={pf.mapUrl} onChange={e => setPf(f => ({ ...f, mapUrl: e.target.value }))} /></div>
             <div className="zitu-page__form-actions">
               <button type="button" className="zitu-page__btn zitu-page__btn--danger" disabled={saving} onClick={delProject}>Supprimer</button>
@@ -1182,6 +1203,26 @@ export default function ProjectDetailPage() {
               <input className="zitu-page__input" type="number" value={wfMinPay} onChange={(e) => setWfMinPay(Number(e.target.value))} />
               <span className="pdp-field__hint">Plancher de <strong>retrait</strong> du portefeuille parrainage — pas le montant L1/L2.</span>
             </div>
+
+            <div className="pdp-section__hint" style={{ margin: '12px 0 4px', fontWeight: 700 }}>Échéancier par défaut</div>
+            <div className="zitu-page__form-grid">
+              <div className="zitu-page__field">
+                <label className="zitu-page__field-label">Avance par défaut (TND)</label>
+                <input className="zitu-page__input" type="number" value={wfAdvance} placeholder="Ex : 5000" onChange={(e) => setWfAdvance(e.target.value)} />
+                <span className="pdp-field__hint">Montant d'acompte pré-rempli au moment de la vente.</span>
+              </div>
+              <div className="zitu-page__field">
+                <label className="zitu-page__field-label">1ʳᵉ échéance</label>
+                <input className="zitu-page__input" type="date" value={wfFirstDue} onChange={(e) => setWfFirstDue(e.target.value)} />
+                <span className="pdp-field__hint">Date du premier paiement d'échéance proposée.</span>
+              </div>
+              <div className="zitu-page__field">
+                <label className="zitu-page__field-label">Dernière échéance</label>
+                <input className="zitu-page__input" type="date" value={wfEndDue} onChange={(e) => setWfEndDue(e.target.value)} />
+                <span className="pdp-field__hint">Date de la dernière échéance proposée.</span>
+              </div>
+            </div>
+
             <div className="zitu-page__form-actions">
               <button type="button" className="zitu-page__btn" onClick={() => setModal(null)}>Fermer</button>
               <button type="button" className="zitu-page__btn zitu-page__btn--primary" onClick={() => setModal(null)}>Valider</button>

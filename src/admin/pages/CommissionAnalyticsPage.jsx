@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom'
 import { useCommissionTracker } from '../lib/useCommissionTracker.js'
 import { useToast } from '../components/AdminToast.jsx'
 import RenderDataGate from '../../components/RenderDataGate.jsx'
-import EmptyState from '../../components/EmptyState.jsx'
 import './zitouna-admin-page.css'
 import './commission-analytics.css'
 
@@ -296,24 +295,115 @@ export default function CommissionAnalyticsPage() {
           skeleton="kpi"
           isEmpty={() => !hasEvents}
           empty={
-            <div className="ca-card ca-card--top-gap">
-              <EmptyState
-                icon="📊"
-                title="Aucune commission à analyser pour l'instant."
-                description="Dès qu'une vente notariée générera une commission, les graphiques s'actualiseront."
-              >
-                <Link
-                  to="/docs/COMMISSION_TRACKER.md"
-                  className="ca-seed-link"
-                  onClick={(e) => {
-                    // Plain link to the seed doc — don't break SPA routing if absent.
-                    e.preventDefault()
-                    window.open('/docs/COMMISSION_TRACKER.md', '_blank', 'noopener')
-                  }}
-                >
-                  Créer des données de test
-                </Link>
-              </EmptyState>
+            <div className="ca-empty-hero" role="status" aria-live="polite">
+              <div className="ca-empty-hero__preview" aria-hidden="true">
+                <svg viewBox="0 0 320 140" className="ca-empty-hero__chart" preserveAspectRatio="none">
+                  <defs>
+                    <linearGradient id="caEmptyFill" x1="0" x2="0" y1="0" y2="1">
+                      <stop offset="0%" stopColor="#2563eb" stopOpacity="0.18" />
+                      <stop offset="100%" stopColor="#2563eb" stopOpacity="0" />
+                    </linearGradient>
+                  </defs>
+                  <path d="M0,110 L40,90 L80,100 L120,70 L160,80 L200,55 L240,65 L280,40 L320,50 L320,140 L0,140 Z" fill="url(#caEmptyFill)" />
+                  <path d="M0,110 L40,90 L80,100 L120,70 L160,80 L200,55 L240,65 L280,40 L320,50" fill="none" stroke="#2563eb" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  {[32, 72, 112, 152, 192, 232, 272].map((x, i) => {
+                    const heights = [28, 40, 22, 52, 34, 60, 46]
+                    return (
+                      <rect
+                        key={x}
+                        x={x}
+                        y={120 - heights[i]}
+                        width="14"
+                        height={heights[i]}
+                        rx="3"
+                        fill="#e0e7ff"
+                      />
+                    )
+                  })}
+                </svg>
+                <div className="ca-empty-hero__badge" aria-hidden="true">
+                  <span>📊</span>
+                </div>
+              </div>
+
+              <div className="ca-empty-hero__body">
+                <h2 className="ca-empty-hero__title">Aucune commission à analyser</h2>
+                <p className="ca-empty-hero__desc">
+                  Dès qu'une vente notariée générera une commission, les graphiques
+                  s'actualiseront automatiquement.
+                </p>
+
+                {(() => {
+                  const notarySales = Array.isArray(sales) ? sales : []
+                  const withSeller = notarySales.filter((s) => s.seller_client_id || s.sellerClientId).length
+                  const withoutSeller = notarySales.length - withSeller
+                  const hasStaffOnly = notarySales.length > 0 && withSeller === 0
+                  if (notarySales.length === 0) return null
+                  return (
+                    <div className={`ca-empty-hero__diag${hasStaffOnly ? ' ca-empty-hero__diag--warn' : ''}`}>
+                      <div className="ca-empty-hero__diag-head">
+                        <span aria-hidden>{hasStaffOnly ? '⚠' : 'ℹ'}</span>
+                        <strong>Diagnostic</strong>
+                      </div>
+                      <div className="ca-empty-hero__diag-row">
+                        <span>Ventes finalisées au notariat</span>
+                        <strong>{notarySales.length}</strong>
+                      </div>
+                      <div className="ca-empty-hero__diag-row">
+                        <span>Avec vendeur client (MLM)</span>
+                        <strong>{withSeller}</strong>
+                      </div>
+                      <div className="ca-empty-hero__diag-row">
+                        <span>Sans vendeur client (staff)</span>
+                        <strong>{withoutSeller}</strong>
+                      </div>
+                      {hasStaffOnly && (
+                        <p className="ca-empty-hero__diag-note">
+                          Vos ventes ont un <em>agent commercial</em> (staff) mais pas de
+                          <em> vendeur client</em> référent. Les commissions multi-niveaux
+                          ne se génèrent que pour les ventes entre clients
+                          (champ <code>sellerClientId</code> renseigné).
+                        </p>
+                      )}
+                    </div>
+                  )
+                })()}
+
+                <ul className="ca-empty-hero__steps">
+                  <li>
+                    <span className="ca-empty-hero__step-num">1</span>
+                    <span>Une vente est validée au notariat</span>
+                  </li>
+                  <li>
+                    <span className="ca-empty-hero__step-num">2</span>
+                    <span>La vente a un <strong>vendeur client</strong> référent</span>
+                  </li>
+                  <li>
+                    <span className="ca-empty-hero__step-num">3</span>
+                    <span>Les graphiques apparaissent ici</span>
+                  </li>
+                </ul>
+
+                <div className="ca-empty-hero__actions">
+                  <button
+                    type="button"
+                    className="ca-empty-hero__btn ca-empty-hero__btn--primary"
+                    onClick={() => refresh().catch(() => {})}
+                  >
+                    <span aria-hidden>↻</span> Actualiser
+                  </button>
+                  <Link
+                    to="/docs/COMMISSION_TRACKER.md"
+                    className="ca-empty-hero__btn ca-empty-hero__btn--ghost"
+                    onClick={(e) => {
+                      e.preventDefault()
+                      window.open('/docs/COMMISSION_TRACKER.md', '_blank', 'noopener')
+                    }}
+                  >
+                    <span aria-hidden>📄</span> Données de test
+                  </Link>
+                </div>
+              </div>
             </div>
           }
         >

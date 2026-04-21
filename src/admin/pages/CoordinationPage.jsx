@@ -270,12 +270,22 @@ export default function CoordinationPage() {
   // ---- actions -------------------------------------------------------------
   const openScheduler = (sale, type) => {
     const existing = planningBySale.get(`${sale.id}:${type}`)
-    setScheduler({
-      open: true, sale, type,
-      date: existing?.date || todayIso(),
-      time: existing?.time || SLOT_OPTIONS[0],
-      notes: existing?.notes || '',
-    })
+    const date = existing?.date || todayIso()
+    let time = existing?.time || SLOT_OPTIONS[0]
+    // If defaulting to today and the default slot is already past, pick the
+    // first upcoming slot (or round "now" up to the next 5-minute mark).
+    if (date === todayIso()) {
+      const d = new Date()
+      d.setMinutes(d.getMinutes() + (5 - (d.getMinutes() % 5 || 5)))
+      const hh = String(d.getHours()).padStart(2, '0')
+      const mm = String(d.getMinutes()).padStart(2, '0')
+      const minHHMM = `${hh}:${mm}`
+      if (time < minHHMM) {
+        const upcoming = SLOT_OPTIONS.find((s) => s >= minHHMM)
+        time = upcoming || minHHMM
+      }
+    }
+    setScheduler({ open: true, sale, type, date, time, notes: existing?.notes || '' })
   }
   const closeScheduler = () => setScheduler((p) => ({ ...p, open: false, sale: null, notes: '' }))
 
@@ -488,6 +498,20 @@ export default function CoordinationPage() {
   const dateError = scheduler.open && scheduler.date && scheduler.time
     && new Date(`${scheduler.date}T${scheduler.time}:00`).getTime() < Date.now()
     ? 'La date et l\u2019heure doivent être dans le futur.' : ''
+
+  // When the picked date is today, cap the <input type="time"> minimum and
+  // disable quick-slot chips that are already in the past. Rounding up to the
+  // next 5-minute mark avoids the "pick 10:00 at 09:59" race where the time
+  // is valid at click but stale by submit.
+  const nowMinTimeHHMM = (() => {
+    if (!scheduler.date || scheduler.date !== todayIso()) return ''
+    const d = new Date()
+    d.setMinutes(d.getMinutes() + (5 - (d.getMinutes() % 5 || 5)))
+    const hh = String(d.getHours()).padStart(2, '0')
+    const mm = String(d.getMinutes()).padStart(2, '0')
+    return `${hh}:${mm}`
+  })()
+  const isSlotPast = (slot) => nowMinTimeHHMM && slot < nowMinTimeHHMM
 
   const statusFilters = [
     ['all',       'Tous',          statusCounts.total],
@@ -901,37 +925,40 @@ export default function CoordinationPage() {
                 )}
               </div>
 
-              <div className="sp-detail__actions">
+              <div className="cv-actions">
                 <button
                   type="button"
-                  className="sp-detail__btn"
+                  className="cv-btn cv-btn--close"
                   onClick={() => setDetailSale(null)}
                 >
-                  Fermer
+                  <span className="cv-btn__icon" aria-hidden>✕</span>
+                  <span>Fermer</span>
                 </button>
                 <button
                   type="button"
-                  className="sp-detail__btn sp-detail__btn--edit"
+                  className={`cv-btn cv-btn--finance${financePlan ? ' cv-btn--done' : ''}`}
                   onClick={() => { setDetailSale(null); openScheduler(s, 'finance') }}
                 >
-                  {financePlan ? 'Modifier Finance' : 'Planifier Finance'}
+                  <span className="cv-btn__icon" aria-hidden>{financePlan ? '✎' : '💰'}</span>
+                  <span>{financePlan ? 'Modifier Finance' : 'Planifier Finance'}</span>
                 </button>
                 <button
                   type="button"
-                  className="sp-detail__btn sp-detail__btn--edit"
+                  className={`cv-btn cv-btn--juridique${juridiquePlan ? ' cv-btn--done' : ''}`}
                   onClick={() => { setDetailSale(null); openScheduler(s, 'juridique') }}
                 >
-                  {juridiquePlan ? 'Modifier Juridique' : 'Planifier Juridique'}
+                  <span className="cv-btn__icon" aria-hidden>{juridiquePlan ? '✎' : '⚖️'}</span>
+                  <span>{juridiquePlan ? 'Modifier Juridique' : 'Planifier Juridique'}</span>
                 </button>
                 {!['cancelled', 'rejected', 'completed'].includes(String(s.status)) && (
                   <button
                     type="button"
-                    className="sp-detail__btn"
-                    style={{ color: '#b91c1c', borderColor: '#fecaca' }}
+                    className="cv-btn cv-btn--cancel"
                     onClick={() => { setCancelTarget(s); setCancelReason('') }}
                     title="Annule la vente ; les données restent pour le suivi."
                   >
-                    Annuler la vente
+                    <span className="cv-btn__icon" aria-hidden>🚫</span>
+                    <span>Annuler la vente</span>
                   </button>
                 )}
               </div>
@@ -1065,20 +1092,27 @@ export default function CoordinationPage() {
               <input
                 id="cv-time"
                 type="time"
-                className="cv-input cv-input--time"
+                className={`cv-input cv-input--time${dateError ? ' cv-input--err' : ''}`}
                 step="300"
+                min={nowMinTimeHHMM || undefined}
                 value={scheduler.time}
+                aria-invalid={Boolean(dateError)}
                 onChange={(e) => setScheduler((p) => ({ ...p, time: e.target.value || '09:00' }))}
               />
               <div className="cv-chips" role="radiogroup" aria-label="Créneaux rapides" style={{ marginTop: 6 }}>
-                {SLOT_OPTIONS.map((slot) => (
-                  <button
-                    key={slot} type="button" role="radio"
-                    aria-checked={scheduler.time === slot}
-                    className={`cv-chip${scheduler.time === slot ? ' cv-chip--active' : ''}`}
-                    onClick={() => setScheduler((p) => ({ ...p, time: slot }))}
-                  >{slot}</button>
-                ))}
+                {SLOT_OPTIONS.map((slot) => {
+                  const past = isSlotPast(slot)
+                  return (
+                    <button
+                      key={slot} type="button" role="radio"
+                      aria-checked={scheduler.time === slot}
+                      disabled={past}
+                      title={past ? 'Créneau déjà passé' : undefined}
+                      className={`cv-chip${scheduler.time === slot ? ' cv-chip--active' : ''}`}
+                      onClick={() => !past && setScheduler((p) => ({ ...p, time: slot }))}
+                    >{slot}</button>
+                  )
+                })}
               </div>
             </div>
 

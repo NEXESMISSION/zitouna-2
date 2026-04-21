@@ -147,11 +147,112 @@ export default function CommissionTrackerPage() {
           skeleton="tree"
           isEmpty={(d) => !d || (Array.isArray(d.commissionEvents) && d.commissionEvents.length === 0)}
           empty={
-            <EmptyState
-              icon="🌳"
-              title="Aucune commission enregistrée"
-              description="Le réseau s'affichera dès qu'un événement de commission sera généré."
-            />
+            (() => {
+              const notarySales = Array.isArray(cleanData?.sales) ? cleanData.sales : []
+              const withSeller = notarySales.filter((s) => s.seller_client_id || s.sellerClientId).length
+              const withoutSeller = notarySales.length - withSeller
+              const hasStaffOnly = notarySales.length > 0 && withSeller === 0
+              return (
+            <div className="ct-empty-hero" role="status" aria-live="polite">
+              <div className="ct-empty-hero__preview" aria-hidden="true">
+                <svg viewBox="0 0 320 180" className="ct-empty-hero__net" preserveAspectRatio="xMidYMid meet">
+                  {/* edges */}
+                  <g stroke="#cbd5e1" strokeWidth="1.5" fill="none">
+                    <path d="M160,36 L80,100" />
+                    <path d="M160,36 L240,100" />
+                    <path d="M80,100 L40,156" />
+                    <path d="M80,100 L120,156" />
+                    <path d="M240,100 L200,156" />
+                    <path d="M240,100 L280,156" />
+                  </g>
+                  {/* root */}
+                  <circle cx="160" cy="36" r="18" fill="#2563eb" />
+                  <text x="160" y="41" textAnchor="middle" fill="#fff" fontSize="14" fontWeight="700">★</text>
+                  {/* level 2 */}
+                  <circle cx="80" cy="100" r="14" fill="#e0e7ff" stroke="#6366f1" strokeWidth="1.5" />
+                  <circle cx="240" cy="100" r="14" fill="#e0e7ff" stroke="#6366f1" strokeWidth="1.5" />
+                  {/* level 3 */}
+                  {[40, 120, 200, 280].map((cx) => (
+                    <circle key={cx} cx={cx} cy="156" r="10" fill="#f1f5f9" stroke="#94a3b8" strokeWidth="1.2" />
+                  ))}
+                </svg>
+                <div className="ct-empty-hero__badge" aria-hidden>
+                  <span>🌳</span>
+                </div>
+              </div>
+
+              <div className="ct-empty-hero__body">
+                <h2 className="ct-empty-hero__title">Aucune commission enregistrée</h2>
+                <p className="ct-empty-hero__desc">
+                  Le réseau des commissions affichera les relations vendeur-acheteur
+                  dès qu'un événement de commission sera généré.
+                </p>
+
+                {notarySales.length > 0 && (
+                  <div className={`ct-empty-hero__diag${hasStaffOnly ? ' ct-empty-hero__diag--warn' : ''}`}>
+                    <div className="ct-empty-hero__diag-head">
+                      <span className="ct-empty-hero__diag-icon" aria-hidden>{hasStaffOnly ? '⚠' : 'ℹ'}</span>
+                      <strong>Diagnostic</strong>
+                    </div>
+                    <div className="ct-empty-hero__diag-grid">
+                      <div className="ct-empty-hero__diag-row">
+                        <span>Ventes finalisées au notariat</span>
+                        <strong>{notarySales.length}</strong>
+                      </div>
+                      <div className="ct-empty-hero__diag-row">
+                        <span>Avec vendeur client (MLM)</span>
+                        <strong>{withSeller}</strong>
+                      </div>
+                      <div className="ct-empty-hero__diag-row">
+                        <span>Sans vendeur client (staff)</span>
+                        <strong>{withoutSeller}</strong>
+                      </div>
+                    </div>
+                    {hasStaffOnly && (
+                      <p className="ct-empty-hero__diag-note">
+                        Vos ventes ont un <em>agent commercial</em> (staff) mais pas de <em>vendeur client</em>
+                        référent. Les commissions multi-niveaux ne se génèrent que pour les ventes entre
+                        clients (champ <code>sellerClientId</code> renseigné).
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                <ul className="ct-empty-hero__steps">
+                  <li>
+                    <span className="ct-empty-hero__step-num">1</span>
+                    <span>Une vente est finalisée au notariat</span>
+                  </li>
+                  <li>
+                    <span className="ct-empty-hero__step-num">2</span>
+                    <span>La vente a un <strong>vendeur client</strong> référent</span>
+                  </li>
+                  <li>
+                    <span className="ct-empty-hero__step-num">3</span>
+                    <span>L'arbre des bénéficiaires apparaît ici</span>
+                  </li>
+                </ul>
+
+                <div className="ct-empty-hero__actions">
+                  <button
+                    type="button"
+                    className="ct-empty-hero__btn ct-empty-hero__btn--primary"
+                    onClick={() => refresh().catch(() => {})}
+                  >
+                    <span aria-hidden>↻</span> Actualiser
+                  </button>
+                  <button
+                    type="button"
+                    className="ct-empty-hero__btn ct-empty-hero__btn--ghost"
+                    onClick={() => navigate('/admin/sales')}
+                  >
+                    <span aria-hidden>→</span> Voir les ventes
+                  </button>
+                </div>
+              </div>
+            </div>
+              )
+            })()
           }
         >
           {() => (

@@ -362,6 +362,141 @@
 /* ── Scheduler modal (kept minimal; most rendering uses sp-detail__*) ──── */
 .cv-sched { gap: 10px; }
 
+/* ── Detail-sheet action buttons (Fermer / Finance / Juridique / Annuler) */
+.cv-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 14px;
+}
+.cv-btn {
+  --cv-btn-bg: #f8fafc;
+  --cv-btn-fg: #0f172a;
+  --cv-btn-border: #e2e8f0;
+  --cv-btn-hover-bg: #f1f5f9;
+  --cv-btn-hover-border: #cbd5e1;
+  --cv-btn-icon-bg: #e2e8f0;
+  --cv-btn-icon-fg: #0f172a;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 10px 14px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.1px;
+  color: var(--cv-btn-fg);
+  background: var(--cv-btn-bg);
+  border: 1.5px solid var(--cv-btn-border);
+  border-radius: 12px;
+  cursor: pointer;
+  text-align: center;
+  line-height: 1.2;
+  transition: background 0.15s ease, border-color 0.15s ease,
+              box-shadow 0.15s ease, transform 0.08s ease, color 0.15s ease;
+}
+.cv-btn:hover:not(:disabled) {
+  background: var(--cv-btn-hover-bg);
+  border-color: var(--cv-btn-hover-border);
+}
+.cv-btn:active:not(:disabled) { transform: translateY(1px); }
+.cv-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--cv-btn-ring, rgba(37, 99, 235, 0.18));
+}
+.cv-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+.cv-btn__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  font-size: 13px;
+  background: var(--cv-btn-icon-bg);
+  color: var(--cv-btn-icon-fg);
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
+/* Fermer — neutral/ghost */
+.cv-btn--close {
+  --cv-btn-bg: #fff;
+  --cv-btn-fg: #475569;
+  --cv-btn-border: #e2e8f0;
+  --cv-btn-hover-bg: #f1f5f9;
+  --cv-btn-hover-border: #cbd5e1;
+  --cv-btn-icon-bg: #f1f5f9;
+  --cv-btn-icon-fg: #64748b;
+  --cv-btn-ring: rgba(100, 116, 139, 0.22);
+}
+
+/* Planifier / Modifier Finance — blue */
+.cv-btn--finance {
+  --cv-btn-bg: #eff6ff;
+  --cv-btn-fg: #1d4ed8;
+  --cv-btn-border: #bfdbfe;
+  --cv-btn-hover-bg: #dbeafe;
+  --cv-btn-hover-border: #93c5fd;
+  --cv-btn-icon-bg: #dbeafe;
+  --cv-btn-icon-fg: #1d4ed8;
+  --cv-btn-ring: rgba(37, 99, 235, 0.22);
+}
+
+/* Planifier / Modifier Juridique — violet */
+.cv-btn--juridique {
+  --cv-btn-bg: #f5f3ff;
+  --cv-btn-fg: #6d28d9;
+  --cv-btn-border: #ddd6fe;
+  --cv-btn-hover-bg: #ede9fe;
+  --cv-btn-hover-border: #c4b5fd;
+  --cv-btn-icon-bg: #ede9fe;
+  --cv-btn-icon-fg: #6d28d9;
+  --cv-btn-ring: rgba(124, 58, 237, 0.22);
+}
+
+/* When already scheduled — subtle green check-style tint */
+.cv-btn--done.cv-btn--finance {
+  --cv-btn-bg: #ecfdf5;
+  --cv-btn-fg: #047857;
+  --cv-btn-border: #a7f3d0;
+  --cv-btn-hover-bg: #d1fae5;
+  --cv-btn-hover-border: #6ee7b7;
+  --cv-btn-icon-bg: #d1fae5;
+  --cv-btn-icon-fg: #047857;
+  --cv-btn-ring: rgba(5, 150, 105, 0.22);
+}
+.cv-btn--done.cv-btn--juridique {
+  --cv-btn-bg: #ecfdf5;
+  --cv-btn-fg: #047857;
+  --cv-btn-border: #a7f3d0;
+  --cv-btn-hover-bg: #d1fae5;
+  --cv-btn-hover-border: #6ee7b7;
+  --cv-btn-icon-bg: #d1fae5;
+  --cv-btn-icon-fg: #047857;
+  --cv-btn-ring: rgba(5, 150, 105, 0.22);
+}
+
+/* Annuler la vente — red / destructive, spans the full row */
+.cv-btn--cancel {
+  grid-column: 1 / -1;
+  --cv-btn-bg: #fef2f2;
+  --cv-btn-fg: #b91c1c;
+  --cv-btn-border: #fecaca;
+  --cv-btn-hover-bg: #fee2e2;
+  --cv-btn-hover-border: #fca5a5;
+  --cv-btn-icon-bg: #fee2e2;
+  --cv-btn-icon-fg: #b91c1c;
+  --cv-btn-ring: rgba(220, 38, 38, 0.22);
+}
+
+@media (max-width: 420px) {
+  .cv-actions { grid-template-columns: 1fr; }
+  .cv-btn--cancel { grid-column: auto; }
+}
+
 /* ── Expiry modal list ──────────────────────────────────────────────────── */
 .cv-expiry { display: flex; flex-direction: column; gap: 10px; }
 .cv-expiry__hint {
