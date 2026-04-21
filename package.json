@@ -7,7 +7,12 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "scan:bundle": "npm run build && node scripts/scan-bundle-secrets.mjs",
+    "security:rls-probe": "node scripts/security/rls-rpc-probe.mjs",
+    "security:table-probe": "node scripts/security/rls-table-probe.mjs",
+    "security:race-probe": "node scripts/security/race-payout-probe.mjs",
+    "security:probe-all": "npm run security:rls-probe && npm run security:table-probe"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.103.2",

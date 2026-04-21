@@ -19,6 +19,18 @@
 
 **Remediation applied in this commit:** C1, H1, H2, H3, M2. The SQL changes are in both the base files (`database/02_schema.sql`, `03_functions.sql`, `04_rls.sql`) **and** a ready-to-run migration at `database/dev/security_remediation_2026_04_21.sql`. **You still need to paste that migration into the Supabase SQL editor to patch the live DB** — code changes alone do not update production.
 
+### Verification matrix — which probe proves which fix
+
+| Finding | How to verify after applying the migration |
+| --- | --- |
+| C1 (amount tamper) | `PROBE_OWN_PAYMENT_ID=... npm run security:table-probe` → `c1_tamper_amount_denied`, `c1_tamper_due_date_denied`, `c1_tamper_approved_at_denied` must all pass |
+| H1 (payout race)   | `PROBE_JWT_USER_A=... PROBE_PAYOUT_PARALLELISM=10 npm run security:race-probe` → exactly 1 success, others fail with `NO_PAYABLE_EVENTS` / `INSUFFICIENT_BALANCE` |
+| H2 (self-reject)   | `PROBE_OWN_PAYMENT_ID=... npm run security:table-probe` → `h2_self_reject_denied` passes |
+| H3 (realtime fanout) | Open N browser tabs on public PlotPages, update a tree batch on an unrelated plot from the admin UI, observe that public tabs do NOT refresh |
+| M2 (receipt_url)   | Staging SQL: `insert into installment_payment_receipts (payment_id, receipt_url) values ('<id>', 'javascript:alert(1)')` → must fail CHECK constraint |
+
+`npm run security:probe-all` runs RPC + table probes in sequence. The race probe is separate because it creates real rows (staging only).
+
 ---
 
 ## 🔴 C1 — `installment_payments` RLS lets the client overwrite `amount` / `due_date` / `approved_at`
