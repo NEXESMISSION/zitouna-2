@@ -14,15 +14,24 @@ export default function AdminModal({ open, onClose, title, children, footer, wid
     }
     window.addEventListener('keydown', onKey, true)
     const lockEl = getAdminPreviewScrollLockEl(overlayRef.current) || document.body
-    const hadOverflow = lockEl.style.overflow
+    // Use a shared overlay counter on the lock element instead of trusting
+    // the captured `style.overflow` value. When modals stack, each one
+    // would otherwise capture `hadOverflow='hidden'` (because the first
+    // one already locked), and on close re-apply 'hidden' — leaving the
+    // body locked forever even though nothing is open. The counter only
+    // unlocks when it reaches 0.
+    const prevCount = Number(lockEl.__zitunaScrollLocks || 0)
+    const savedOverflow = prevCount === 0 ? lockEl.style.overflow : lockEl.__zitunaSavedOverflow
+    if (prevCount === 0) lockEl.__zitunaSavedOverflow = savedOverflow
+    lockEl.__zitunaScrollLocks = prevCount + 1
     lockEl.style.overflow = 'hidden'
     return () => {
       window.removeEventListener('keydown', onKey, true)
-      if (lockEl === document.body) {
-        const otherOverlay = document.querySelector('.zadm-drawer-overlay, .adm-drawer-overlay')
-        if (!otherOverlay) lockEl.style.overflow = hadOverflow || ''
-      } else {
-        lockEl.style.overflow = hadOverflow || ''
+      const nextCount = Math.max(0, Number(lockEl.__zitunaScrollLocks || 1) - 1)
+      lockEl.__zitunaScrollLocks = nextCount
+      if (nextCount === 0) {
+        lockEl.style.overflow = lockEl.__zitunaSavedOverflow || ''
+        delete lockEl.__zitunaSavedOverflow
       }
     }
   }, [open, onClose])

@@ -11,15 +11,20 @@ export default function AdminDrawer({ open, onClose, title, subtitle, children, 
     }
     window.addEventListener('keydown', onKey)
     const lockEl = getAdminPreviewScrollLockEl(overlayRef.current) || document.body
-    const hadOverflow = lockEl.style.overflow
+    // Shared lock counter — see AdminModal.jsx for why we don't trust the
+    // captured overflow value when drawers/modals stack.
+    const prevCount = Number(lockEl.__zitunaScrollLocks || 0)
+    const savedOverflow = prevCount === 0 ? lockEl.style.overflow : lockEl.__zitunaSavedOverflow
+    if (prevCount === 0) lockEl.__zitunaSavedOverflow = savedOverflow
+    lockEl.__zitunaScrollLocks = prevCount + 1
     lockEl.style.overflow = 'hidden'
     return () => {
       window.removeEventListener('keydown', onKey)
-      if (lockEl === document.body) {
-        const otherModal = document.querySelector('.zadm-modal-overlay, .adm-modal-overlay')
-        if (!otherModal) lockEl.style.overflow = hadOverflow || ''
-      } else {
-        lockEl.style.overflow = hadOverflow || ''
+      const nextCount = Math.max(0, Number(lockEl.__zitunaScrollLocks || 1) - 1)
+      lockEl.__zitunaScrollLocks = nextCount
+      if (nextCount === 0) {
+        lockEl.style.overflow = lockEl.__zitunaSavedOverflow || ''
+        delete lockEl.__zitunaSavedOverflow
       }
     }
   }, [open, onClose, preventOverlayClose])

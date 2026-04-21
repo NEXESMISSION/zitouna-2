@@ -1841,10 +1841,13 @@ export function computeCommissionEventPayloads(sale, relations, rules) {
   }
 
   // Reverse-sale guard: if the buyer appears somewhere in the seller's upline
-  // (e.g. Haroun sells to Me, and Me is Haroun's great-grandparent), strip
-  // the buyer out — they shouldn't earn a commission on their own purchase.
-  // Everyone else in the chain earns at their level.
-  const ordered = chain.filter((cid) => cid !== buyerId)
+  // (sell to parent / middle / root of own tree), truncate the chain AT the
+  // buyer. The seller + intermediate ancestors (between seller and buyer)
+  // still earn — but nobody above the buyer does. Previous behavior only
+  // filtered the buyer themselves, which incorrectly paid the buyer's own
+  // ancestors on a sale their descendant made.
+  const buyerIdx = chain.indexOf(buyerId)
+  const ordered = buyerIdx === -1 ? chain.slice() : chain.slice(0, buyerIdx)
   const maxLevel = rules.reduce((m, r) => Math.max(m, Number(r.level) || 0), 0)
 
   const events = []
@@ -3972,6 +3975,10 @@ export async function fetchMyCommissionLedger(clientId = null) {
       amount: Number(ev.amount) || 0,
       status: ev.status || 'pending',
       createdAt: ev.created_at || null,
+      // Exposed so the dashboard's MyReferralTree can read `meta.chainPath`
+      // to reconstruct the user's subtree without additional DB calls.
+      rule_snapshot: ev.rule_snapshot || null,
+      ruleSnapshot: ev.rule_snapshot || null,
       sale: sale ? {
         id: sale.id,
         code: sale.code,

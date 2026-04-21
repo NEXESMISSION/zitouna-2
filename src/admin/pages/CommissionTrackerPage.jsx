@@ -4,6 +4,7 @@ import { useCommissionTracker } from '../lib/useCommissionTracker.js'
 import CommissionOrgChart from '../components/CommissionOrgChart.jsx'
 import CommissionDetailPanel from '../components/CommissionDetailPanel.jsx'
 import CommissionOverrideModal from '../components/CommissionOverrideModal.jsx'
+import CommissionDiagnosticsPanel from '../components/CommissionDiagnosticsPanel.jsx'
 import RenderDataGate from '../../components/RenderDataGate.jsx'
 import EmptyState from '../../components/EmptyState.jsx'
 import { useAuth } from '../../lib/AuthContext.jsx'
@@ -40,6 +41,7 @@ export default function CommissionTrackerPage() {
 
   const [selectedClientId, setSelectedClientId] = useState(null)
   const [overrideEvent, setOverrideEvent] = useState(null)
+  const [diagOpen, setDiagOpen] = useState(false)
 
   // Demo/seed clients (anything with "DEMO" in the name) are pruned from the
   // visualization so the tree doesn't get polluted with fixture rows.
@@ -124,6 +126,16 @@ export default function CommissionTrackerPage() {
             <span className="ct-topbar__stat-lbl">bénéf.</span>
           </span>
         </div>
+        <button
+          type="button"
+          className="ct-topbar__refresh"
+          onClick={() => setDiagOpen(true)}
+          aria-label="Ouvrir le diagnostic du réseau"
+          title="Diagnostic — ventes inversées, orphelins, cycles…"
+          style={{ marginRight: 4 }}
+        >
+          ⚠
+        </button>
         <button
           type="button"
           className="ct-topbar__refresh"
@@ -330,6 +342,16 @@ export default function CommissionTrackerPage() {
           onSaved={handleOverrideSaved}
         />
       ) : null}
+
+      <CommissionDiagnosticsPanel
+        open={diagOpen}
+        onClose={() => setDiagOpen(false)}
+        data={cleanData}
+        onJumpToNode={(id) => {
+          setDiagOpen(false)
+          if (id) setSelectedClientId(String(id))
+        }}
+      />
     </div>
   )
 }

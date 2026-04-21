@@ -1,0 +1,191 @@
+/* src/components/my-referral-tree.css
+   ─────────────────────────────────────────────────────────────────
+   Compact per-user referral tree rendered on the customer dashboard.
+   Designed to sit inside a dark-themed card (dashboard-page.css) so
+   it uses the olive / slate palette shared with the rest of that
+   page. Admin variant (if needed later) can override surface colors
+   scoped under .adm-shell.
+   ───────────────────────────────────────────────────────────────── */
+
+.mrt {
+  background: rgba(22, 41, 23, 0.55);
+  border: 1px solid rgba(168, 204, 80, 0.22);
+  border-radius: 14px;
+  padding: 16px 18px;
+  color: #d7e5d8;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.mrt__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.mrt__title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #eef3d7;
+  letter-spacing: -0.01em;
+}
+.mrt__subtitle {
+  font-size: 12.5px;
+  color: rgba(215, 229, 216, 0.65);
+}
+
+.mrt__stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+@media (max-width: 520px) {
+  .mrt__stats { grid-template-columns: 1fr; }
+}
+.mrt__stat {
+  background: rgba(168, 204, 80, 0.08);
+  border: 1px solid rgba(168, 204, 80, 0.22);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.mrt__stat--good { background: rgba(34, 197, 94, 0.12); border-color: rgba(34, 197, 94, 0.32); }
+.mrt__stat-num { font-size: 18px; font-weight: 800; color: #eef3d7; line-height: 1.1; }
+.mrt__stat-lbl { font-size: 11px; color: rgba(215, 229, 216, 0.6); text-transform: uppercase; letter-spacing: 0.04em; }
+.mrt__stat-sk { min-height: 54px; }
+
+.mrt__empty {
+  padding: 22px 8px;
+  text-align: center;
+  color: rgba(215, 229, 216, 0.7);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.mrt__empty-emoji { font-size: 28px; opacity: 0.85; }
+.mrt__empty-title { margin: 2px 0 0; font-size: 14px; font-weight: 700; color: #eef3d7; }
+.mrt__empty-desc { margin: 0; font-size: 12.5px; line-height: 1.5; max-width: 46ch; }
+
+/* ── Tree shape ───────────────────────────────────────────────── */
+.mrt-root {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mrt-children {
+  list-style: none;
+  margin: 4px 0 0 18px;
+  padding: 0 0 0 14px;
+  border-left: 1px dashed rgba(168, 204, 80, 0.3);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mrt-node { position: relative; }
+
+.mrt-card {
+  display: grid;
+  grid-template-columns: 22px 32px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(168, 204, 80, 0.05);
+  border: 1px solid rgba(168, 204, 80, 0.18);
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.mrt-card:hover { background: rgba(168, 204, 80, 0.1); border-color: rgba(168, 204, 80, 0.28); }
+.mrt-card--sk { background: rgba(168, 204, 80, 0.04); }
+
+.mrt-card__toggle {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background: rgba(168, 204, 80, 0.18);
+  color: #eef3d7;
+  border: 0;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease;
+}
+.mrt-card__toggle:hover { background: rgba(168, 204, 80, 0.3); }
+.mrt-card__toggle--leaf {
+  background: transparent;
+  color: rgba(215, 229, 216, 0.35);
+  cursor: default;
+}
+.mrt-card__toggle--leaf:hover { background: transparent; }
+
+.mrt-card__avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, rgba(168, 204, 80, 0.45) 0%, rgba(34, 197, 94, 0.5) 100%);
+  color: #0b1f0c;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
+.mrt-card__body { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.mrt-card__name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #eef3d7;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mrt-card__meta {
+  font-size: 11.5px;
+  color: rgba(215, 229, 216, 0.6);
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.mrt-card__phone { direction: ltr; font-variant-numeric: tabular-nums; }
+
+.mrt-card__amount {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0;
+  white-space: nowrap;
+}
+.mrt-card__amount strong {
+  font-size: 13px;
+  font-weight: 800;
+  color: #eef3d7;
+  font-variant-numeric: tabular-nums;
+}
+.mrt-card__amount span {
+  font-size: 10.5px;
+  color: rgba(215, 229, 216, 0.55);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Generation tint so the depth is visually obvious. */
+.mrt-node--d1 > .mrt-card { border-color: rgba(168, 204, 80, 0.32); }
+.mrt-node--d2 > .mrt-card { border-color: rgba(245, 158, 11, 0.32); }
+.mrt-node--d3 > .mrt-card { border-color: rgba(234, 88, 12, 0.32); }
+.mrt-node--d4 > .mrt-card { border-color: rgba(139, 92, 246, 0.28); }
+.mrt-node--d5 > .mrt-card { border-color: rgba(148, 163, 184, 0.28); }

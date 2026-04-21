@@ -85,12 +85,25 @@ export default function NotificationsMenu({ scope = null, label = 'Notifications
   }, [open])
 
   // Lock body scroll while the full-screen panel is open so the page
-  // underneath doesn't scroll on touch.
+  // underneath doesn't scroll on touch. Use a shared counter on the body
+  // so stacked overlays (this panel + an admin modal/drawer) don't leave
+  // the body locked when they close out of order.
   useEffect(() => {
     if (!open) return undefined
-    const prev = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => { document.body.style.overflow = prev }
+    const el = document.body
+    const prevCount = Number(el.__zitunaScrollLocks || 0)
+    const savedOverflow = prevCount === 0 ? el.style.overflow : el.__zitunaSavedOverflow
+    if (prevCount === 0) el.__zitunaSavedOverflow = savedOverflow
+    el.__zitunaScrollLocks = prevCount + 1
+    el.style.overflow = 'hidden'
+    return () => {
+      const nextCount = Math.max(0, Number(el.__zitunaScrollLocks || 1) - 1)
+      el.__zitunaScrollLocks = nextCount
+      if (nextCount === 0) {
+        el.style.overflow = el.__zitunaSavedOverflow || ''
+        delete el.__zitunaSavedOverflow
+      }
+    }
   }, [open])
 
   const filtered = useMemo(() => {

@@ -19,6 +19,7 @@ import * as instMetrics from '../domain/installmentMetrics.js'
 import RenderDataGate from '../components/RenderDataGate.jsx'
 import EmptyState from '../components/EmptyState.jsx'
 import ErrorPanel from '../components/ErrorPanel.jsx'
+import MyReferralTree from '../components/MyReferralTree.jsx'
 import './dashboard-page.css'
 import './installments-page.css'
 
@@ -1332,6 +1333,16 @@ export default function DashboardPage() {
                         </div>
                         </section>
                       </details>
+                    )}
+
+                    {showAmbassadorCard && (
+                      <div style={{ marginBottom: 14 }}>
+                        <MyReferralTree
+                          myClientId={clientId}
+                          ledger={myCommissionEvents}
+                          loading={ledgerLoading && myCommissionEvents.length === 0}
+                        />
+                      </div>
                     )}
 
                     {showAmbassadorCard && (
