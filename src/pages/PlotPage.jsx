@@ -122,52 +122,56 @@ export default function PlotPage() {
   const idMatches = Boolean(proj) && String(proj.id) === String(projectId)
   const plot = idMatches ? proj?.plots?.find((pl) => String(pl.id) === String(plotId)) : null
 
-  // Auto-retry once when the project fetch returned but our plot is missing.
-  // After a DB reset/seed or a stale cache, the first read can land before
-  // the `public_parcels` view propagates. Without this, the user sees
-  // "Parcelle introuvable" and only finds the plot after navigating away
-  // and back. We refresh once per (projectId, plotId) pair and let the
-  // normal empty state kick in if the retry still doesn't surface it.
-  const retriedRef = useRef({ key: '', tried: false })
-  // The ref flip alone doesn't re-render the gate, and we want the skeleton
-  // to stay up between "first fetch settled without the plot" and "retry
-  // finishes refetching" — otherwise the empty state flashes for ~180 ms.
-  // Mirror the ref into state so the render function can observe it.
-  const [firstAttemptDone, setFirstAttemptDone] = useState(false)
+  // Grace window before we declare "not found". The public_parcels view and
+  // realtime channel can take multiple seconds to propagate after a nav from
+  // BrowsePage or a DB change. Instead of flashing the empty state as soon as
+  // one fetch settles, keep the skeleton up and keep retrying until either the
+  // plot shows up or the grace window is exhausted.
+  const GRACE_MS = 5000
+  const RETRY_DELAYS = [250, 700, 1500, 2800]
+  const key = `${projectId}:${plotId}`
+  const [graceExpired, setGraceExpired] = useState(false)
+  const graceKeyRef = useRef('')
+
   useEffect(() => {
-    const key = `${projectId}:${plotId}`
-    if (retriedRef.current.key !== key) {
-      retriedRef.current = { key, tried: false }
-      setFirstAttemptDone(false)
+    if (graceKeyRef.current === key) return undefined
+    graceKeyRef.current = key
+    setGraceExpired(false)
+    const t = window.setTimeout(() => setGraceExpired(true), GRACE_MS)
+    return () => window.clearTimeout(t)
+  }, [key])
+
+  // Fire up to N retries while the project has loaded but the plot hasn't
+  // surfaced yet. Each retry is scheduled independently so we don't stall
+  // the render. Cancelled on key change / plot arrival.
+  const retryIndexRef = useRef({ key: '', idx: 0 })
+  useEffect(() => {
+    if (retryIndexRef.current.key !== key) {
+      retryIndexRef.current = { key, idx: 0 }
     }
-    if (!loading && idMatches && !plot && !retriedRef.current.tried) {
-      retriedRef.current.tried = true
-      const t = window.setTimeout(() => {
-        refresh?.()
-        setFirstAttemptDone(true)
-      }, 180)
-      return () => { window.clearTimeout(t) }
-    }
-    if (!loading && idMatches && plot) {
-      // Fetch found the plot; clear the gate guard so future missing-plot
-      // states (on a subsequent nav) can retry again.
-      if (firstAttemptDone) setFirstAttemptDone(false)
-    }
-    return undefined
-  }, [loading, idMatches, plot, projectId, plotId, refresh, firstAttemptDone])
+    if (graceExpired) return undefined
+    if (loading || !idMatches || plot) return undefined
+    const idx = retryIndexRef.current.idx
+    if (idx >= RETRY_DELAYS.length) return undefined
+    const t = window.setTimeout(() => {
+      retryIndexRef.current.idx = idx + 1
+      refresh?.()
+    }, RETRY_DELAYS[idx])
+    return () => window.clearTimeout(t)
+  }, [loading, idMatches, plot, key, refresh, graceExpired])
 
   // "Ready" is when: fetch settled, id matches route, and plot exists.
   const gateData = !loading && idMatches && plot ? { proj, plot } : null
   // Keep the skeleton up while:
   //  - the underlying hook is fetching, OR
   //  - we have stale cross-id data, OR
-  //  - the plot is missing but the auto-retry hasn't completed yet (prevents
-  //    the "Parcelle introuvable" flash on first entry).
+  //  - the plot is missing and the grace window hasn't expired yet.
   const gateLoading =
     loading
     || (Boolean(proj) && !idMatches)
     || (!proj && Boolean(projectId) && loading)
-    || (idMatches && !plot && !firstAttemptDone)
+    || (idMatches && !plot && !graceExpired)
+    || (!proj && Boolean(projectId) && !graceExpired)
   const isEmptyGate = (d) => d == null
 
   return (
@@ -187,8 +191,20 @@ export default function PlotPage() {
           <section className="dashboard-page">
             <TopBar />
             <EmptyState
-              title="Parcelle introuvable."
-              action={{ label: 'Retour', onClick: () => navigate('/browse') }}
+              icon={
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#a8cc50" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/>
+                  <circle cx="12" cy="10" r="3"/>
+                </svg>
+              }
+              title="Parcelle introuvable"
+              description="Cette parcelle n'existe plus ou a peut-être été renommée. Elle a pu être vendue, réassignée, ou le lien que vous avez ouvert est obsolète."
+              action={{ label: 'Explorer les projets', onClick: () => navigate('/browse') }}
+              secondary={
+                projectId
+                  ? { label: 'Revenir au projet', onClick: () => navigate(`/project/${projectId}`) }
+                  : { label: 'Réessayer', onClick: () => refresh?.() }
+              }
             />
           </section>
         }

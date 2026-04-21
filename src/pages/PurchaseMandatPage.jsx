@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import TopBar from '../TopBar.jsx'
 import { usePublicProjectDetail, usePublicVisitSlotOptions } from '../lib/useSupabase.js'
+import EmptyState from '../components/EmptyState.jsx'
 
 function localISODate(d = new Date()) {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
@@ -45,8 +46,33 @@ export default function PurchaseMandatPage() {
     )
   }
 
-  if (!proj) return (<main className="screen screen--app"><section className="dashboard-page"><TopBar /><div className="empty-state"><p>Projet introuvable.</p><button className="cta-primary" onClick={() => navigate('/browse')}>Retour</button></div></section></main>)
-  if (selectedPlots.length === 0) return (<main className="screen screen--app"><section className="dashboard-page"><TopBar /><div className="empty-state"><p>Aucune parcelle sélectionnée.</p><button className="cta-primary" onClick={() => navigate(`/project/${projectId}`)}>Choisir des parcelles</button></div></section></main>)
+  if (!proj) return (
+    <main className="screen screen--app">
+      <section className="dashboard-page">
+        <TopBar />
+        <EmptyState
+          icon={<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#a8cc50" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M1 6v15l7-3 8 3 7-3V3l-7 3-8-3-7 3z"/><path d="M8 3v15"/><path d="M16 6v15"/></svg>}
+          title="Projet introuvable"
+          description="Ce projet n'est plus disponible publiquement. Le lien que vous avez ouvert est peut-être obsolète."
+          action={{ label: 'Explorer les projets', onClick: () => navigate('/browse') }}
+        />
+      </section>
+    </main>
+  )
+  if (selectedPlots.length === 0) return (
+    <main className="screen screen--app">
+      <section className="dashboard-page">
+        <TopBar />
+        <EmptyState
+          icon={<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#a8cc50" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M14 17.5h7"/></svg>}
+          title="Aucune parcelle sélectionnée"
+          description="Choisissez d'abord une ou plusieurs parcelles depuis la page du projet pour organiser votre visite."
+          action={{ label: 'Choisir des parcelles', onClick: () => navigate(`/project/${projectId}`) }}
+          secondary={{ label: 'Tous les projets', onClick: () => navigate('/browse') }}
+        />
+      </section>
+    </main>
+  )
 
   return (
     <main className="screen screen--app">

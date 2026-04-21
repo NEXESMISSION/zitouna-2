@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import TopBar from '../TopBar.jsx'
 import { usePublicProjectDetail } from '../lib/useSupabase.js'
@@ -123,10 +123,45 @@ export default function ProjectPage() {
   // the wrong project page for an instant.
   const idMatches = Boolean(proj) && String(proj.id) === String(id)
   const showData = !loading && idMatches
-  const showLoading = loading || (Boolean(proj) && !idMatches) || (!proj && !loading && Boolean(id))
-  // Treat "no id at all" or "hook settled with null" as the empty/not-found
-  // state. The RenderDataGate empty branch handles the "projet introuvable"
-  // panel so we get a single consistent layout.
+
+  // Grace window: hold the skeleton up for a few seconds when the project
+  // hasn't surfaced yet (stale cache, cold public view, realtime not ready).
+  // This stops the "Projet introuvable" empty state from flashing before the
+  // project actually arrives.
+  const GRACE_MS = 5000
+  const RETRY_DELAYS = [300, 900, 1800, 3000]
+  const [graceExpired, setGraceExpired] = useState(false)
+  const graceKeyRef = useRef('')
+  useEffect(() => {
+    if (graceKeyRef.current === id) return undefined
+    graceKeyRef.current = id
+    setGraceExpired(false)
+    const t = window.setTimeout(() => setGraceExpired(true), GRACE_MS)
+    return () => window.clearTimeout(t)
+  }, [id])
+
+  const retryIndexRef = useRef({ key: '', idx: 0 })
+  useEffect(() => {
+    if (retryIndexRef.current.key !== id) retryIndexRef.current = { key: id, idx: 0 }
+    if (graceExpired) return undefined
+    if (loading || idMatches) return undefined
+    if (!id) return undefined
+    const idx = retryIndexRef.current.idx
+    if (idx >= RETRY_DELAYS.length) return undefined
+    const t = window.setTimeout(() => {
+      retryIndexRef.current.idx = idx + 1
+      refresh?.()
+    }, RETRY_DELAYS[idx])
+    return () => window.clearTimeout(t)
+  }, [loading, idMatches, id, refresh, graceExpired])
+
+  const showLoading =
+    loading
+    || (Boolean(proj) && !idMatches)
+    || (!proj && !loading && Boolean(id) && !graceExpired)
+  // Treat "no id at all" or "hook settled with null past the grace window" as
+  // the empty/not-found state. The RenderDataGate empty branch handles the
+  // "projet introuvable" panel so we get a single consistent layout.
   const gateData = showData ? proj : null
   const gateLoading = showLoading && !showData
   const isEmptyGate = (d) => d == null
@@ -148,8 +183,17 @@ export default function ProjectPage() {
           <section className="dashboard-page">
             <TopBar />
             <EmptyState
-              title="Projet introuvable."
-              action={{ label: 'Retour aux projets', onClick: () => navigate('/browse') }}
+              icon={
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#a8cc50" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M1 6v15l7-3 8 3 7-3V3l-7 3-8-3-7 3z"/>
+                  <path d="M8 3v15"/>
+                  <path d="M16 6v15"/>
+                </svg>
+              }
+              title="Projet introuvable"
+              description="Ce projet n'est plus disponible publiquement. Il est peut-être complet, archivé, ou le lien que vous avez ouvert est obsolète."
+              action={{ label: 'Explorer les projets', onClick: () => navigate('/browse') }}
+              secondary={{ label: 'Réessayer', onClick: () => refresh?.() }}
             />
           </section>
         }
