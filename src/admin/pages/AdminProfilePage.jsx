@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { navItemsForUser } from '../adminNavConfig.js'
 import { useAuth } from '../../lib/AuthContext.jsx'
 import { useSales, useAdminUsers } from '../../lib/useSupabase.js'
 import { useToast } from '../components/AdminToast.jsx'
 import { runSafeAction } from '../../lib/runSafeAction.js'
+import { preloadRoute } from '../../lib/routePreload.js'
 import './sell-field.css'
 import './admin-profile.css'
 
@@ -185,6 +186,29 @@ export default function AdminProfilePage() {
   const governanceItems   = pickItems(GOVERNANCE_GROUP)
   const remunerationItems = pickItems(REMUNERATION_GROUP)
 
+  // After the admin hub has painted, warm up the top-of-funnel pages so the
+  // first click into the daily workflow feels instant. Staggered via
+  // requestIdleCallback to avoid contending with post-login data fetches.
+  useEffect(() => {
+    const hotPaths = [
+      '/admin/sell',
+      '/admin/coordination',
+      '/admin/finance',
+      '/admin/legal',
+      '/admin/juridique',
+      '/admin/clients',
+      '/admin/recouvrement',
+      '/admin/projects',
+    ].filter((p) => availableByPath.has(p))
+    if (hotPaths.length === 0) return
+    const ric = window.requestIdleCallback || ((cb) => window.setTimeout(cb, 200))
+    const cancel = window.cancelIdleCallback || window.clearTimeout
+    const handles = hotPaths.map((path, i) =>
+      ric(() => preloadRoute(path), { timeout: 1500 + i * 200 }),
+    )
+    return () => handles.forEach((h) => { try { cancel(h) } catch { /* ignore */ } })
+  }, [availableByPath])
+
   const firstName   = getFirstName(adminUser)
   const greeting    = getGreeting()
   const displayName = adminUser?.name || adminUser?.email || 'Administrateur'
@@ -246,12 +270,16 @@ export default function AdminProfilePage() {
     const icon  = ICON_BY_PATH[item.to] || '•'
     const hint  = HINT_BY_PATH[item.to] || 'Accéder au module.'
     const count = badgeForPath(item.to, sales)
+    const warmUp = () => preloadRoute(item.to)
     return (
       <button
         key={item.to}
         type="button"
         className={`ap-nav-card ap-nav-card--${tone}`}
         onClick={() => navigate(item.to)}
+        onMouseEnter={warmUp}
+        onFocus={warmUp}
+        onTouchStart={warmUp}
         aria-label={item.label}
       >
         <span className="ap-nav-card__icon" aria-hidden>{icon}</span>

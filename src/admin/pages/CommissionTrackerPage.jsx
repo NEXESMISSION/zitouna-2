@@ -152,6 +152,15 @@ export default function CommissionTrackerPage() {
               const withSeller = notarySales.filter((s) => s.seller_client_id || s.sellerClientId).length
               const withoutSeller = notarySales.length - withSeller
               const hasStaffOnly = notarySales.length > 0 && withSeller === 0
+              const clientNameById = new Map(
+                (cleanData?.clients || []).map((c) => [asId(c.id), c.full_name || c.name || ''])
+              )
+              const projectTitleById = new Map(
+                (cleanData?.projects || []).map((p) => [asId(p.id), p.title || ''])
+              )
+              const staffSales = notarySales
+                .filter((s) => !s.seller_client_id && !s.sellerClientId)
+                .slice(0, 8)
               return (
             <div className="ct-empty-hero" role="status" aria-live="polite">
               <div className="ct-empty-hero__preview" aria-hidden="true">
@@ -214,6 +223,45 @@ export default function CommissionTrackerPage() {
                         référent. Les commissions multi-niveaux ne se génèrent que pour les ventes entre
                         clients (champ <code>sellerClientId</code> renseigné).
                       </p>
+                    )}
+                    {staffSales.length > 0 && (
+                      <ul className="ct-empty-hero__sale-list" aria-label="Ventes sans vendeur client">
+                        {staffSales.map((s) => {
+                          const clientName = clientNameById.get(asId(s.client_id || s.clientId)) || 'Client'
+                          const projectTitle = projectTitleById.get(asId(s.project_id || s.projectId)) || '—'
+                          return (
+                            <li key={s.id} className="ct-empty-hero__sale-row">
+                              <button
+                                type="button"
+                                className="ct-empty-hero__sale-btn"
+                                onClick={() => {
+                                  const cid = asId(s.client_id || s.clientId)
+                                  if (cid) navigate(`/admin/clients/${cid}`)
+                                }}
+                                title="Ouvrir la fiche client pour définir un vendeur client"
+                              >
+                                <div className="ct-empty-hero__sale-main">
+                                  <strong>{clientName}</strong>
+                                  <span className="ct-empty-hero__sale-sub">{projectTitle}</span>
+                                </div>
+                                <div className="ct-empty-hero__sale-meta">
+                                  <span className="ct-empty-hero__sale-amount">
+                                    {fmtMoney(s.agreed_price || s.agreedPrice)}
+                                  </span>
+                                  <span className="ct-empty-hero__sale-tag">Staff</span>
+                                </div>
+                                <span className="ct-empty-hero__sale-chev" aria-hidden>→</span>
+                              </button>
+                            </li>
+                          )
+                        })}
+                        {notarySales.filter((s) => !s.seller_client_id && !s.sellerClientId).length > staffSales.length && (
+                          <li className="ct-empty-hero__sale-more">
+                            + {notarySales.filter((s) => !s.seller_client_id && !s.sellerClientId).length - staffSales.length}
+                            {' '}autres ventes sans vendeur client
+                          </li>
+                        )}
+                      </ul>
                     )}
                   </div>
                 )}

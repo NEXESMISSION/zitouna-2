@@ -19,22 +19,23 @@
 
 /* ── Tokens ───────────────────────────────────────────────────── */
 :root {
-  /* Default gradient — transparent green glow (no white sheen). */
-  --sk-base-light: rgba(168, 204, 80, 0.08);
-  --sk-glint-light: rgba(168, 204, 80, 0.22);
+  /* Default gradient — subtle slate base with a clearly visible glint
+     so the shimmer reads on white admin surfaces without feeling busy. */
+  --sk-base-light: rgba(148, 163, 184, 0.18);
+  --sk-glint-light: rgba(255, 255, 255, 0.7);
 
-  /* Dark/admin gradient — matches App.css .pub-sk and sell-field.css
+  /* Dark gradient — matches App.css .pub-sk and sell-field.css
      .sp-sk-num (white-alpha over the dark hero surface). */
-  --sk-base-dark: rgba(168, 204, 80, 0.06);
-  --sk-glint-dark: rgba(168, 204, 80, 0.18);
+  --sk-base-dark: rgba(168, 204, 80, 0.08);
+  --sk-glint-dark: rgba(168, 204, 80, 0.22);
 
-  /* Hero/stat-pill variant: same palette, slightly stronger glow. */
-  --sk-base-hero: rgba(168, 204, 80, 0.14);
-  --sk-glint-hero: rgba(168, 204, 80, 0.3);
+  /* Hero/stat-pill variant: stronger glint for dark surfaces. */
+  --sk-base-hero: rgba(168, 204, 80, 0.16);
+  --sk-glint-hero: rgba(168, 204, 80, 0.36);
 
   --sk-radius: 6px;
   --sk-radius-pill: 999px;
-  --sk-duration: 1.4s;
+  --sk-duration: 1.3s;
   --sk-easing: ease-in-out;
 }
 
@@ -457,7 +458,8 @@
 
 /* Chunk loader — top progress bar that slides. Users have
    already seen the chrome (TopBar, sidebar), so we show a
-   subtle progress hint rather than a full-screen spinner. */
+   subtle progress hint rather than a full-screen spinner.
+   Duration matches the shimmer so the two loops don't fight. */
 .app-loader--chunk {
   position: fixed;
   top: 0;
@@ -481,11 +483,51 @@
     #16a34a 50%,
     transparent 100%
   );
-  animation: sk-chunk-slide 1.2s ease-in-out infinite;
+  animation: sk-chunk-slide var(--sk-duration) var(--sk-easing) infinite;
 }
 @keyframes sk-chunk-slide {
   0%   { left: -30%; }
   100% { left: 100%; }
+}
+
+/* Page-shaped fallback rendered under the progress bar while a
+   route chunk is fetching. Matches the generic admin layout
+   (back-button + hero + KPI strip + card grid) so the transition
+   doesn't flash a blank screen. Consumers pass their own page
+   skeletons once the component mounts. */
+.app-loader--page {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 18px 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.app-loader--page__hero {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 18px;
+  border-radius: 14px;
+  background: rgba(168, 204, 80, 0.05);
+  border: 1px solid rgba(168, 204, 80, 0.18);
+}
+.app-loader--page__hero-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.app-loader--page__strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+.app-loader--page__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
 }
 
 /* ── Canonical shimmer keyframes (ONCE) ──────────────────────── */
@@ -521,7 +563,7 @@
 .adm-shell .sk-button,
 .adm-shell .sk-map,
 .adm-shell .sk-thumb {
-  background: rgba(168, 204, 80, 0.08) !important;
+  background: rgba(148, 163, 184, 0.2) !important;
   position: relative;
   overflow: hidden;
 }
@@ -536,18 +578,18 @@
   background: linear-gradient(
     90deg,
     transparent 0%,
-    rgba(168, 204, 80, 0.3) 50%,
+    rgba(255, 255, 255, 0.7) 50%,
     transparent 100%
   ) !important;
 }
 
-/* Card surface — remove the dark-green default, use white */
+/* Card surface — neutral slate tint on white admin pages */
 .adm-shell .sk-card,
 .adm-shell .sk-card--light {
-  background: rgba(168, 204, 80, 0.05) !important;
-  border: 1px solid rgba(168, 204, 80, 0.24) !important;
+  background: rgba(241, 245, 249, 0.8) !important;
+  border: 1px solid rgba(148, 163, 184, 0.25) !important;
   border-radius: 12px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
   min-height: 120px;
   padding: 14px;
 }
@@ -556,16 +598,16 @@
 .adm-shell .sk-detail__hero,
 .adm-shell .sk-kpi,
 .adm-shell .sk-kpi--dark {
-  background: rgba(168, 204, 80, 0.05) !important;
-  border: 1px solid rgba(168, 204, 80, 0.24) !important;
+  background: rgba(241, 245, 249, 0.8) !important;
+  border: 1px solid rgba(148, 163, 184, 0.25) !important;
 }
 
 /* Tree + table accents */
 .adm-shell .sk-tree__node {
-  background: rgba(168, 204, 80, 0.05);
-  border: 1px solid rgba(168, 204, 80, 0.18);
+  background: rgba(241, 245, 249, 0.7);
+  border: 1px solid rgba(148, 163, 184, 0.2);
 }
-.adm-shell .sk-table__row { border-bottom-color: rgba(168, 204, 80, 0.18); }
+.adm-shell .sk-table__row { border-bottom-color: rgba(148, 163, 184, 0.2); }
 
 /* Respect user's reduced-motion preference */
 @media (prefers-reduced-motion: reduce) {
@@ -578,6 +620,16 @@
   .adm-shell .sk-map,
   .adm-shell .sk-thumb {
     animation: none !important;
-    background: rgba(168, 204, 80, 0.14) !important;
+    background: rgba(148, 163, 184, 0.24) !important;
+  }
+  .adm-shell .sk::before,
+  .adm-shell .sk-line::before,
+  .adm-shell .sk-num::before,
+  .adm-shell .sk-box::before,
+  .adm-shell .sk-avatar::before,
+  .adm-shell .sk-button::before,
+  .adm-shell .sk-map::before,
+  .adm-shell .sk-thumb::before {
+    display: none;
   }
 }

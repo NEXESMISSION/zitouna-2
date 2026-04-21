@@ -7,6 +7,7 @@ import RequireStaff from './components/RequireStaff.jsx'
 import NotificationToaster from './components/NotificationToaster.jsx'
 import VersionBanner from './components/VersionBanner.jsx'
 import lazyWithRetry, { clearChunkReloadFlag } from './lib/lazyWithRetry.js'
+import { registerRoutePreloader } from './lib/routePreload.js'
 import './App.css'
 
 const LoginPage = lazyWithRetry(() => import('./pages/LoginPage.jsx'))
@@ -49,6 +50,35 @@ const DangerZonePage = lazyWithRetry(() => import('./admin/pages/DangerZonePage.
 // RESEARCH 05 §5: was eagerly imported — now lazy, consistent with the rest.
 const CommissionTrackerPage = lazyWithRetry(() => import('./admin/pages/CommissionTrackerPage.jsx'))
 
+// Wire each lazy component into the preload registry so nav surfaces can
+// warm the chunk on hover/focus/idle. When the user finally clicks, the
+// module is already cached — Suspense resolves without flashing a fallback.
+const PRELOAD_PAIRS = [
+  ['/admin/projects', ProjectsPage],
+  ['/admin/sell', SellPage],
+  ['/admin/cash-sales', CashSalesPage],
+  ['/admin/clients', ClientsPage],
+  ['/admin/audit-log', AuditLogPage],
+  ['/admin/users', UserManagementPage],
+  ['/admin/finance', FinanceDashboardPage],
+  ['/admin/legal', NotaryDashboardPage],
+  ['/admin/recouvrement', RecouvrementPage],
+  ['/admin/recouvrement2', RecouvrementV2Page],
+  ['/admin/coordination', CoordinationPage],
+  ['/admin/juridique', ServiceJuridiquePage],
+  ['/admin/call-center', CallCenterPage],
+  ['/admin/call-center/calendar', CallCenterCalendarPage],
+  ['/admin/commercial-calendar', CommercialCalendarPage],
+  ['/admin/commissions', CommissionTrackerPage],
+  ['/admin/commission-ledger', CommissionLedgerPage],
+  ['/admin/commissions/analytics', CommissionAnalyticsPage],
+  ['/admin/commissions/anomalies', CommissionAnomaliesPage],
+  ['/admin/client-link-repair', ClientLinkRepairPage],
+]
+for (const [path, Comp] of PRELOAD_PAIRS) {
+  if (typeof Comp?.preload === 'function') registerRoutePreloader(path, Comp.preload)
+}
+
 function LegacyMandatToVisiteRedirect() {
   const { id } = useParams()
   return <Navigate to={`/project/${id}/visite`} replace />
@@ -80,11 +110,10 @@ export default function App() {
       <Suspense
         fallback={
           <>
-            {/* Plan 06 §10 — three distinct global loader variants.
-                Route-level lazy chunks use the subtle top progress bar so
-                users see the chrome stay intact while the code fetches,
-                not a full-screen spinner. CSS lives in styles/skeletons.css
-                (.app-loader--chunk / .app-loader--chunk__bar). */}
+            {/* Route-level Suspense fallback: top progress bar + a generic
+                page-shaped skeleton so the switch doesn't flash a blank
+                screen. When chunks are preloaded (see preloadRoute()) the
+                fallback usually never appears. */}
             <div
               className="app-loader--chunk"
               role="progressbar"
@@ -93,7 +122,25 @@ export default function App() {
             >
               <div className="app-loader--chunk__bar" />
             </div>
-            <div className="app-loader" data-fallback="suspense" aria-hidden="true" />
+            <div className="app-loader--page" aria-hidden="true">
+              <div className="app-loader--page__hero">
+                <span className="sk sk-avatar sk-avatar--lg" />
+                <div className="app-loader--page__hero-text">
+                  <span className="sk sk-line sk-line--title" />
+                  <span className="sk sk-line sk-line--sub" />
+                </div>
+              </div>
+              <div className="app-loader--page__strip">
+                {[0, 1, 2, 3].map((i) => (
+                  <span key={i} className="sk sk-kpi" />
+                ))}
+              </div>
+              <div className="app-loader--page__grid">
+                {[0, 1, 2, 3, 4, 5].map((i) => (
+                  <span key={i} className="sk sk-card sk-card--light" />
+                ))}
+              </div>
+            </div>
           </>
         }
       >

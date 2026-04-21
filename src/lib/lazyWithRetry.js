@@ -40,47 +40,65 @@ function jittered(ms) {
 }
 
 export default function lazyWithRetry(importFn, { maxAttempts = 3, delayMs = 600 } = {}) {
-  return lazy(async () => {
-    let lastErr = null
-    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      try {
-        return await importFn()
-      } catch (e) {
-        lastErr = e
-        // Only retry chunk-load-shaped errors; module syntax errors, network
-        // unreachable, CSP violations etc. should surface immediately.
-        if (!isChunkLoadError(e)) break
-        if (attempt < maxAttempts) {
-          await new Promise((r) => setTimeout(r, jittered(delayMs * attempt)))
+  // Cache the in-flight import so .preload() can be called repeatedly without
+  // re-fetching the chunk, and so Suspense hits the already-resolved module
+  // when the user finally navigates.
+  let cached = null
+  const load = () => {
+    if (cached) return cached
+    cached = (async () => {
+      let lastErr = null
+      for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        try {
+          return await importFn()
+        } catch (e) {
+          lastErr = e
+          // Only retry chunk-load-shaped errors; module syntax errors, network
+          // unreachable, CSP violations etc. should surface immediately.
+          if (!isChunkLoadError(e)) break
+          if (attempt < maxAttempts) {
+            await new Promise((r) => setTimeout(r, jittered(delayMs * attempt)))
+          }
         }
       }
-    }
-    // Chunk load failed after retries — if we haven't already tried a reload
-    // this session, force one. Bust any cached index.html by tagging the URL
-    // with a timestamp so the browser treats it as a new navigation.
-    if (isChunkLoadError(lastErr) && typeof window !== 'undefined') {
-      try {
-        const reloaded = window.sessionStorage.getItem(RELOAD_FLAG)
-        if (!reloaded) {
-          window.sessionStorage.setItem(RELOAD_FLAG, String(Date.now()))
-          console.warn('[lazyWithRetry] chunk load failed after retries — forcing a cache-busting reload')
-          const url = new URL(window.location.href)
-          url.searchParams.set('_r', String(Date.now()))
-          window.location.replace(url.toString())
-          // Return a never-resolving promise so React Suspense keeps the
-          // spinner mounted while the browser navigates away. Without this,
-          // React would render the error immediately before the reload lands.
-          return new Promise(() => {})
+      // Chunk load failed after retries — if we haven't already tried a reload
+      // this session, force one. Bust any cached index.html by tagging the URL
+      // with a timestamp so the browser treats it as a new navigation.
+      if (isChunkLoadError(lastErr) && typeof window !== 'undefined') {
+        try {
+          const reloaded = window.sessionStorage.getItem(RELOAD_FLAG)
+          if (!reloaded) {
+            window.sessionStorage.setItem(RELOAD_FLAG, String(Date.now()))
+            console.warn('[lazyWithRetry] chunk load failed after retries — forcing a cache-busting reload')
+            const url = new URL(window.location.href)
+            url.searchParams.set('_r', String(Date.now()))
+            window.location.replace(url.toString())
+            // Return a never-resolving promise so React Suspense keeps the
+            // spinner mounted while the browser navigates away. Without this,
+            // React would render the error immediately before the reload lands.
+            return new Promise(() => {})
+          }
+          // Already reloaded once this session — surface the error to the
+          // boundary so the user gets a clear "reload manually" prompt.
+          console.warn('[lazyWithRetry] chunk load failed after reload — surfacing to boundary')
+        } catch {
+          /* ignore — fall through to throw */
         }
-        // Already reloaded once this session — surface the error to the
-        // boundary so the user gets a clear "reload manually" prompt.
-        console.warn('[lazyWithRetry] chunk load failed after reload — surfacing to boundary')
-      } catch {
-        /* ignore — fall through to throw */
       }
-    }
-    throw lastErr
-  })
+      // Reset the cache on hard failure so a later retry (e.g. from the error
+      // boundary's "Reload" button) can re-attempt the import fresh.
+      cached = null
+      throw lastErr
+    })()
+    return cached
+  }
+
+  const Component = lazy(load)
+  // Expose preload() on the component so nav cards can warm the chunk on
+  // hover/focus — by the time the user clicks, the module is cached and
+  // Suspense resolves synchronously (no fallback flash).
+  Component.preload = load
+  return Component
 }
 
 export function clearChunkReloadFlag() {

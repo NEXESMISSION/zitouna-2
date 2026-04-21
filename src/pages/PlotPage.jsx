@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import TopBar from '../TopBar.jsx'
 import { usePublicProjectDetail } from '../lib/useSupabase.js'
@@ -129,24 +129,45 @@ export default function PlotPage() {
   // and back. We refresh once per (projectId, plotId) pair and let the
   // normal empty state kick in if the retry still doesn't surface it.
   const retriedRef = useRef({ key: '', tried: false })
+  // The ref flip alone doesn't re-render the gate, and we want the skeleton
+  // to stay up between "first fetch settled without the plot" and "retry
+  // finishes refetching" — otherwise the empty state flashes for ~180 ms.
+  // Mirror the ref into state so the render function can observe it.
+  const [firstAttemptDone, setFirstAttemptDone] = useState(false)
   useEffect(() => {
     const key = `${projectId}:${plotId}`
     if (retriedRef.current.key !== key) {
       retriedRef.current = { key, tried: false }
+      setFirstAttemptDone(false)
     }
     if (!loading && idMatches && !plot && !retriedRef.current.tried) {
       retriedRef.current.tried = true
       const t = window.setTimeout(() => {
         refresh?.()
+        setFirstAttemptDone(true)
       }, 180)
       return () => { window.clearTimeout(t) }
     }
+    if (!loading && idMatches && plot) {
+      // Fetch found the plot; clear the gate guard so future missing-plot
+      // states (on a subsequent nav) can retry again.
+      if (firstAttemptDone) setFirstAttemptDone(false)
+    }
     return undefined
-  }, [loading, idMatches, plot, projectId, plotId, refresh])
+  }, [loading, idMatches, plot, projectId, plotId, refresh, firstAttemptDone])
 
   // "Ready" is when: fetch settled, id matches route, and plot exists.
   const gateData = !loading && idMatches && plot ? { proj, plot } : null
-  const gateLoading = loading || (Boolean(proj) && !idMatches) || (!proj && Boolean(projectId) && loading)
+  // Keep the skeleton up while:
+  //  - the underlying hook is fetching, OR
+  //  - we have stale cross-id data, OR
+  //  - the plot is missing but the auto-retry hasn't completed yet (prevents
+  //    the "Parcelle introuvable" flash on first entry).
+  const gateLoading =
+    loading
+    || (Boolean(proj) && !idMatches)
+    || (!proj && Boolean(projectId) && loading)
+    || (idMatches && !plot && !firstAttemptDone)
   const isEmptyGate = (d) => d == null
 
   return (
