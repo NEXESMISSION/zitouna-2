@@ -186,11 +186,18 @@ function TreeNode({ node, expandedDefault }) {
   )
 }
 
-export default function MyReferralTree({ myClientId, ledger, loading = false }) {
+export default function MyReferralTree({ myClientId, myName, ledger, loading = false }) {
   const { root, totalNodes, totalEarnings } = useMemo(
     () => buildTree(myClientId, ledger),
     [myClientId, ledger],
   )
+  const myInitials = String(myName || 'Moi')
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((s) => s[0] || '')
+    .join('')
+    .toUpperCase() || 'M'
 
   if (loading) {
     return (
@@ -221,12 +228,51 @@ export default function MyReferralTree({ myClientId, ledger, loading = false }) 
     )
   }
 
-  if (!myClientId || root.length === 0) {
-    return (
-      <div className="mrt">
-        <div className="mrt__header">
-          <h3 className="mrt__title">Mon arbre de parrainage</h3>
+  const isEmpty = !myClientId || root.length === 0
+
+  return (
+    <div className="mrt">
+      <div className="mrt__header">
+        <h3 className="mrt__title">Mon arbre de commissions</h3>
+        {!isEmpty && (
+          <span className="mrt__subtitle">
+            {totalNodes} personne{totalNodes > 1 ? 's' : ''} · {fmtMoney(totalEarnings)} générés
+          </span>
+        )}
+      </div>
+
+      {!isEmpty && (
+        <div className="mrt__stats">
+          <div className="mrt__stat">
+            <span className="mrt__stat-num">{root.length}</span>
+            <span className="mrt__stat-lbl">Filleul{root.length > 1 ? 's' : ''} directs</span>
+          </div>
+          <div className="mrt__stat">
+            <span className="mrt__stat-num">{totalNodes}</span>
+            <span className="mrt__stat-lbl">Total du réseau</span>
+          </div>
+          <div className="mrt__stat mrt__stat--good">
+            <span className="mrt__stat-num">{fmtMoney(totalEarnings)}</span>
+            <span className="mrt__stat-lbl">Total généré</span>
+          </div>
         </div>
+      )}
+
+      {/* Personal root card — "you" sit at the top of your tree. */}
+      <div className="mrt-me">
+        <span className="mrt-me__avatar" aria-hidden>{myInitials}</span>
+        <div className="mrt-me__body">
+          <div className="mrt-me__name">{myName || 'Vous'}</div>
+          <div className="mrt-me__meta">
+            {isEmpty
+              ? 'Racine de votre réseau — personne en dessous pour l’instant.'
+              : `Racine · ${root.length} filleul${root.length > 1 ? 's' : ''} directs`}
+          </div>
+        </div>
+        <span className="mrt-me__tag">Vous</span>
+      </div>
+
+      {isEmpty ? (
         <div className="mrt__empty">
           <div className="mrt__empty-emoji" aria-hidden>🌱</div>
           <p className="mrt__empty-title">Aucun filleul pour l'instant.</p>
@@ -235,37 +281,13 @@ export default function MyReferralTree({ myClientId, ledger, loading = false }) 
             elle apparaîtra ici avec ses propres filleuls.
           </p>
         </div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="mrt">
-      <div className="mrt__header">
-        <h3 className="mrt__title">Mon arbre de parrainage</h3>
-        <span className="mrt__subtitle">
-          {totalNodes} personne{totalNodes > 1 ? 's' : ''} · {fmtMoney(totalEarnings)} générés
-        </span>
-      </div>
-      <div className="mrt__stats">
-        <div className="mrt__stat">
-          <span className="mrt__stat-num">{root.length}</span>
-          <span className="mrt__stat-lbl">Filleul{root.length > 1 ? 's' : ''} directs</span>
-        </div>
-        <div className="mrt__stat">
-          <span className="mrt__stat-num">{totalNodes}</span>
-          <span className="mrt__stat-lbl">Total du réseau</span>
-        </div>
-        <div className="mrt__stat mrt__stat--good">
-          <span className="mrt__stat-num">{fmtMoney(totalEarnings)}</span>
-          <span className="mrt__stat-lbl">Total généré</span>
-        </div>
-      </div>
-      <ul className="mrt-root">
-        {root.map((n) => (
-          <TreeNode key={n.id} node={n} expandedDefault />
-        ))}
-      </ul>
+      ) : (
+        <ul className="mrt-root mrt-root--attached">
+          {root.map((n) => (
+            <TreeNode key={n.id} node={n} expandedDefault />
+          ))}
+        </ul>
+      )}
     </div>
   )
 }

@@ -736,7 +736,7 @@ export default function DashboardPage() {
             className={`inv-tab${activeTab === 'parrainage' ? ' inv-tab--active' : ''}`}
             onClick={() => setActiveTab('parrainage')}
           >
-            Parrainage
+            Commissions
           </button>
         </div>
 
@@ -1180,7 +1180,7 @@ export default function DashboardPage() {
             <div className="inv-wallet">
               <header className="inv-wallet__header">
                 <div>
-                  <h3 className="inv-wallet__title">Parrainage</h3>
+                  <h3 className="inv-wallet__title">Commissions</h3>
                   <p className="inv-wallet__lead">
                     Retraits soumis aux règles finance (après tampon légal).
                   </p>
@@ -1272,7 +1272,7 @@ export default function DashboardPage() {
                     {parrainageForecast && (
                       <details className="inv-wallet__fold">
                         <summary className="inv-wallet__fold-summary">Projection avec vos filleuls (optionnel)</summary>
-                        <section className="inv-forecast inv-forecast--in-fold" aria-label="Potentiel de parrainage">
+                        <section className="inv-forecast inv-forecast--in-fold" aria-label="Potentiel de commissions">
                         <div className="inv-forecast__head">
                           <span className="inv-forecast__kicker">Projection</span>
                           <strong className="inv-forecast__title">Votre potentiel avec vos filleuls actuels</strong>
@@ -1339,6 +1339,7 @@ export default function DashboardPage() {
                       <div style={{ marginBottom: 14 }}>
                         <MyReferralTree
                           myClientId={clientId}
+                          myName={clientProfile?.full_name || clientProfile?.name || displayName}
                           ledger={myCommissionEvents}
                           loading={ledgerLoading && myCommissionEvents.length === 0}
                         />
@@ -1364,7 +1365,7 @@ export default function DashboardPage() {
                           </div>
                         </div>
                         <p className="inv-ledger__hint">
-                          L1 = votre vente · L2+ = vente dans votre ligne de parrainage.
+                          L1 = votre vente · L2+ = vente dans votre ligne de commissions.
                         </p>
                         <RenderDataGate
                           loading={ledgerLoading && myCommissionEvents.length === 0}
@@ -1476,7 +1477,7 @@ export default function DashboardPage() {
                               )}
                               {indirectEvents.length > 0 && (
                                 <div className="inv-ledger__section">
-                                  <div className="inv-ledger__section-title">Ventes de votre ligne (parrainage)</div>
+                                  <div className="inv-ledger__section-title">Ventes de votre ligne (commissions)</div>
                                   <ul className="inv-ledger__list">{indirectEvents.map(renderCard)}</ul>
                                 </div>
                               )}
