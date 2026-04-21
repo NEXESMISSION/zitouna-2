@@ -590,6 +590,22 @@ export default function SellPage() {
     myClientId && wizardBuyerClientId && String(myClientId) === wizardBuyerClientId,
   )
 
+  /** Impossible d'enregistrer une vente où l'acheteur est sa propre fiche client (CHECK DB + métier). */
+  const buyerClientIdEqualsSeller = useCallback(
+    (clientId) => Boolean(myClientId && clientId && String(myClientId) === String(clientId)),
+    [myClientId],
+  )
+
+  useEffect(() => {
+    if (!buyerClientIdEqualsSeller(form.clientId)) return
+    setForm((f) => ({ ...f, clientId: '' }))
+    setCinLookupResult(null)
+    setCinLookup((prev) => {
+      const selfPh = clientProfile?.phone ? normalizePhoneLookup(clientProfile.phone) : ''
+      return selfPh && prev === selfPh ? '' : prev
+    })
+  }, [form.clientId, buyerClientIdEqualsSeller, clientProfile?.phone])
+
   /** Parcelles indisponibles : statut parcelle + ventes « engagées » (pas brouillon). Les brouillons ne bloquent pas une nouvelle vente. */
   const soldOrReservedIds = useMemo(() => {
     const set = new Set()
@@ -841,6 +857,10 @@ export default function SellPage() {
         )
         return
       }
+      if (buyerClientIdEqualsSeller(form.clientId)) {
+        addToast('Vous ne pouvez pas être l’acheteur de votre propre vente. Indiquez un autre client.', 'error')
+        return
+      }
     }
     if (saleWizardStep === 5) {
       if (form.paymentType === 'installments' && projectOffers.length > 0 && !form.offerId) {
@@ -853,7 +873,7 @@ export default function SellPage() {
       }
     }
     setSaleWizardStep(s => Math.min(SALE_WIZARD_STEP_COUNT, s + 1))
-  }, [saleWizardStep, form, projectOffers.length, addToast, cinLookup.length, cinLookupResult, selectedPlots])
+  }, [saleWizardStep, form, projectOffers.length, addToast, cinLookup.length, cinLookupResult, selectedPlots, buyerClientIdEqualsSeller])
 
   const plotIdEquals = useCallback((a, b) => {
     if (a == null || b == null) return false
@@ -883,6 +903,10 @@ export default function SellPage() {
 
   const handleSave = useCallback(async () => {
     if (saleSaving) return
+    if (buyerClientIdEqualsSeller(form.clientId)) {
+      addToast('Vous ne pouvez pas être l’acheteur de votre propre vente. Indiquez un autre client.', 'error')
+      return
+    }
     // cinLookupResult is the last successful phone lookup / RPC-created row;
     // the useClients hook may not have refreshed yet, so fall back to it when
     // the local list doesn't contain form.clientId.
@@ -1104,7 +1128,7 @@ export default function SellPage() {
       window.clearTimeout(watchdog)
       if (!watchdogFired) setSaleSaving(false)
     }
-  }, [saleSaving, form, editId, clients, scopedProjects, projectOffers, sales, salesCreate, salesUpdate, updateParcelStatus, addToast, role, adminUser, closeSaleDrawer, refreshSales, sellerMode, sellerHasParcelWhitelist, sellerAssignedParcelDbIds, myClientId, effectiveSellerClientId, cinLookup, sellerClientRecord?.cin, effectivePlotPrice])
+  }, [saleSaving, form, editId, clients, scopedProjects, projectOffers, sales, salesCreate, salesUpdate, updateParcelStatus, addToast, role, adminUser, closeSaleDrawer, refreshSales, sellerMode, sellerHasParcelWhitelist, sellerAssignedParcelDbIds, myClientId, effectiveSellerClientId, cinLookup, sellerClientRecord?.cin, effectivePlotPrice, buyerClientIdEqualsSeller])
 
   const advanceStatus = useCallback(async (sale) => {
     const flow = STATUS_FLOW[sale.status]
@@ -1213,6 +1237,10 @@ export default function SellPage() {
     const cin = clientForm.cin.trim()
     const existing = clients.find(c => normalizePhoneLookup(c.phone) === normalizedPhone)
     if (existing) {
+      if (buyerClientIdEqualsSeller(existing.id)) {
+        addToast('Ce numéro correspond à votre propre fiche client. Choisissez un autre acheteur.', 'error')
+        return
+      }
       setForm(f => ({ ...f, clientId: existing.id }))
       setCinLookup(normalizedPhone)
       setCinLookupResult(existing)
@@ -1295,7 +1323,7 @@ export default function SellPage() {
       }
     }
     finally { setClientSaving(false) }
-  }, [clientForm, clients, clientUpsert, addToast, refreshClients, withTimeout, adminUser?.id, role])
+  }, [clientForm, clients, clientUpsert, addToast, refreshClients, withTimeout, adminUser?.id, role, buyerClientIdEqualsSeller])
 
   const activeSales = salesForList.filter(s => !['cancelled', 'completed', 'rejected'].includes(s.status)).length
   const totalRevenue = salesForList.filter(s => ['active', 'completed'].includes(s.status)).reduce((s, x) => s + (x.agreedPrice || 0), 0)
@@ -2116,26 +2144,6 @@ export default function SellPage() {
             <span className="sp-help-card__ico" aria-hidden>💡</span>
             <span>Le téléphone sert de clé unique pour relier la vente au client. Le CIN est facultatif.</span>
           </div>
-          {clientProfile?.id && clientProfile?.phone && (
-            <button
-              type="button"
-              className="sp-wizard__mini sp-wizard__mini--ok"
-              style={{ width: '100%', marginBottom: 10, cursor: 'pointer', border: 'none', textAlign: 'left' }}
-              onClick={() => {
-                const ph = normalizePhoneLookup(clientProfile.phone)
-                setCinLookup(ph)
-                setCinLookupResult(clientProfile)
-                setForm(f => ({ ...f, clientId: clientProfile.id }))
-              }}
-            >
-              <span>👤</span>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 700 }}>Utiliser mon profil acheteur</div>
-                <div style={{ fontSize: 11, marginTop: 2 }}>{clientProfile.name} · {clientProfile.phone}</div>
-              </div>
-              <span style={{ fontSize: 10, fontWeight: 700 }}>Sélectionner</span>
-            </button>
-          )}
           <label className="sp-wizard__label" htmlFor="sp-phone-input">
             Téléphone du client<span className="sp-required" aria-hidden>*</span>
           </label>
@@ -2148,15 +2156,17 @@ export default function SellPage() {
                 const val = normalizePhoneLookup(e.target.value)
                 setCinLookup(val)
                 if (val.length >= 4) {
-                  // 1) Check if typed phone matches the current user's own clientProfile.
-                  const selfMatch = clientProfile?.id && normalizePhoneLookup(clientProfile.phone) === val
-                    ? clientProfile : null
-                  // 2) Instant match against the local clients list (cached view).
-                  const found = selfMatch || clients.find(c => normalizePhoneLookup(c.phone) === val)
+                  // Instant match against the local clients list (cached view).
+                  // Never treat the current user's own client row as the buyer.
+                  const found = clients.find(
+                    (c) =>
+                      normalizePhoneLookup(c.phone) === val &&
+                      !buyerClientIdEqualsSeller(c.id),
+                  ) || null
                   setCinLookupResult(found || null)
                   if (found) setForm(f => ({ ...f, clientId: found.id }))
                   else setForm(f => ({ ...f, clientId: '' }))
-                  // 3) When fully entered and local list has no match, hit the DB
+                  // When fully entered and local list has no match, hit the DB
                   //    so we don't invite the user to create a duplicate stub.
                   if (!found && val.length >= 8) {
                     const guard = val
@@ -2167,6 +2177,15 @@ export default function SellPage() {
                       .then(dbClient => {
                         if (guard !== val) return
                         if (dbClient) {
+                          if (buyerClientIdEqualsSeller(dbClient.id)) {
+                            addToast(
+                              'Ce numéro correspond à votre fiche client : vous ne pouvez pas être l’acheteur de votre propre vente.',
+                              'error',
+                            )
+                            setCinLookupResult(null)
+                            setForm(f => ({ ...f, clientId: '' }))
+                            return
+                          }
                           setCinLookupResult(dbClient)
                           setForm(f => ({ ...f, clientId: dbClient.id }))
                         }
@@ -2265,6 +2284,13 @@ export default function SellPage() {
                     )
                     if (!stub?.id) {
                       addToast('Impossible de rattacher ce numéro pour le moment.', 'error')
+                      return
+                    }
+                    if (buyerClientIdEqualsSeller(stub.id)) {
+                      addToast(
+                        'Ce numéro correspond à votre fiche client : vous ne pouvez pas être l\'acheteur de votre propre vente.',
+                        'error',
+                      )
                       return
                     }
                     setCinLookupResult(stub)

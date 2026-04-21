@@ -196,6 +196,10 @@ export default function MyReferralTree({ myClientId, myName, ledger, loading = f
     () => buildTree(myClientId, ledger),
     [myClientId, ledger],
   )
+  const hasCommissionLines = useMemo(
+    () => (Array.isArray(ledger) ? ledger.some((e) => e.kind === 'commission') : false),
+    [ledger],
+  )
   const [expanded, setExpanded] = useState(false)
 
   const myInitials = String(myName || 'Moi')
@@ -286,7 +290,9 @@ export default function MyReferralTree({ myClientId, myName, ledger, loading = f
             <div className="mrt-me__name">{myName || 'Vous'}</div>
             <div className="mrt-me__meta">
               {isEmpty
-                ? 'Aucun filleul pour l’instant'
+                ? (hasCommissionLines
+                  ? 'Commissions visibles, mais aucun lien vendeur → acheteur dans vos données d’affichage'
+                  : 'Aucun filleul pour l’instant — l’arbre se remplit après enregistrement des commissions (clôture notaire)')
                 : `${root.length} filleul${root.length > 1 ? 's' : ''} direct${root.length > 1 ? 's' : ''}`}
             </div>
           </div>

@@ -3946,8 +3946,39 @@ export async function fetchMyCommissionLedger(clientId = null) {
     : { data: [], error: null }
   if (salesRes.error) throw new Error(`fetchMyCommissionLedger sales: ${salesRes.error.message}`)
   const sales = salesRes.data || []
-  const clientIds = [...new Set(sales.flatMap((s) => [s.client_id, s.seller_client_id]).filter(Boolean))]
-  const projectIds = [...new Set(sales.map((s) => s.project_id).filter(Boolean))]
+
+  /** UUID-ish strings for Map keys (RLS often hides sales rows where the user is seller, not buyer). */
+  const sid = (v) => (v == null || v === '' ? '' : String(v).trim())
+
+  const clientIdSet = new Set()
+  for (const s of sales) {
+    if (s.client_id) clientIdSet.add(sid(s.client_id))
+    if (s.seller_client_id) clientIdSet.add(sid(s.seller_client_id))
+  }
+  const projectIdSet = new Set()
+  for (const s of sales) {
+    if (s.project_id) projectIdSet.add(sid(s.project_id))
+  }
+  for (const ev of events) {
+    const meta = ev.rule_snapshot && typeof ev.rule_snapshot === 'object' ? ev.rule_snapshot.meta : null
+    if (!meta || typeof meta !== 'object') continue
+    const ds = sid(meta.directSeller)
+    const bc = sid(meta.buyerClientId)
+    if (ds) clientIdSet.add(ds)
+    if (bc) clientIdSet.add(bc)
+    const cp = meta.chainPath
+    if (Array.isArray(cp)) {
+      for (const x of cp) {
+        const id = sid(x)
+        if (id) clientIdSet.add(id)
+      }
+    }
+    const sp = sid(meta.saleProjectId)
+    if (sp) projectIdSet.add(sp)
+  }
+
+  const clientIds = [...clientIdSet].filter(Boolean)
+  const projectIds = [...projectIdSet].filter(Boolean)
   const [clientsRes, projectsDetailRes] = await Promise.all([
     clientIds.length
       ? db().from('clients').select('id, full_name, code, phone').in('id', clientIds)
@@ -3959,15 +3990,34 @@ export async function fetchMyCommissionLedger(clientId = null) {
   if (clientsRes.error) throw new Error(`fetchMyCommissionLedger clients: ${clientsRes.error.message}`)
   if (projectsDetailRes.error) throw new Error(`fetchMyCommissionLedger projects: ${projectsDetailRes.error.message}`)
 
-  const saleById = new Map(sales.map((s) => [s.id, s]))
-  const clientById = new Map((clientsRes.data || []).map((c) => [c.id, c]))
-  const projectById = new Map((projectsDetailRes.data || []).map((p) => [p.id, p]))
+  const saleById = new Map(sales.map((s) => [sid(s.id), s]))
+  const clientById = new Map((clientsRes.data || []).map((c) => [sid(c.id), c]))
+  const projectById = new Map((projectsDetailRes.data || []).map((p) => [sid(p.id), p]))
+
+  const clientDto = (row, fallbackId) => {
+    if (row) {
+      return { id: row.id, name: row.full_name || row.code, phone: row.phone || '' }
+    }
+    if (fallbackId) {
+      return { id: fallbackId, name: '—', phone: '' }
+    }
+    return null
+  }
 
   const mappedEvents = events.map((ev) => {
-    const sale = saleById.get(ev.sale_id) || null
-    const project = sale ? projectById.get(sale.project_id) : null
-    const seller = sale ? clientById.get(sale.seller_client_id) : null
-    const buyer = sale ? clientById.get(sale.client_id) : null
+    const sale = saleById.get(sid(ev.sale_id)) || null
+    const meta = ev.rule_snapshot && typeof ev.rule_snapshot === 'object' ? ev.rule_snapshot.meta : null
+    const metaObj = meta && typeof meta === 'object' ? meta : null
+    const saleSellerId = sale ? sid(sale.seller_client_id) : ''
+    const saleBuyerId = sale ? sid(sale.client_id) : ''
+    const metaSellerId = metaObj ? sid(metaObj.directSeller) : ''
+    const metaBuyerId = metaObj ? sid(metaObj.buyerClientId) : ''
+    const resolvedSellerId = saleSellerId || metaSellerId || ''
+    const resolvedBuyerId = saleBuyerId || metaBuyerId || ''
+    const sellerRow = resolvedSellerId ? clientById.get(resolvedSellerId) : null
+    const buyerRow = resolvedBuyerId ? clientById.get(resolvedBuyerId) : null
+    const projectId = sale ? sid(sale.project_id) : (metaObj ? sid(metaObj.saleProjectId) : '')
+    const project = projectId ? projectById.get(projectId) : null
     return {
       kind: 'commission',
       id: ev.id,
@@ -3986,10 +4036,11 @@ export async function fetchMyCommissionLedger(clientId = null) {
         notaryCompletedAt: sale.notary_completed_at || null,
       } : null,
       project: project ? { id: project.id, title: project.title, city: project.city } : null,
-      seller: seller ? { id: seller.id, name: seller.full_name || seller.code, phone: seller.phone || '' } : null,
-      buyer: buyer ? { id: buyer.id, name: buyer.full_name || buyer.code, phone: buyer.phone || '' } : null,
+      seller: clientDto(sellerRow, resolvedSellerId || null),
+      buyer: clientDto(buyerRow, resolvedBuyerId || null),
     }
   })
+
   // Merge commission events + payout requests and sort by date (newest first).
   const merged = [...mappedEvents, ...payoutRequests]
   merged.sort((a, b) => {
