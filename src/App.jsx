@@ -8,6 +8,7 @@ import NotificationToaster from './components/NotificationToaster.jsx'
 import VersionBanner from './components/VersionBanner.jsx'
 import lazyWithRetry, { clearChunkReloadFlag } from './lib/lazyWithRetry.js'
 import { registerRoutePreloader } from './lib/routePreload.js'
+import { useAuth } from './lib/AuthContext.jsx'
 import './App.css'
 
 const LoginPage = lazyWithRetry(() => import('./pages/LoginPage.jsx'))
@@ -84,6 +85,22 @@ function LegacyMandatToVisiteRedirect() {
   return <Navigate to={`/project/${id}/visite`} replace />
 }
 
+// Landing behavior for "/": logged-in clients land on their dashboard
+// (their home), guests see the public browse page. While auth is still
+// bootstrapping we keep the page blank — Suspense fallback has already
+// rendered the skeleton, re-rendering here would just flash.
+function RootLanding() {
+  const { ready, isAuthenticated, adminUser } = useAuth()
+  if (!ready) return null
+  // Staff have their own hub at /admin — keep them in the customer-facing
+  // browse flow by default, but logged-in clients always go to their
+  // dashboard as their "home".
+  if (isAuthenticated && !adminUser) {
+    return <Navigate to="/dashboard" replace />
+  }
+  return <BrowsePage />
+}
+
 function ScrollToTopOnRouteChange() {
   const { pathname } = useLocation()
 
@@ -146,7 +163,7 @@ export default function App() {
       >
       <Routes>
         {/* Public routes */}
-        <Route path="/"                                element={<BrowsePage />} />
+        <Route path="/"                                element={<RootLanding />} />
         <Route path="/browse"                          element={<BrowsePage />} />
         <Route path="/project/:id"                     element={<ProjectPage />} />
         <Route path="/project/:projectId/plot/:plotId" element={<PlotPage />} />
