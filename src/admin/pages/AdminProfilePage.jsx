@@ -23,7 +23,7 @@ const WORKFLOW_ORDER = [
 ]
 const ACQUISITION_GROUP = ['/admin/call-center', '/admin/commercial-calendar']
 const ASSETS_GROUP = ['/admin/projects', '/admin/clients']
-const GOVERNANCE_GROUP = ['/admin/users', '/admin/client-link-repair']
+const GOVERNANCE_GROUP = ['/admin/users', '/admin/client-link-repair', '/admin/phone-changes']
 const REMUNERATION_GROUP = [
   '/admin/commissions',
   '/admin/commission-ledger',
@@ -54,6 +54,7 @@ const ICON_BY_PATH = {
   '/admin/audit-log': '📜',
   '/admin/users': '🛡️',
   '/admin/client-link-repair': '🔗',
+  '/admin/phone-changes': '📞',
 }
 
 const HINT_BY_PATH = {
@@ -76,6 +77,7 @@ const HINT_BY_PATH = {
   '/admin/audit-log': "Visualiser l'historique des actions.",
   '/admin/users': 'Créer et gérer les comptes internes.',
   '/admin/client-link-repair': 'Réparer les liens client orphelins.',
+  '/admin/phone-changes': 'Examiner les demandes de changement de téléphone.',
 }
 
 // Tone used for the left border of each nav card. Picked to keep
@@ -97,6 +99,7 @@ const TONE_BY_PATH = {
   '/admin/clients': 'green',
   '/admin/users': 'red',
   '/admin/client-link-repair': 'red',
+  '/admin/phone-changes': 'red',
   '/admin/commissions': 'purple',
   '/admin/commission-ledger': 'purple',
   '/admin/commissions/analytics': 'purple',
