@@ -29,7 +29,13 @@
 | H3 (realtime fanout) | Open N browser tabs on public PlotPages, update a tree batch on an unrelated plot from the admin UI, observe that public tabs do NOT refresh |
 | M2 (receipt_url)   | Staging SQL: `insert into installment_payment_receipts (payment_id, receipt_url) values ('<id>', 'javascript:alert(1)')` → must fail CHECK constraint |
 
-`npm run security:probe-all` runs RPC + table probes in sequence. The race probe is separate because it creates real rows (staging only).
+`npm run security:probe-all` runs RPC + table probes in sequence. The race probes are separate because they create real rows (staging only).
+
+| Extra (phased hardening) | Command / notes |
+| --- | --- |
+| Phase D — bad JWT / Basic auth | `npm run security:auth-probe` — PostgREST must reject bogus `Authorization` (no silent empty `clients` for invalid tokens) |
+| Phase C — double sale (delegated seller) | `npm run security:race-sale-probe` — needs full env (see `scripts/security/race-delegated-sale-probe.mjs`); exits 0 with SKIP until configured |
+| Phase F — load (catalog) | Install [k6](https://k6.io/), then run `scripts/k6/smoke-catalog.js` with `K6_SUPABASE_URL` + `K6_SUPABASE_ANON_KEY` |
 
 ---
 

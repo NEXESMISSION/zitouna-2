@@ -156,7 +156,11 @@ export const TABLE_PROBE_MATRIX = [
     table: 'clients',
     op: 'insert',
     role: 'anon',
-    payload: { name: 'Probe', email: 'probe@example.invalid' },
+    payload: {
+      code: 'PROBE-ANON',
+      full_name: 'Probe',
+      email: 'probe-anon@example.invalid',
+    },
     expect: 'deny',
   },
   {

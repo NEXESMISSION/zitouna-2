@@ -12,7 +12,10 @@
     "security:rls-probe": "node scripts/security/rls-rpc-probe.mjs",
     "security:table-probe": "node scripts/security/rls-table-probe.mjs",
     "security:race-probe": "node scripts/security/race-payout-probe.mjs",
-    "security:probe-all": "npm run security:rls-probe && npm run security:table-probe"
+    "security:probe-all": "npm run security:rls-probe && npm run security:table-probe",
+    "security:auth-probe": "node scripts/security/auth-session-probe.mjs",
+    "security:race-sale-probe": "node scripts/security/race-delegated-sale-probe.mjs",
+    "security:fill-probe-env": "node scripts/security/fill-probe-env.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.103.2",

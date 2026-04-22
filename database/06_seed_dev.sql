@@ -8,9 +8,9 @@
 --   1) Wipes auth users + business/catalog data (destructive, guard-gated)
 --   2) Seeds 4 projects (workflow, checklist, commission rules, offers, slots)
 --   3) Seeds 20 parcels per project (80 total)
---   4) Seeds 2 SUPER_ADMIN accounts (password: 123456)
---      - lassad@gmail.com   SUPER_ADMIN
---      - saif@gmail.com     SUPER_ADMIN
+--   4) Seeds 2 SUPER_ADMIN + 2 plain clients for RLS probes (password: 123456)
+--      - lassad@gmail.com / saif@gmail.com — SUPER_ADMIN
+--      - rls_probe_a@zitouna.test / rls_probe_b@zitouna.test — buyers (not staff)
 --
 -- IMPORTANT:
 --   Run this in the same SQL session after:
@@ -226,7 +226,19 @@ values
   ('afternoon-2', '16h00 – 18h00', 'Fin d''après-midi', 4);
 
 -- -----------------------------------------------------------------------------
--- 4) 2 SUPER_ADMIN auth accounts (password: 13456) + identities
+-- 3b) Plain client stubs for RLS security probes (linked when auth rows insert)
+--     Emails/passwords match defaults in scripts/security/rls-rpc-probe.mjs
+-- -----------------------------------------------------------------------------
+
+insert into public.clients (id, code, full_name, email, phone, phone_normalized, status)
+values
+  (('d0000000-0000-4000-8000-' || substr(md5('rls_probe_a@zitouna.test'),1,12))::uuid,
+   'PROBE-A', 'RLS Probe A', 'rls_probe_a@zitouna.test', '+216 30 000 001', '+21630000001', 'active'),
+  (('d0000000-0000-4000-8001-' || substr(md5('rls_probe_b@zitouna.test'),1,12))::uuid,
+   'PROBE-B', 'RLS Probe B', 'rls_probe_b@zitouna.test', '+216 30 000 002', '+21630000002', 'active');
+
+-- -----------------------------------------------------------------------------
+-- 4) SUPER_ADMIN + RLS probe auth accounts (password: 123456) + identities
 -- -----------------------------------------------------------------------------
 
 insert into auth.users (
@@ -252,8 +264,10 @@ select
   '',
   ''
 from (values
-  ('lassad@gmail.com', 'Lassad', '+216 20 000 001'),
-  ('saif@gmail.com',   'Saif',   '+216 20 000 002')
+  ('lassad@gmail.com',       'Lassad',    '+216 20 000 001'),
+  ('saif@gmail.com',         'Saif',      '+216 20 000 002'),
+  ('rls_probe_a@zitouna.test', 'RLS Probe A', '+216 30 000 001'),
+  ('rls_probe_b@zitouna.test', 'RLS Probe B', '+216 30 000 002')
 ) as t(email, full_name, phone);
 
 insert into auth.identities (
@@ -274,7 +288,9 @@ select
   now()
 from (values
   ('lassad@gmail.com'),
-  ('saif@gmail.com')
+  ('saif@gmail.com'),
+  ('rls_probe_a@zitouna.test'),
+  ('rls_probe_b@zitouna.test')
 ) as t(email);
 
 -- -----------------------------------------------------------------------------

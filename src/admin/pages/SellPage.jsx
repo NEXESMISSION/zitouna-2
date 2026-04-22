@@ -596,6 +596,18 @@ export default function SellPage() {
     [myClientId],
   )
 
+  /** Normalized phone of the current user, if linked to a client profile. */
+  const selfPhoneLookup = useMemo(
+    () => (clientProfile?.phone ? normalizePhoneLookup(clientProfile.phone) : ''),
+    [clientProfile?.phone],
+  )
+  /** True when the phone the user is typing into the buyer picker matches
+   *  their own phone — short-circuits the lookup and disables "+ Nouveau"
+   *  so we reject self-sale upfront rather than at submit. */
+  const buyerPhoneIsSelf = Boolean(
+    selfPhoneLookup && cinLookup && cinLookup === selfPhoneLookup,
+  )
+
   useEffect(() => {
     if (!buyerClientIdEqualsSeller(form.clientId)) return
     setForm((f) => ({ ...f, clientId: '' }))
@@ -2155,6 +2167,16 @@ export default function SellPage() {
               onChange={e => {
                 const val = normalizePhoneLookup(e.target.value)
                 setCinLookup(val)
+                // Short-circuit: the user is typing their own phone. Don't run
+                // the local or remote lookup — it can only resolve to self,
+                // which is not a legal buyer.
+                if (selfPhoneLookup && val === selfPhoneLookup) {
+                  setCinLookupResult(null)
+                  setForm(f => ({ ...f, clientId: '' }))
+                  setPhoneLookupBusy(false)
+                  setPhoneLookupError(false)
+                  return
+                }
                 if (val.length >= 4) {
                   // Instant match against the local clients list (cached view).
                   // Never treat the current user's own client row as the buyer.
@@ -2216,8 +2238,14 @@ export default function SellPage() {
               type="button"
               className="sp-wizard__btn sp-wizard__btn--ghost"
               style={{ whiteSpace: 'nowrap', flexShrink: 0 }}
-              title="Ouvre le formulaire pour créer une fiche acheteur (autorisé si votre compte a l’accès vente)"
+              disabled={buyerPhoneIsSelf}
+              title={
+                buyerPhoneIsSelf
+                  ? "Impossible : ce numéro correspond à votre propre fiche client."
+                  : "Ouvre le formulaire pour créer une fiche acheteur (autorisé si votre compte a l’accès vente)"
+              }
               onClick={() => {
+                if (buyerPhoneIsSelf) return
                 setClientForm({ name: '', phone: cinLookup || '', phoneCc: '+216', cin: '', city: '' })
                 setClientModal(true)
               }}
@@ -2225,6 +2253,13 @@ export default function SellPage() {
               + Nouveau
             </button>
           </div>
+          {buyerPhoneIsSelf && (
+            <div className="sp-wizard__mini sp-wizard__mini--err" style={{ marginTop: 8 }}>
+              Ce numéro correspond à votre propre fiche client. Vous ne pouvez
+              pas être l’acheteur de votre propre vente — saisissez un autre
+              numéro de téléphone.
+            </div>
+          )}
           {cinLookupResult && cinLookup.length >= 4 && (
             <div className="sp-wizard__mini sp-wizard__mini--ok">
               <span>✓</span>
