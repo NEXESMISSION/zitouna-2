@@ -845,17 +845,39 @@ export function AuthProvider({ children }) {
         'signUp',
       ).catch((e) => ({ data: null, error: e }))
 
+      let signedInUser = data?.user
+      let session = data?.session
+
       if (error) {
         const msg = String(error.message || '').toLowerCase()
         let reason = 'signup_failed'
         if (msg.includes('already registered') || msg.includes('user already') || msg.includes('duplicate')) reason = 'email_conflict'
         else if (msg.includes('password')) reason = 'weak_password'
         else if (msg.includes('email')) reason = 'invalid_email'
-        return { ok: false, reason, error: error.message }
-      }
 
-      const signedInUser = data?.user
-      const session = data?.session
+        // Orphan-recovery: a prior signup attempt created the auth user but
+        // failed at profile upsert (e.g. PHONE_LINK_CONFLICT), leaving the
+        // user unable to retry with the same email. If the caller provides
+        // the matching password we can re-authenticate, then continue to
+        // profile upsert below with the (now-corrected) phone.
+        if (reason === 'email_conflict') {
+          const { data: siData } = await withAuthTimeout(
+            supabase.auth.signInWithPassword({ email, password }),
+            10_000,
+            'signInWithPassword[orphanRecovery]',
+          ).catch((e) => ({ data: null, error: e }))
+          if (siData?.session && siData?.user) {
+            signedInUser = siData.user
+            session = siData.session
+          } else {
+            // Wrong password → genuine email collision with someone else's
+            // account. Preserve original email_conflict signal.
+            return { ok: false, reason, error: error.message }
+          }
+        } else {
+          return { ok: false, reason, error: error.message }
+        }
+      }
 
       if (signedInUser && session) {
         try {

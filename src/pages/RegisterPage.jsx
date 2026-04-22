@@ -118,7 +118,7 @@ export default function RegisterPage() {
         let message
         switch (reason) {
           case 'phone_conflict':
-            message = "Ce numéro est déjà lié à un autre compte. Contactez le support pour vérification."
+            message = "Ce numéro est déjà associé à un autre compte. Utilisez un autre numéro, ou contactez le support si c'est bien le vôtre."
             break
           case 'email_conflict':
             message = "Cette adresse e-mail est déjà utilisée. Essayez « Mot de passe oublié » ou utilisez une autre adresse."
