@@ -45,6 +45,7 @@ const CallCenterCalendarPage = lazyWithRetry(() => import('./admin/pages/CallCen
 const CommercialCalendarPage = lazyWithRetry(() => import('./admin/pages/CommercialCalendarPage.jsx'))
 const CommissionLedgerPage = lazyWithRetry(() => import('./admin/pages/CommissionLedgerPage.jsx'))
 const ClientLinkRepairPage = lazyWithRetry(() => import('./admin/pages/ClientLinkRepairPage.jsx'))
+const PhoneChangesPage = lazyWithRetry(() => import('./admin/pages/PhoneChangesPage.jsx'))
 const CommissionAnomaliesPage = lazyWithRetry(() => import('./admin/pages/CommissionAnomaliesPage.jsx'))
 const CommissionAnalyticsPage = lazyWithRetry(() => import('./admin/pages/CommissionAnalyticsPage.jsx'))
 const DangerZonePage = lazyWithRetry(() => import('./admin/pages/DangerZonePage.jsx'))
@@ -204,6 +205,7 @@ export default function App() {
           <Route path="recouvrement2"        element={<RecouvrementV2Page />} />
           <Route path="users"                element={<UserManagementPage />} />
           <Route path="client-link-repair"   element={<ClientLinkRepairPage />} />
+          <Route path="phone-changes"        element={<PhoneChangesPage />} />
           <Route path="audit-log"            element={<AuditLogPage />} />
           <Route path="sell"                 element={<SellPage />} />
           <Route path="cash-sales"           element={<CashSalesPage />} />

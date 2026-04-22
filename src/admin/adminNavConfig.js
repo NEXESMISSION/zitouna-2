@@ -41,6 +41,7 @@ export const NAV_ITEMS = [
   // Gouvernance
   { to: '/admin/users', label: 'Utilisateurs & permissions', icon: 'user-cog' },
   { to: '/admin/client-link-repair', label: 'Reparation des liens client', icon: 'link' },
+  { to: '/admin/phone-changes', label: 'Demandes changement téléphone', icon: 'phone' },
 ]
 
 /**
@@ -51,6 +52,7 @@ export const NAV_ITEMS = [
 export function isNavItemAllowed(itemPath, allowedPages) {
   const normItem = normalizeAdminPagePath(itemPath)
   if (normItem === '/admin/users' || normItem.startsWith('/admin/users/')) return allowedPages === null
+  if (normItem === '/admin/phone-changes' || normItem.startsWith('/admin/phone-changes/')) return allowedPages === null
   if (allowedPages === null || allowedPages === undefined) return true
   if (!Array.isArray(allowedPages)) return false
   return allowedPages.some((p) => {
@@ -72,6 +74,7 @@ export function pathnameMatchesAllowed(pathname, allowedPages) {
   if (path === '/admin' || path === '/admin/profile' || path === '/admin/dashboard') return true
   /** Super-admin only (aligned with isNavItemAllowed for Utilisateurs). */
   if (path === '/admin/users' || path.startsWith('/admin/users/')) return false
+  if (path === '/admin/phone-changes' || path.startsWith('/admin/phone-changes/')) return false
   if (!Array.isArray(allowedPages) || allowedPages.length === 0) return false
   return allowedPages.some((p) => {
     const base = normalizeAdminPagePath(p)

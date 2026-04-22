@@ -199,6 +199,76 @@
 }
 .inv-profile__save:disabled { opacity: 0.5; cursor: not-allowed; }
 
+/* Phone-change demande block inside profile modal */
+.inv-profile__phone-change {
+  margin-top: 14px; padding-top: 14px;
+  border-top: 1px solid rgba(168, 204, 80, 0.15);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.inv-profile__phone-change-header {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+}
+.inv-profile__phone-change-title {
+  font-size: 12px; font-weight: 700; color: #d7e5d8;
+}
+.inv-profile__phone-change-toggle {
+  padding: 6px 10px; border-radius: 8px;
+  background: rgba(168, 204, 80, 0.12);
+  border: 1px solid rgba(168, 204, 80, 0.35);
+  color: #d7e5d8; font-size: 11px; font-weight: 700;
+  font-family: inherit; cursor: pointer;
+}
+.inv-profile__phone-change-toggle:hover { filter: brightness(1.1); }
+.inv-profile__phone-change-status {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 10px 12px; border-radius: 8px;
+  font-size: 11px; line-height: 1.4;
+}
+.inv-profile__phone-change-status--pending {
+  background: rgba(245, 200, 66, 0.1);
+  border: 1px solid rgba(245, 200, 66, 0.35);
+  color: #f5c842;
+}
+.inv-profile__phone-change-status--approved {
+  background: rgba(168, 204, 80, 0.1);
+  border: 1px solid rgba(168, 204, 80, 0.35);
+  color: #a8cc50;
+}
+.inv-profile__phone-change-status--rejected {
+  background: rgba(248, 113, 113, 0.1);
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  color: #fca5a5;
+}
+.inv-profile__phone-change-status strong { color: inherit; font-weight: 700; }
+.inv-profile__phone-change-note { opacity: 0.85; }
+.inv-profile__phone-change-form {
+  display: flex; flex-direction: column;
+  padding: 10px 12px; border-radius: 8px;
+  background: rgba(13, 26, 15, 0.6);
+  border: 1px solid rgba(168, 204, 80, 0.2);
+}
+.inv-profile__phone-change-actions {
+  display: flex; gap: 8px; margin-top: 10px;
+}
+.inv-profile__phone-change-cancel,
+.inv-profile__phone-change-submit {
+  flex: 1; padding: 8px; border-radius: 8px;
+  font-size: 11px; font-weight: 700; font-family: inherit;
+  cursor: pointer;
+}
+.inv-profile__phone-change-cancel {
+  background: transparent; color: #d7e5d8;
+  border: 1px solid rgba(141, 166, 142, 0.5);
+}
+.inv-profile__phone-change-submit {
+  background: linear-gradient(90deg, #7ab020, #a8cc50);
+  color: #0b150c; border: none;
+}
+.inv-profile__phone-change-cancel:disabled,
+.inv-profile__phone-change-submit:disabled {
+  opacity: 0.5; cursor: not-allowed;
+}
+
 /* ══════════════════════════════════════
    TABS
    ══════════════════════════════════════ */

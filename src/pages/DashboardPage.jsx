@@ -14,7 +14,14 @@ import {
   useSalesBySellerClientId,
   useSalesScoped,
 } from '../lib/useSupabase.js'
-import { addInstallmentReceiptRecord, requestAmbassadorPayout, updatePaymentStatus, uploadInstallmentReceipt } from '../lib/db.js'
+import {
+  addInstallmentReceiptRecord,
+  fetchMyPhoneChangeRequest,
+  requestAmbassadorPayout,
+  submitPhoneChangeRequest,
+  updatePaymentStatus,
+  uploadInstallmentReceipt,
+} from '../lib/db.js'
 import * as instMetrics from '../domain/installmentMetrics.js'
 import RenderDataGate from '../components/RenderDataGate.jsx'
 import EmptyState from '../components/EmptyState.jsx'
@@ -508,6 +515,53 @@ export default function DashboardPage() {
   const [profileSaving, setProfileSaving] = useState(false)
   const [profileMsg, setProfileMsg] = useState('')
 
+  // Phone-change demande (dashboard-side half of the super-admin flow).
+  const [phoneChange, setPhoneChange] = useState({
+    open: false,
+    newPhone: '',
+    reason: '',
+    saving: false,
+    msg: '',
+    request: null, // { id, status, requested_phone, created_at, reviewer_note, ... }
+    loading: false,
+  })
+
+  const loadMyPhoneChangeRequest = useCallback(async () => {
+    try {
+      setPhoneChange((p) => ({ ...p, loading: true }))
+      const req = await fetchMyPhoneChangeRequest()
+      setPhoneChange((p) => ({ ...p, request: req || null, loading: false }))
+    } catch (err) {
+      console.warn('[dashboard] fetchMyPhoneChangeRequest:', err?.message || err)
+      setPhoneChange((p) => ({ ...p, loading: false }))
+    }
+  }, [])
+
+  useEffect(() => {
+    if (showProfile) loadMyPhoneChangeRequest()
+  }, [showProfile, loadMyPhoneChangeRequest])
+
+  const handleSubmitPhoneChange = useCallback(async () => {
+    const trimmed = String(phoneChange.newPhone || '').trim()
+    if (trimmed.length < 6) {
+      setPhoneChange((p) => ({ ...p, msg: 'Numéro invalide (6 caractères minimum).' }))
+      return
+    }
+    setPhoneChange((p) => ({ ...p, saving: true, msg: '' }))
+    try {
+      await submitPhoneChangeRequest({ newPhone: trimmed, reason: phoneChange.reason || '' })
+      setPhoneChange((p) => ({ ...p, saving: false, msg: 'Demande envoyée.', newPhone: '', reason: '', open: false }))
+      await loadMyPhoneChangeRequest()
+    } catch (err) {
+      const raw = String(err?.message || err || '')
+      let msg = raw
+      if (/PHONE_UNCHANGED/i.test(raw)) msg = 'Le nouveau numéro est identique à l\'actuel.'
+      else if (/INVALID_PHONE/i.test(raw)) msg = 'Numéro invalide.'
+      else if (/NOT_AUTHENTICATED/i.test(raw)) msg = 'Session expirée : reconnectez-vous.'
+      setPhoneChange((p) => ({ ...p, saving: false, msg }))
+    }
+  }, [phoneChange.newPhone, phoneChange.reason, loadMyPhoneChangeRequest])
+
   const profileFields = useMemo(() => {
     const u = user || {}
     const adm = adminUser || {}
@@ -712,6 +766,116 @@ export default function DashboardPage() {
             >
               {profileSaving ? 'Enregistrement…' : 'Enregistrer'}
             </button>
+
+            {/* Phone-change demande. A client cannot edit phone directly —
+                they submit a request reviewed by a super admin. */}
+            <div className="inv-profile__phone-change">
+              <div className="inv-profile__phone-change-header">
+                <span className="inv-profile__phone-change-title">
+                  Changer le numéro de téléphone
+                </span>
+                {!phoneChange.open && !phoneChange.request && (
+                  <button
+                    type="button"
+                    className="inv-profile__phone-change-toggle"
+                    onClick={() => setPhoneChange((p) => ({ ...p, open: true, msg: '' }))}
+                  >
+                    Demander un changement
+                  </button>
+                )}
+              </div>
+
+              {phoneChange.request && phoneChange.request.status === 'pending' && (
+                <div className="inv-profile__phone-change-status inv-profile__phone-change-status--pending">
+                  <strong>Demande en cours</strong>
+                  <span>Nouveau numéro : <span dir="ltr">{phoneChange.request.requested_phone}</span></span>
+                  <span className="inv-profile__phone-change-note">
+                    Un super administrateur examinera votre demande.
+                  </span>
+                </div>
+              )}
+
+              {phoneChange.request && phoneChange.request.status === 'approved' && !phoneChange.open && (
+                <div className="inv-profile__phone-change-status inv-profile__phone-change-status--approved">
+                  <strong>Dernière demande approuvée</strong>
+                  <span>Numéro actuel : <span dir="ltr">{phoneChange.request.requested_phone}</span></span>
+                  <button
+                    type="button"
+                    className="inv-profile__phone-change-toggle"
+                    onClick={() => setPhoneChange((p) => ({ ...p, open: true, msg: '' }))}
+                  >
+                    Nouvelle demande
+                  </button>
+                </div>
+              )}
+
+              {phoneChange.request && phoneChange.request.status === 'rejected' && !phoneChange.open && (
+                <div className="inv-profile__phone-change-status inv-profile__phone-change-status--rejected">
+                  <strong>Dernière demande refusée</strong>
+                  {phoneChange.request.reviewer_note && (
+                    <span className="inv-profile__phone-change-note">
+                      Motif : {phoneChange.request.reviewer_note}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    className="inv-profile__phone-change-toggle"
+                    onClick={() => setPhoneChange((p) => ({ ...p, open: true, msg: '' }))}
+                  >
+                    Soumettre une nouvelle demande
+                  </button>
+                </div>
+              )}
+
+              {phoneChange.open && (
+                <div className="inv-profile__phone-change-form">
+                  <label className="inv-profile__label" htmlFor="pc-new-phone">
+                    Nouveau numéro
+                  </label>
+                  <input
+                    id="pc-new-phone"
+                    type="tel"
+                    dir="ltr"
+                    className="inv-profile__input"
+                    placeholder="+216 XX XXX XXX"
+                    value={phoneChange.newPhone}
+                    onChange={(e) => setPhoneChange((p) => ({ ...p, newPhone: e.target.value }))}
+                  />
+                  <label className="inv-profile__label" htmlFor="pc-reason" style={{ marginTop: 8 }}>
+                    Motif (optionnel)
+                  </label>
+                  <textarea
+                    id="pc-reason"
+                    className="inv-profile__input"
+                    rows={2}
+                    placeholder="Pourquoi voulez-vous changer de numéro ?"
+                    value={phoneChange.reason}
+                    onChange={(e) => setPhoneChange((p) => ({ ...p, reason: e.target.value }))}
+                  />
+                  {phoneChange.msg && (
+                    <p className="inv-profile__msg">{phoneChange.msg}</p>
+                  )}
+                  <div className="inv-profile__phone-change-actions">
+                    <button
+                      type="button"
+                      className="inv-profile__phone-change-cancel"
+                      onClick={() => setPhoneChange((p) => ({ ...p, open: false, msg: '' }))}
+                      disabled={phoneChange.saving}
+                    >
+                      Annuler
+                    </button>
+                    <button
+                      type="button"
+                      className="inv-profile__phone-change-submit"
+                      onClick={handleSubmitPhoneChange}
+                      disabled={phoneChange.saving || !phoneChange.newPhone.trim()}
+                    >
+                      {phoneChange.saving ? 'Envoi…' : 'Envoyer la demande'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         )}
 

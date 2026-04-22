@@ -4824,3 +4824,43 @@ export async function fetchCommissionTrackerData() {
     projects: prRes.data || [],
   }
 }
+
+// ===========================================================================
+// Phone-change requests — client-submitted demande + super-admin review.
+// Backed by database/dev/phone_change_requests.sql.
+// ===========================================================================
+
+export async function submitPhoneChangeRequest({ newPhone, reason = '' }) {
+  const res = await db().rpc('submit_phone_change_request', {
+    p_new_phone: newPhone,
+    p_reason: reason,
+  })
+  throwIfError(res, 'submitPhoneChangeRequest')
+  return res.data
+}
+
+export async function fetchMyPhoneChangeRequest() {
+  const res = await db().rpc('my_phone_change_request')
+  throwIfError(res, 'fetchMyPhoneChangeRequest')
+  return res.data?.request || null
+}
+
+export async function adminSearchPhoneChangeRequests({ emailQuery = '', status = '', limit = 50 } = {}) {
+  const res = await db().rpc('admin_search_phone_change_requests', {
+    p_email_query: emailQuery,
+    p_status: status,
+    p_limit: limit,
+  })
+  throwIfError(res, 'adminSearchPhoneChangeRequests')
+  return Array.isArray(res.data) ? res.data : []
+}
+
+export async function adminApplyPhoneChange({ requestId, approve, note = '' }) {
+  const res = await db().rpc('admin_apply_phone_change', {
+    p_request_id: requestId,
+    p_approve: Boolean(approve),
+    p_note: note,
+  })
+  throwIfError(res, 'adminApplyPhoneChange')
+  return res.data
+}
