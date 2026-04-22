@@ -186,14 +186,76 @@ export default function CommissionOrgChart({ data, selectedClientId, onNodeClick
   // --------- build maps ---------------------------------------------------
   const built = useMemo(() => {
     const clients = data?.clients || []
-    const rels = data?.sellerRelations || []
+    const authRels = data?.sellerRelations || []
     const events = data?.commissionEvents || []
     const sales = data?.sales || []
 
     const clientById = new Map(clients.map((c) => [asId(c.id), c]))
+
+    // Synthetic seller_relations derived from sales. Mirrors the
+    // trg_sales_auto_parrainage semantics: first sale's seller becomes the
+    // buyer's upline parent. We only add a synthetic row when no
+    // authoritative seller_relations row exists for that buyer — this patches
+    // over cases where the DB trigger missed (legacy sale, seller added via
+    // UPDATE after insert, trigger disabled on migration, etc.) so the chart
+    // reflects the real commercial network instead of showing orphan nodes.
+    const authChildSet = new Set()
+    for (const r of authRels) {
+      const c = asId(r.child_client_id ?? r.childClientId)
+      if (c) authChildSet.add(c)
+    }
+    const salesByTime = [...sales].sort((a, b) => {
+      const ta = new Date(a.notary_completed_at || a.notaryCompletedAt || 0).getTime()
+      const tb = new Date(b.notary_completed_at || b.notaryCompletedAt || 0).getTime()
+      return ta - tb
+    })
+    const syntheticRels = []
+    const syntheticClaimed = new Set()
+    for (const s of salesByTime) {
+      const buyer = asId(s.client_id ?? s.clientId)
+      const seller = asId(s.seller_client_id ?? s.sellerClientId)
+      if (!buyer || !seller || buyer === seller) continue
+      if (authChildSet.has(buyer) || syntheticClaimed.has(buyer)) continue
+      syntheticClaimed.add(buyer)
+      syntheticRels.push({
+        parent_client_id: seller,
+        child_client_id: buyer,
+        source_sale_id: asId(s.id) || null,
+        _synthetic: true,
+      })
+    }
+    const rels = authRels.concat(syntheticRels)
+    const syntheticEdgeKeys = new Set(
+      syntheticRels.map((r) => `${asId(r.parent_client_id)}→${asId(r.child_client_id)}`),
+    )
+
     const childrenMap = tree.buildChildrenMap(rels)
     const parentMap = tree.buildParentMap(rels)
-    const allIds = clients.map((c) => asId(c.id)).filter(Boolean)
+    const allIdsRaw = clients.map((c) => asId(c.id)).filter(Boolean)
+
+    // Relevance filter — a client is "in the network" iff it participates in
+    // a seller_relation (as parent or child), is the beneficiary of a
+    // commission_event, or is the seller on a finalized sale. Clients that
+    // match none of these are noise that turns the chart into a wasteland of
+    // disconnected single-node forests. Filtering here preserves clientById
+    // for the detail panel lookups that use the full dataset.
+    const relevantIds = new Set()
+    for (const r of rels) {
+      const p = asId(r.parent_client_id ?? r.parentClientId)
+      const c = asId(r.child_client_id ?? r.childClientId)
+      if (p) relevantIds.add(p)
+      if (c) relevantIds.add(c)
+    }
+    for (const e of events) {
+      const b = asId(e.beneficiary_client_id ?? e.beneficiaryClientId)
+      if (b) relevantIds.add(b)
+    }
+    for (const s of sales) {
+      const seller = asId(s.seller_client_id ?? s.sellerClientId)
+      if (seller) relevantIds.add(seller)
+    }
+    const allIds = allIdsRaw.filter((id) => relevantIds.has(id) && clientById.has(id))
+    const hiddenCount = allIdsRaw.length - allIds.length
 
     // Stats per client: total, paid, payable, pending, per-level, sales_made
     const statsById = new Map()
@@ -229,18 +291,29 @@ export default function CommissionOrgChart({ data, selectedClientId, onNodeClick
       salesCountBySeller.set(seller, (salesCountBySeller.get(seller) || 0) + 1)
     }
 
-    // Edges derived from seller_relations (plus source_sale_id when known)
+    // Edges derived from seller_relations (plus source_sale_id when known).
+    // `synthetic` flags the ones we inferred from sales above — styled
+    // dashed in render so reviewers can tell authoritative parrainage edges
+    // from sale-inferred ones.
     const edges = []
     for (const r of rels) {
       const parent = asId(r.parent_client_id ?? r.parentClientId)
       const child = asId(r.child_client_id ?? r.childClientId)
       if (!parent || !child) continue
       if (!clientById.has(parent) || !clientById.has(child)) continue
-      edges.push({ parent, child, sourceSaleId: asId(r.source_sale_id ?? r.sourceSaleId) || null })
+      const key = `${parent}→${child}`
+      edges.push({
+        parent,
+        child,
+        sourceSaleId: asId(r.source_sale_id ?? r.sourceSaleId) || null,
+        synthetic: syntheticEdgeKeys.has(key),
+      })
     }
 
     return {
       clientById, childrenMap, parentMap, allIds, edges, statsById, salesCountBySeller,
+      hiddenCount,
+      syntheticCount: syntheticRels.length,
     }
   }, [data])
 
@@ -259,6 +332,39 @@ export default function CommissionOrgChart({ data, selectedClientId, onNodeClick
     }
     return s
   }, [search, built.clientById])
+
+  // --------- lineage (ancestors + descendants of selected) ----------------
+  // When the user clicks a node we highlight its full vertical lineage so the
+  // "who refers whom" story is legible even when the tree is messy. Null when
+  // nothing is selected → normal (un-dimmed) view.
+  const selectedIdNorm = asId(selectedClientId) || null
+  const lineageIds = useMemo(() => {
+    if (!selectedIdNorm) return null
+    const s = new Set([selectedIdNorm])
+    // ancestors — walk up until parent is missing or we loop
+    let cur = selectedIdNorm
+    const seenUp = new Set([selectedIdNorm])
+    // DEFAULT_MAX_DEPTH is 40 in referralTree.js; same bound here guards cycles.
+    for (let i = 0; i < 40; i += 1) {
+      const p = built.parentMap.get(cur)
+      if (!p || seenUp.has(p)) break
+      seenUp.add(p); s.add(p); cur = p
+    }
+    // descendants — BFS, bounded by seen set (also kills cycles)
+    const queue = [selectedIdNorm]
+    const seenDown = new Set([selectedIdNorm])
+    while (queue.length) {
+      const node = queue.shift()
+      const kids = built.childrenMap.get(node)
+      if (!kids) continue
+      for (const k of kids) {
+        const kid = asId(k)
+        if (!kid || seenDown.has(kid)) continue
+        seenDown.add(kid); s.add(kid); queue.push(kid)
+      }
+    }
+    return s
+  }, [selectedIdNorm, built.parentMap, built.childrenMap])
 
   // --------- zoom + pan (transform-based: drag to pan, wheel to zoom) ------
   // Zoom toward a specific screen point, keeping that point "anchored" under
@@ -410,7 +516,7 @@ export default function CommissionOrgChart({ data, selectedClientId, onNodeClick
   }, [isPanning])
 
   // --------- selection highlight ------------------------------------------
-  const selectedId = asId(selectedClientId) || null
+  const selectedId = selectedIdNorm
   const handleCardClick = useCallback((id) => {
     // Suppress the click that fires at the end of a pan-drag.
     if (suppressNextClickRef.current) {
@@ -424,7 +530,10 @@ export default function CommissionOrgChart({ data, selectedClientId, onNodeClick
   const [hoverEdge, setHoverEdge] = useState(null)
 
   // --------- render -------------------------------------------------------
-  const clientsCount = built.clientById.size
+  // `allIds.length` = laid-out cards (post relevance-filter). `clientById.size`
+  // counts every client ever loaded — we want the visible count for empty
+  // detection so a fully-noise dataset still resolves to "empty network".
+  const clientsCount = built.allIds.length
   const isEmpty = clientsCount === 0
 
   const cursorClass = isPanning
@@ -446,10 +555,19 @@ export default function CommissionOrgChart({ data, selectedClientId, onNodeClick
         <input
           type="search"
           className="cog-toolbar__search"
-          placeholder={`Rechercher (${clientsCount}) …`}
+          placeholder={
+            built.hiddenCount > 0
+              ? `Rechercher (${clientsCount} actifs / ${built.hiddenCount} hors réseau) …`
+              : `Rechercher (${clientsCount}) …`
+          }
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           aria-label="Rechercher un membre du réseau"
+          title={
+            built.hiddenCount > 0
+              ? `${built.hiddenCount} clients sans rôle dans le réseau (aucun parrainage, aucune vente, aucune commission) sont masqués pour la lisibilité.`
+              : undefined
+          }
         />
         <button type="button" className="cog-toolbar__btn" onClick={() => zoomBy(-ZOOM_STEP)} aria-label="Zoom arrière" title="Zoom −">−</button>
         <span className="cog-toolbar__zoom" aria-live="polite">{Math.round(view.zoom * 100)}%</span>
@@ -466,6 +584,13 @@ export default function CommissionOrgChart({ data, selectedClientId, onNodeClick
         <div className="cog-legend__row"><span className="cog-legend__dot cog-legend__dot--g3" /> G3</div>
         <div className="cog-legend__row"><span className="cog-legend__dot cog-legend__dot--g4" /> G4+</div>
         <div className="cog-legend__hint">Flèche = parrain → filleul</div>
+        {built.syntheticCount > 0 ? (
+          <div className="cog-legend__hint cog-legend__hint--warn" title="Lien déduit d'une vente (aucun parrainage enregistré).">
+            <svg width="28" height="8" aria-hidden><line x1="0" y1="4" x2="28" y2="4" stroke="#94a3b8" strokeWidth="1.8" strokeDasharray="4 4" /></svg>
+            {' '}Trait pointillé = déduit d'une vente
+          </div>
+        ) : null}
+        <div className="cog-legend__hint">Cliquer : lignée complète (ascendants + descendants)</div>
         <div className="cog-legend__hint">Molette : zoom · Glisser : déplacer · Espace + glisser : partout</div>
       </div>
 
@@ -521,12 +646,19 @@ export default function CommissionOrgChart({ data, selectedClientId, onNodeClick
                 const p = layout.positions.get(edge.parent)
                 const c = layout.positions.get(edge.child)
                 if (!p || !c) return null
-                const isActive = selectedId && (selectedId === edge.parent || selectedId === edge.child)
+                // An edge is "active" when BOTH endpoints are in the selected
+                // node's lineage — i.e. it's part of the path linking the
+                // selection to its ancestors or descendants. This lights up
+                // the entire vertical spine instead of a single hop.
+                const isActive = Boolean(
+                  lineageIds && lineageIds.has(edge.parent) && lineageIds.has(edge.child),
+                )
                 const isHover = hoverEdge === i
+                const isDimmed = Boolean(lineageIds) && !isActive
                 return (
                   <g
                     key={`${edge.parent}-${edge.child}-${i}`}
-                    className={`cog-edge ${isActive ? 'cog-edge--active' : ''} ${isHover ? 'cog-edge--hover' : ''}`}
+                    className={`cog-edge ${isActive ? 'cog-edge--active' : ''} ${isHover ? 'cog-edge--hover' : ''} ${isDimmed ? 'cog-edge--dim' : ''} ${edge.synthetic ? 'cog-edge--synthetic' : ''}`}
                     onMouseEnter={() => setHoverEdge(i)}
                     onMouseLeave={() => setHoverEdge((h) => (h === i ? null : h))}
                   >
@@ -535,8 +667,15 @@ export default function CommissionOrgChart({ data, selectedClientId, onNodeClick
                       fill="none"
                       stroke={isActive ? '#1d4ed8' : '#cbd5e1'}
                       strokeWidth={isActive ? 2.5 : 1.8}
+                      strokeDasharray={edge.synthetic ? '4 4' : undefined}
                       markerEnd={`url(#${isActive ? 'cog-arrow--active' : 'cog-arrow'})`}
-                    />
+                    >
+                      {edge.synthetic ? (
+                        <title>
+                          {'Lien déduit d\'une vente — aucun parrainage enregistré dans seller_relations.'}
+                        </title>
+                      ) : null}
+                    </path>
                   </g>
                 )
               })}
@@ -552,7 +691,11 @@ export default function CommissionOrgChart({ data, selectedClientId, onNodeClick
               const genClass = GEN_CLASSES[Math.min(depth, GEN_CLASSES.length - 1)]
               const genLabel = GEN_LABELS[Math.min(depth, GEN_LABELS.length - 1)]
               const isSelected = selectedId === id
-              const isDimmed = searchMatchIds && !searchMatchIds.has(id)
+              // Dim if it fails the search filter OR (when something is
+              // selected) isn't in that node's upline/downline lineage.
+              const isDimmed =
+                (searchMatchIds && !searchMatchIds.has(id))
+                || (lineageIds && !lineageIds.has(id))
               return (
                 <button
                   type="button"

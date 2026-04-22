@@ -44,9 +44,12 @@
   top: 0;
   pointer-events: none;
 }
-.cog-edge path { pointer-events: stroke; cursor: default; transition: stroke 0.15s; }
+.cog-edge path { pointer-events: stroke; cursor: default; transition: stroke 0.15s, opacity 0.15s; }
 .cog-edge--hover path { stroke: #64748b !important; }
 .cog-edge--active path { stroke: #1d4ed8 !important; }
+/* When a node is selected, edges outside the selected node's lineage fade
+   back so the active spine reads as the primary relationship. */
+.cog-edge--dim path { opacity: 0.18; }
 
 /* ---- Cards ---- */
 .cog-card {
@@ -332,6 +335,14 @@
   color: #64748b;
   font-style: italic;
 }
+.cog-legend__hint--warn {
+  color: #b45309;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-style: normal;
+}
+.cog-legend__hint--warn svg { flex-shrink: 0; }
 
 /* ============================================================================
    Empty state

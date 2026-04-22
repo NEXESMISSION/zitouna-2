@@ -89,13 +89,43 @@ export default function CommissionDetailPanel({ clientId, data, onClose }) {
     if (!clientId || !data) return null
     const clients = data.clients || []
     const events = data.commissionEvents || []
-    const rels = data.sellerRelations || []
+    const authRels = data.sellerRelations || []
     const sales = data.sales || []
     const projects = data.projects || []
 
     const idStr = asStr(clientId)
     const client = clients.find((c) => asStr(c.id) === idStr)
     if (!client) return null
+
+    // Mirror the org chart's synthetic-relation logic so lineage numbers
+    // (ancestors, filleuls directs, Gen) stay consistent with the tree view
+    // when the DB trigger trg_sales_auto_parrainage missed a row.
+    const authChildSet = new Set()
+    for (const r of authRels) {
+      const c = asStr(r.child_client_id ?? r.childClientId)
+      if (c) authChildSet.add(c)
+    }
+    const salesByTime = [...sales].sort((a, b) => {
+      const ta = new Date(a.notary_completed_at || a.notaryCompletedAt || 0).getTime()
+      const tb = new Date(b.notary_completed_at || b.notaryCompletedAt || 0).getTime()
+      return ta - tb
+    })
+    const syntheticRels = []
+    const syntheticClaimed = new Set()
+    for (const s of salesByTime) {
+      const buyer = asStr(s.client_id ?? s.clientId)
+      const seller = asStr(s.seller_client_id ?? s.sellerClientId)
+      if (!buyer || !seller || buyer === seller) continue
+      if (authChildSet.has(buyer) || syntheticClaimed.has(buyer)) continue
+      syntheticClaimed.add(buyer)
+      syntheticRels.push({
+        parent_client_id: seller,
+        child_client_id: buyer,
+        source_sale_id: asStr(s.id) || null,
+      })
+    }
+    const rels = authRels.concat(syntheticRels)
+    const syntheticChildSet = new Set(syntheticClaimed)
 
     const parentMap = tree.buildParentMap(rels)
     const childMap = tree.buildChildrenMap(rels)
@@ -192,6 +222,7 @@ export default function CommissionDetailPanel({ clientId, data, onClose }) {
       client, ancestors, directChildren, filleulSalesCount,
       salesAsSeller, purchases,
       events: myEvents, stats, sellerTotals, buyerTotals, gen,
+      syntheticChildSet,
     }
   }, [clientId, data])
 
@@ -214,6 +245,7 @@ export default function CommissionDetailPanel({ clientId, data, onClose }) {
     client, ancestors, directChildren, filleulSalesCount,
     salesAsSeller, purchases,
     events, stats, sellerTotals, buyerTotals, gen,
+    syntheticChildSet,
   } = payload
   const genClass = gen === 1 ? 'cdp__gen--root'
     : gen === 2 ? 'cdp__gen--l1'
@@ -393,11 +425,20 @@ export default function CommissionDetailPanel({ clientId, data, onClose }) {
               <ul className="cdp__children">
                 {directChildren.map((c) => {
                   const n = filleulSalesCount.get(asStr(c.id)) || 0
+                  const isInferred = syntheticChildSet?.has(asStr(c.id))
                   return (
                     <li key={c.id} className="cdp__child">
                       <span className="cdp__child-avatar" aria-hidden="true">{clientInitials(c)}</span>
                       <span className="cdp__child-name">{clientDisplayName(c)}</span>
                       {n > 0 ? <span className="cdp__child-meta">{n} vente{n > 1 ? 's' : ''}</span> : null}
+                      {isInferred ? (
+                        <span
+                          className="cdp__child-meta cdp__child-meta--warn"
+                          title="Lien déduit d'une vente — aucun parrainage enregistré dans seller_relations. Exécuter backfill_parrainage_from_sales() pour le matérialiser."
+                        >
+                          déduit
+                        </span>
+                      ) : null}
                     </li>
                   )
                 })}

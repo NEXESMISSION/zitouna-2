@@ -555,6 +555,11 @@
   border-radius: 4px;
   white-space: nowrap;
 }
+/* "déduit" pill for filleuls synthesized from sales (no seller_relations row) */
+.cdp__child-meta--warn {
+  color: #b45309;
+  background: #fef3c7;
+}
 
 /* ---- Body spacing tweak for new groups ------------------------- */
 .cdp__body { gap: 22px; }
