@@ -186,7 +186,6 @@ export default function DashboardPage() {
   const harvestThisYearTnd = (harvestDistributions || [])
     .filter((d) => d.harvestYear === currentYear)
     .reduce((s, d) => s + d.amountTnd, 0)
-  const harvestLifetimeTnd = (harvestDistributions || []).reduce((s, d) => s + d.amountTnd, 0)
   const nextHarvest = (upcomingHarvests || []).find(
     (h) => h.status === 'planned' || h.status === 'in_progress',
   ) || null
@@ -939,67 +938,6 @@ export default function DashboardPage() {
                     </div>
                   </div>
                 </div>
-              </section>
-
-              {/* ── Two income tracks: Récoltes (harvests) + Commissions ── */}
-              <section className="zb-income-tracks">
-                <article
-                  className="zb-income zb-income--harvest"
-                  onClick={() => navigate('/my/harvests')}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(e) => { if (e.key === 'Enter') navigate('/my/harvests') }}
-                >
-                  <div className="zb-income-head">
-                    <div className="zb-income-ic">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M12 3c4 3 6 7 6 11a6 6 0 0 1-12 0c0-4 2-8 6-11z" />
-                        <path d="M12 14v6" />
-                      </svg>
-                    </div>
-                    <div className="zb-income-head-tx">
-                      <div className="zb-income-t">Récoltes</div>
-                      <div className="zb-income-s">Revenu annuel des oliviers</div>
-                    </div>
-                  </div>
-                  <div className="zb-income-v">
-                    {Math.round(harvestThisYearTnd).toLocaleString('fr-FR')}
-                    <span className="zb-s">TND</span>
-                  </div>
-                  <div className="zb-income-meta">
-                    cette année · {Math.round(harvestLifetimeTnd).toLocaleString('fr-FR')} TND cumulé
-                  </div>
-                  <div className="zb-income-foot">Voir l&apos;historique →</div>
-                </article>
-
-                <article
-                  className="zb-income zb-income--commission"
-                  onClick={() => navigate('/my/commissions')}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(e) => { if (e.key === 'Enter') navigate('/my/commissions') }}
-                >
-                  <div className="zb-income-head">
-                    <div className="zb-income-ic">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                        <circle cx="6" cy="6" r="2.5" /><circle cx="18" cy="6" r="2.5" /><circle cx="12" cy="18" r="2.5" />
-                        <path d="M7.8 7.8l3.4 8.4M16.2 7.8l-3.4 8.4" />
-                      </svg>
-                    </div>
-                    <div className="zb-income-head-tx">
-                      <div className="zb-income-t">Commissions</div>
-                      <div className="zb-income-s">Parrainage direct + indirect</div>
-                    </div>
-                  </div>
-                  <div className="zb-income-v">
-                    {Math.round(Number(referralSummary?.commissionsReleased) || 0).toLocaleString('fr-FR')}
-                    <span className="zb-s">TND</span>
-                  </div>
-                  <div className="zb-income-meta">
-                    {Math.round(Number(referralSummary?.walletBalance) || 0).toLocaleString('fr-FR')} TND disponible
-                  </div>
-                  <div className="zb-income-foot">Voir le détail →</div>
-                </article>
               </section>
 
               {/* ── Prochaine récolte — featured card when one exists ── */}
