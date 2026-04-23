@@ -1,5 +1,5 @@
 import { Suspense, useEffect } from 'react'
-import { Routes, Route, Navigate, useParams, useLocation } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import AppErrorBoundary from './components/AppErrorBoundary.jsx'
 import ChunkErrorBoundary from './components/ChunkErrorBoundary.jsx'
 import RequireCustomerAuth from './components/RequireCustomerAuth.jsx'
@@ -18,10 +18,15 @@ const ResetPasswordPage = lazyWithRetry(() => import('./pages/ResetPasswordPage.
 const BrowsePage = lazyWithRetry(() => import('./pages/BrowsePage.jsx'))
 const DashboardPage = lazyWithRetry(() => import('./pages/DashboardPage.jsx'))
 const InstallmentsPage = lazyWithRetry(() => import('./pages/InstallmentsPage.jsx'))
+const MyCommissionsPage = lazyWithRetry(() => import('./pages/MyCommissionsPage.jsx'))
+const MyPayoutPage = lazyWithRetry(() => import('./pages/MyPayoutPage.jsx'))
+const MyActivityPage = lazyWithRetry(() => import('./pages/MyActivityPage.jsx'))
+const MyParcellesPage = lazyWithRetry(() => import('./pages/MyParcellesPage.jsx'))
+const MyTreePage = lazyWithRetry(() => import('./pages/MyTreePage.jsx'))
+const MyHarvestsPage = lazyWithRetry(() => import('./pages/MyHarvestsPage.jsx'))
+const MyProfilePage = lazyWithRetry(() => import('./pages/MyProfilePage.jsx'))
 const ProjectPage = lazyWithRetry(() => import('./pages/ProjectPage.jsx'))
 const PlotPage = lazyWithRetry(() => import('./pages/PlotPage.jsx'))
-const PurchaseMandatPage = lazyWithRetry(() => import('./pages/PurchaseMandatPage.jsx'))
-const VisitSuccessPage = lazyWithRetry(() => import('./pages/VisitSuccessPage.jsx'))
 const ReferralInvitePage = lazyWithRetry(() => import('./pages/ReferralInvitePage.jsx'))
 
 const AdminLayout = lazyWithRetry(() => import('./admin/AdminLayout.jsx'))
@@ -44,13 +49,17 @@ const CallCenterPage = lazyWithRetry(() => import('./admin/pages/CallCenterPage.
 const CallCenterCalendarPage = lazyWithRetry(() => import('./admin/pages/CallCenterCalendarPage.jsx'))
 const CommercialCalendarPage = lazyWithRetry(() => import('./admin/pages/CommercialCalendarPage.jsx'))
 const CommissionLedgerPage = lazyWithRetry(() => import('./admin/pages/CommissionLedgerPage.jsx'))
+const CommissionsShell = lazyWithRetry(() => import('./admin/components/commissions/CommissionsShell.jsx'))
+const CommissionsOverviewPage = lazyWithRetry(() => import('./admin/pages/CommissionsOverviewPage.jsx'))
 const ClientLinkRepairPage = lazyWithRetry(() => import('./admin/pages/ClientLinkRepairPage.jsx'))
 const PhoneChangesPage = lazyWithRetry(() => import('./admin/pages/PhoneChangesPage.jsx'))
 const CommissionAnomaliesPage = lazyWithRetry(() => import('./admin/pages/CommissionAnomaliesPage.jsx'))
 const CommissionAnalyticsPage = lazyWithRetry(() => import('./admin/pages/CommissionAnalyticsPage.jsx'))
+const ReverseGrantsPage = lazyWithRetry(() => import('./admin/pages/ReverseGrantsPage.jsx'))
 const DangerZonePage = lazyWithRetry(() => import('./admin/pages/DangerZonePage.jsx'))
 // RESEARCH 05 §5: was eagerly imported — now lazy, consistent with the rest.
 const CommissionTrackerPage = lazyWithRetry(() => import('./admin/pages/CommissionTrackerPage.jsx'))
+const DistributionsPage = lazyWithRetry(() => import('./admin/pages/DistributionsPage.jsx'))
 
 // Wire each lazy component into the preload registry so nav surfaces can
 // warm the chunk on hover/focus/idle. When the user finally clicks, the
@@ -71,19 +80,17 @@ const PRELOAD_PAIRS = [
   ['/admin/call-center', CallCenterPage],
   ['/admin/call-center/calendar', CallCenterCalendarPage],
   ['/admin/commercial-calendar', CommercialCalendarPage],
-  ['/admin/commissions', CommissionTrackerPage],
-  ['/admin/commission-ledger', CommissionLedgerPage],
+  ['/admin/commissions', CommissionsOverviewPage],
+  ['/admin/commissions/network', CommissionTrackerPage],
+  ['/admin/commissions/ledger', CommissionLedgerPage],
   ['/admin/commissions/analytics', CommissionAnalyticsPage],
+  ['/admin/commissions/reverse-grants', ReverseGrantsPage],
   ['/admin/commissions/anomalies', CommissionAnomaliesPage],
+  ['/admin/distributions', DistributionsPage],
   ['/admin/client-link-repair', ClientLinkRepairPage],
 ]
 for (const [path, Comp] of PRELOAD_PAIRS) {
   if (typeof Comp?.preload === 'function') registerRoutePreloader(path, Comp.preload)
-}
-
-function LegacyMandatToVisiteRedirect() {
-  const { id } = useParams()
-  return <Navigate to={`/project/${id}/visite`} replace />
 }
 
 // Landing behavior for "/": logged-in clients land on their dashboard
@@ -91,15 +98,11 @@ function LegacyMandatToVisiteRedirect() {
 // bootstrapping we keep the page blank — Suspense fallback has already
 // rendered the skeleton, re-rendering here would just flash.
 function RootLanding() {
-  const { ready, isAuthenticated, adminUser } = useAuth()
+  const { ready } = useAuth()
   if (!ready) return null
-  // Staff have their own hub at /admin — keep them in the customer-facing
-  // browse flow by default, but logged-in clients always go to their
-  // dashboard as their "home".
-  if (isAuthenticated && !adminUser) {
-    return <Navigate to="/dashboard" replace />
-  }
-  return <BrowsePage />
+  // Everyone lands on /dashboard (incl. staff/admins). Admin area is
+  // reachable from the sidebar for those who have access.
+  return <Navigate to="/dashboard" replace />
 }
 
 function ScrollToTopOnRouteChange() {
@@ -168,7 +171,9 @@ export default function App() {
         <Route path="/browse"                          element={<BrowsePage />} />
         <Route path="/project/:id"                     element={<ProjectPage />} />
         <Route path="/project/:projectId/plot/:plotId" element={<PlotPage />} />
-        <Route path="/project/:id/mandat"              element={<LegacyMandatToVisiteRedirect />} />
+        <Route path="/project/:id/mandat"              element={<Navigate to="/browse" replace />} />
+        <Route path="/project/:id/visite"              element={<Navigate to="/browse" replace />} />
+        <Route path="/project/:id/visite/success"      element={<Navigate to="/browse" replace />} />
         <Route path="/owner"                           element={<Navigate to="/browse" replace />} />
         <Route path="/ref/:code"                       element={<ReferralInvitePage />} />
 
@@ -179,10 +184,15 @@ export default function App() {
         <Route path="/reset-password"   element={<ResetPasswordPage />} />
 
         {/* Customer portfolio (auth required when Supabase is configured) */}
-        <Route path="/dashboard"    element={<RequireCustomerAuth><DashboardPage /></RequireCustomerAuth>} />
-        <Route path="/installments" element={<RequireCustomerAuth><InstallmentsPage /></RequireCustomerAuth>} />
-        <Route path="/project/:id/visite"         element={<PurchaseMandatPage />} />
-        <Route path="/project/:id/visite/success" element={<VisitSuccessPage />} />
+        <Route path="/dashboard"      element={<RequireCustomerAuth><DashboardPage /></RequireCustomerAuth>} />
+        <Route path="/installments"   element={<RequireCustomerAuth><InstallmentsPage /></RequireCustomerAuth>} />
+        <Route path="/my/commissions" element={<RequireCustomerAuth><MyCommissionsPage /></RequireCustomerAuth>} />
+        <Route path="/my/payout"      element={<RequireCustomerAuth><MyPayoutPage /></RequireCustomerAuth>} />
+        <Route path="/my/activity"    element={<RequireCustomerAuth><MyActivityPage /></RequireCustomerAuth>} />
+        <Route path="/my/parcelles"   element={<RequireCustomerAuth><MyParcellesPage /></RequireCustomerAuth>} />
+        <Route path="/my/tree"        element={<RequireCustomerAuth><MyTreePage /></RequireCustomerAuth>} />
+        <Route path="/my/harvests"    element={<RequireCustomerAuth><MyHarvestsPage /></RequireCustomerAuth>} />
+        <Route path="/my/profile"     element={<RequireCustomerAuth><MyProfilePage /></RequireCustomerAuth>} />
 
         {/* Admin (no auth required now) */}
         <Route path="/admin" element={<RequireStaff><AdminLayout /></RequireStaff>}>
@@ -194,10 +204,20 @@ export default function App() {
           <Route path="clients"              element={<ClientsPage />} />
           <Route path="clients/:clientId"    element={<ClientProfilePage />} />
           <Route path="finance"              element={<FinanceDashboardPage />} />
-          <Route path="commission-ledger" element={<CommissionLedgerPage />} />
-          <Route path="commissions" element={<CommissionTrackerPage />} />
-          <Route path="commissions/analytics" element={<CommissionAnalyticsPage />} />
-          <Route path="commissions/anomalies" element={<CommissionAnomaliesPage />} />
+          {/* Unified commissions shell: /admin/commissions/* with tabbed sub-routes.
+              Legacy routes (/admin/commission-ledger, /admin/commissions/anomalies,
+              /admin/commissions/analytics) are preserved and redirected below so
+              bookmarks keep working. */}
+          <Route path="commissions" element={<CommissionsShell />}>
+            <Route index                element={<CommissionsOverviewPage />} />
+            <Route path="network"       element={<CommissionTrackerPage />} />
+            <Route path="ledger"        element={<CommissionLedgerPage />} />
+            <Route path="analytics"      element={<CommissionAnalyticsPage />} />
+            <Route path="reverse-grants" element={<ReverseGrantsPage />} />
+            <Route path="anomalies"      element={<CommissionAnomaliesPage />} />
+          </Route>
+          <Route path="commission-ledger" element={<Navigate to="/admin/commissions/ledger" replace />} />
+          <Route path="distributions"      element={<DistributionsPage />} />
           <Route path="legal"                element={<NotaryDashboardPage />} />
           <Route path="coordination"         element={<CoordinationPage />} />
           <Route path="juridique"            element={<ServiceJuridiquePage />} />

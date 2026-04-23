@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import * as tree from '../lib/referralTree.js'
+import { resolveUpline } from '../lib/resolveUpline.js'
 import './commission-org-chart.css'
 
 // =============================================================================
@@ -155,14 +155,17 @@ function layoutForest(clientIds, childrenMap, parentMap) {
   return { positions: pxPositions, width, height, maxDepth }
 }
 
-// Right-angle connector: down from parent bottom → horizontal to child column → down to child top.
+// Right-angle connector: down from parent bottom → horizontal to child column
+// → down to a point just ABOVE the child so the arrow head sits clearly in
+// the gap between cards (instead of being swallowed by the card's top edge).
+// Direction is seller/sponsor (parent) → buyer/filleul (child).
+const ARROW_GAP = 12
 function connectorPath(parent, child) {
   const x1 = parent.x + CARD_W / 2
   const y1 = parent.y + CARD_H
   const x2 = child.x + CARD_W / 2
-  const y2 = child.y
+  const y2 = child.y - ARROW_GAP
   const midY = y1 + (y2 - y1) / 2
-  // Straight vertical if aligned.
   if (Math.abs(x1 - x2) < 1) {
     return `M ${x1} ${y1} L ${x1} ${y2}`
   }
@@ -189,6 +192,7 @@ export default function CommissionOrgChart({ data, selectedClientId, onNodeClick
     const authRels = data?.sellerRelations || []
     const events = data?.commissionEvents || []
     const sales = data?.sales || []
+    const reverseGrants = data?.reverseGrants || []
 
     const clientById = new Map(clients.map((c) => [asId(c.id), c]))
 
@@ -199,38 +203,21 @@ export default function CommissionOrgChart({ data, selectedClientId, onNodeClick
     // over cases where the DB trigger missed (legacy sale, seller added via
     // UPDATE after insert, trigger disabled on migration, etc.) so the chart
     // reflects the real commercial network instead of showing orphan nodes.
-    const authChildSet = new Set()
-    for (const r of authRels) {
-      const c = asId(r.child_client_id ?? r.childClientId)
-      if (c) authChildSet.add(c)
-    }
-    const salesByTime = [...sales].sort((a, b) => {
-      const ta = new Date(a.notary_completed_at || a.notaryCompletedAt || 0).getTime()
-      const tb = new Date(b.notary_completed_at || b.notaryCompletedAt || 0).getTime()
-      return ta - tb
+    // Shared resolver — stable tie-breaker (see resolveUpline.js) so the
+    // tree chart and the detail panel never disagree about a client's
+    // parent when two sales share the same notary_completed_at timestamp.
+    const { rels, parentMap, childrenMap, syntheticChildSet } = resolveUpline({
+      sellerRelations: authRels,
+      sales,
     })
-    const syntheticRels = []
-    const syntheticClaimed = new Set()
-    for (const s of salesByTime) {
-      const buyer = asId(s.client_id ?? s.clientId)
-      const seller = asId(s.seller_client_id ?? s.sellerClientId)
-      if (!buyer || !seller || buyer === seller) continue
-      if (authChildSet.has(buyer) || syntheticClaimed.has(buyer)) continue
-      syntheticClaimed.add(buyer)
-      syntheticRels.push({
-        parent_client_id: seller,
-        child_client_id: buyer,
-        source_sale_id: asId(s.id) || null,
-        _synthetic: true,
-      })
+    const syntheticEdgeKeys = new Set()
+    for (const r of rels) {
+      const child = asId(r.child_client_id ?? r.childClientId)
+      if (syntheticChildSet.has(child)) {
+        const parent = asId(r.parent_client_id ?? r.parentClientId)
+        syntheticEdgeKeys.add(`${parent}→${child}`)
+      }
     }
-    const rels = authRels.concat(syntheticRels)
-    const syntheticEdgeKeys = new Set(
-      syntheticRels.map((r) => `${asId(r.parent_client_id)}→${asId(r.child_client_id)}`),
-    )
-
-    const childrenMap = tree.buildChildrenMap(rels)
-    const parentMap = tree.buildParentMap(rels)
     const allIdsRaw = clients.map((c) => asId(c.id)).filter(Boolean)
 
     // Relevance filter — a client is "in the network" iff it participates in
@@ -291,6 +278,41 @@ export default function CommissionOrgChart({ data, selectedClientId, onNodeClick
       salesCountBySeller.set(seller, (salesCountBySeller.get(seller) || 0) + 1)
     }
 
+    // Reverse sales: the buyer is already an ancestor of the seller in the
+    // upline tree, so the sale flows "up" the hierarchy instead of down.
+    // The commission engine truncates the chain at the buyer (see
+    // compute_and_insert_commissions_for_sale in database/03_functions.sql)
+    // so there's no illegal payout — but the forward parrainage edge alone
+    // hides that a second, reverse commercial transaction happened between
+    // these two clients. Surface it explicitly here.
+    const reverseEdges = [] // [{ saleId, seller, buyer }]
+    const reverseSalesById = new Map() // clientId -> count
+    const reverseEdgeKeys = new Set()  // dedupe on (seller→buyer)
+    for (const s of sales) {
+      const seller = asId(s.seller_client_id ?? s.sellerClientId)
+      const buyer  = asId(s.client_id ?? s.clientId)
+      if (!seller || !buyer || seller === buyer) continue
+      if (!clientById.has(seller) || !clientById.has(buyer)) continue
+      // Walk up from the seller — if we hit the buyer, the buyer sits above
+      // the seller in the tree, i.e. the sale is reverse relative to the
+      // parrainage direction. `seen` also guards against cycles.
+      const seen = new Set([seller])
+      let cur = parentMap.get(seller)
+      let isReverse = false
+      while (cur && !seen.has(cur)) {
+        if (cur === buyer) { isReverse = true; break }
+        seen.add(cur)
+        cur = parentMap.get(cur)
+      }
+      if (!isReverse) continue
+      const key = `${seller}→${buyer}`
+      reverseSalesById.set(seller, (reverseSalesById.get(seller) || 0) + 1)
+      reverseSalesById.set(buyer,  (reverseSalesById.get(buyer)  || 0) + 1)
+      if (reverseEdgeKeys.has(key)) continue
+      reverseEdgeKeys.add(key)
+      reverseEdges.push({ saleId: asId(s.id), seller, buyer })
+    }
+
     // Edges derived from seller_relations (plus source_sale_id when known).
     // `synthetic` flags the ones we inferred from sales above — styled
     // dashed in render so reviewers can tell authoritative parrainage edges
@@ -310,10 +332,83 @@ export default function CommissionOrgChart({ data, selectedClientId, onNodeClick
       })
     }
 
+    // Reverse-sale grants: purple directed edge from source → beneficiary
+    // representing the acquired right (distinct from the red dashed arrow,
+    // which is the transaction). For hover-highlight we precompute the
+    // qualifying subtree — descendants of `source` whose incoming edge from
+    // their parent was linked AFTER the grant's effective_from.
+    const grantEdges = []
+    const grantCountsBySource = new Map()       // sourceId -> active grant count
+    const grantCountsByBeneficiary = new Map()  // beneficiaryId -> active grant count
+    const grantQualifyingNodesById = new Map()  // grantId -> Set<nodeId>
+    const edgeLinkedAtByKey = new Map()
+    for (const r of rels) {
+      const p = asId(r.parent_client_id ?? r.parentClientId)
+      const c = asId(r.child_client_id ?? r.childClientId)
+      const at = r.linked_at ?? r.linkedAt
+      if (p && c && at) edgeLinkedAtByKey.set(`${p}→${c}`, Date.parse(at))
+    }
+    for (const g of reverseGrants) {
+      if ((g?.status || 'active') !== 'active') continue
+      const source = asId(g.source_client_id ?? g.sourceClientId)
+      const beneficiary = asId(g.beneficiary_client_id ?? g.beneficiaryClientId)
+      if (!source || !beneficiary) continue
+      if (!clientById.has(source) || !clientById.has(beneficiary)) continue
+      const effTs = Date.parse(g.effective_from ?? g.effectiveFrom ?? '')
+      grantCountsBySource.set(source, (grantCountsBySource.get(source) || 0) + 1)
+      grantCountsByBeneficiary.set(beneficiary, (grantCountsByBeneficiary.get(beneficiary) || 0) + 1)
+
+      // BFS descendants of source in the parent/children graph. Include a
+      // descendant in the qualifying set when the edge (parent → this node)
+      // was linked AFTER effective_from.
+      const qualifying = new Set()
+      const seen = new Set([source])
+      const queue = [source]
+      while (queue.length) {
+        const cur = queue.shift()
+        const kids = childrenMap.get(cur)
+        if (!kids) continue
+        for (const rawKid of kids) {
+          const kid = asId(rawKid)
+          if (!kid || seen.has(kid)) continue
+          seen.add(kid)
+          const edgeAt = edgeLinkedAtByKey.get(`${cur}→${kid}`)
+          if (Number.isFinite(edgeAt) && Number.isFinite(effTs) && edgeAt > effTs) {
+            qualifying.add(kid)
+            // Descendants of a qualifying node also inherit eligibility.
+            const sub = [kid]
+            const subSeen = new Set([kid])
+            while (sub.length) {
+              const n = sub.shift()
+              const nk = childrenMap.get(n)
+              if (!nk) continue
+              for (const rk of nk) {
+                const kk = asId(rk)
+                if (!kk || subSeen.has(kk)) continue
+                subSeen.add(kk); qualifying.add(kk); sub.push(kk)
+              }
+            }
+          }
+          queue.push(kid)
+        }
+      }
+
+      grantEdges.push({
+        id: asId(g.id),
+        source,
+        beneficiary,
+        effectiveFrom: g.effective_from ?? g.effectiveFrom,
+        triggerSaleId: asId(g.trigger_sale_id ?? g.triggerSaleId),
+      })
+      grantQualifyingNodesById.set(asId(g.id), qualifying)
+    }
+
     return {
       clientById, childrenMap, parentMap, allIds, edges, statsById, salesCountBySeller,
       hiddenCount,
-      syntheticCount: syntheticRels.length,
+      syntheticCount: syntheticChildSet.size,
+      reverseEdges, reverseSalesById,
+      grantEdges, grantCountsBySource, grantCountsByBeneficiary, grantQualifyingNodesById,
     }
   }, [data])
 
@@ -528,6 +623,7 @@ export default function CommissionOrgChart({ data, selectedClientId, onNodeClick
 
   // --------- edge hover ---------------------------------------------------
   const [hoverEdge, setHoverEdge] = useState(null)
+  const [hoverGrantId, setHoverGrantId] = useState(null)
 
   // --------- render -------------------------------------------------------
   // `allIds.length` = laid-out cards (post relevance-filter). `clientById.size`
@@ -583,11 +679,29 @@ export default function CommissionOrgChart({ data, selectedClientId, onNodeClick
         <div className="cog-legend__row"><span className="cog-legend__dot cog-legend__dot--g2" /> G2</div>
         <div className="cog-legend__row"><span className="cog-legend__dot cog-legend__dot--g3" /> G3</div>
         <div className="cog-legend__row"><span className="cog-legend__dot cog-legend__dot--g4" /> G4+</div>
-        <div className="cog-legend__hint">Flèche = parrain → filleul</div>
+        <div className="cog-legend__hint">
+          <svg width="28" height="8" aria-hidden style={{ verticalAlign: 'middle', marginRight: 4 }}>
+            <line x1="0" y1="4" x2="22" y2="4" stroke="#3b82f6" strokeWidth="2.4" />
+            <path d="M 22 1 L 28 4 L 22 7 z" fill="#1d4ed8" />
+          </svg>
+          Flèche bleue = <strong>vendeur&nbsp;→&nbsp;filleul</strong>
+        </div>
         {built.syntheticCount > 0 ? (
           <div className="cog-legend__hint cog-legend__hint--warn" title="Lien déduit d'une vente (aucun parrainage enregistré).">
             <svg width="28" height="8" aria-hidden><line x1="0" y1="4" x2="28" y2="4" stroke="#94a3b8" strokeWidth="1.8" strokeDasharray="4 4" /></svg>
             {' '}Trait pointillé = déduit d'une vente
+          </div>
+        ) : null}
+        {built.reverseEdges.length > 0 ? (
+          <div className="cog-legend__hint cog-legend__hint--reverse" title="Un filleul a vendu à son parrain (ou ascendant). Le chaînage des commissions est tronqué.">
+            <svg width="28" height="8" aria-hidden><line x1="0" y1="4" x2="28" y2="4" stroke="#dc2626" strokeWidth="2" strokeDasharray="5 4" /></svg>
+            {' '}Flèche rouge = vente inversée ({built.reverseEdges.length})
+          </div>
+        ) : null}
+        {built.grantEdges.length > 0 ? (
+          <div className="cog-legend__hint cog-legend__hint--grant" title="Droit acquis via vente inversée : le bénéficiaire touche une commission L1 sur les ventes issues des nouveaux filleuls de la source, postérieurs à la date du droit.">
+            <svg width="28" height="8" aria-hidden><line x1="0" y1="4" x2="28" y2="4" stroke="#7c3aed" strokeWidth="2.2" /></svg>
+            {' '}Flèche violette = droit acquis ({built.grantEdges.length})
           </div>
         ) : null}
         <div className="cog-legend__hint">Cliquer : lignée complète (ascendants + descendants)</div>
@@ -619,29 +733,142 @@ export default function CommissionOrgChart({ data, selectedClientId, onNodeClick
               aria-hidden
             >
               <defs>
+                {/* Bigger, higher-contrast head so the direction
+                    (parrain → filleul) reads at any zoom level. */}
                 <marker
                   id="cog-arrow"
                   viewBox="0 0 10 10"
-                  refX="8"
+                  refX="9"
                   refY="5"
-                  markerWidth="6"
-                  markerHeight="6"
-                  orient="auto-start-reverse"
-                >
-                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8" />
-                </marker>
-                <marker
-                  id="cog-arrow--active"
-                  viewBox="0 0 10 10"
-                  refX="8"
-                  refY="5"
-                  markerWidth="6"
-                  markerHeight="6"
+                  markerWidth="14"
+                  markerHeight="14"
                   orient="auto-start-reverse"
                 >
                   <path d="M 0 0 L 10 5 L 0 10 z" fill="#1d4ed8" />
                 </marker>
+                {/* Mid-path arrow used on straight vertical runs so the
+                    direction is legible even when the head is clipped
+                    behind the child card. */}
+                <marker
+                  id="cog-arrow-mid"
+                  viewBox="0 0 10 10"
+                  refX="5"
+                  refY="5"
+                  markerWidth="10"
+                  markerHeight="10"
+                  orient="auto"
+                >
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#1d4ed8" />
+                </marker>
+                <marker
+                  id="cog-arrow--active"
+                  viewBox="0 0 10 10"
+                  refX="9"
+                  refY="5"
+                  markerWidth="16"
+                  markerHeight="16"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#1d4ed8" />
+                </marker>
+                <marker
+                  id="cog-arrow--reverse"
+                  viewBox="0 0 10 10"
+                  refX="8"
+                  refY="5"
+                  markerWidth="7"
+                  markerHeight="7"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#dc2626" />
+                </marker>
+                <marker
+                  id="cog-arrow--grant"
+                  viewBox="0 0 10 10"
+                  refX="8"
+                  refY="5"
+                  markerWidth="7"
+                  markerHeight="7"
+                  orient="auto-start-reverse"
+                >
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#7c3aed" />
+                </marker>
               </defs>
+              {/* Reverse-sale back-arrows — drawn before forward edges so
+                  they sit underneath, then a second pass on top for clarity.
+                  A reverse sale flows seller → buyer where buyer is already
+                  an ancestor of the seller. We bow the curve out to the
+                  right so it doesn't overlap the normal parrainage spine. */}
+              {built.reverseEdges.map((re, i) => {
+                const sp = layout.positions.get(re.seller)
+                const bp = layout.positions.get(re.buyer)
+                if (!sp || !bp) return null
+                const x1 = sp.x + CARD_W
+                const y1 = sp.y + CARD_H / 2
+                const x2 = bp.x + CARD_W
+                const y2 = bp.y + CARD_H / 2
+                const bow = Math.max(80, Math.abs(y1 - y2) * 0.4)
+                const cx = Math.max(x1, x2) + bow
+                const d = `M ${x1} ${y1} C ${cx} ${y1}, ${cx} ${y2}, ${x2} ${y2}`
+                return (
+                  <g key={`rev-${re.saleId}-${i}`} className="cog-edge cog-edge--reverse">
+                    <path
+                      d={d}
+                      fill="none"
+                      stroke="#dc2626"
+                      strokeWidth={2}
+                      strokeDasharray="5 4"
+                      markerEnd="url(#cog-arrow--reverse)"
+                    >
+                      <title>
+                        Vente inversée — le vendeur a vendu à son propre parrain
+                        (ou à un ancêtre). Le chaînage des commissions est
+                        tronqué au niveau de l'acheteur.
+                      </title>
+                    </path>
+                  </g>
+                )
+              })}
+              {/* Reverse-sale grant edges — purple solid arcs from source to
+                  beneficiary. Distinct from red dashed reverse-sale arrows:
+                  the red arrow shows the transaction, the purple arrow shows
+                  the acquired right. Bowed to the LEFT so they don't collide
+                  with the reverse-sale arrows (bowed right). */}
+              {built.grantEdges.map((ge, i) => {
+                const sp = layout.positions.get(ge.source)
+                const bp = layout.positions.get(ge.beneficiary)
+                if (!sp || !bp) return null
+                const x1 = sp.x
+                const y1 = sp.y + CARD_H / 2
+                const x2 = bp.x
+                const y2 = bp.y + CARD_H / 2
+                const bow = Math.max(90, Math.abs(y1 - y2) * 0.45)
+                const cx = Math.min(x1, x2) - bow
+                const d = `M ${x1} ${y1} C ${cx} ${y1}, ${cx} ${y2}, ${x2} ${y2}`
+                const isHover = hoverGrantId === ge.id
+                return (
+                  <g
+                    key={`grant-${ge.id}`}
+                    className={`cog-edge cog-edge--grant ${isHover ? 'cog-edge--grant-hover' : ''}`}
+                    onMouseEnter={() => setHoverGrantId(ge.id)}
+                    onMouseLeave={() => setHoverGrantId((h) => (h === ge.id ? null : h))}
+                  >
+                    <path
+                      d={d}
+                      fill="none"
+                      stroke="#7c3aed"
+                      strokeWidth={isHover ? 3 : 2.2}
+                      markerEnd="url(#cog-arrow--grant)"
+                    >
+                      <title>
+                        Droit acquis via vente inversée — effectif depuis {' '}
+                        {ge.effectiveFrom ? new Date(ge.effectiveFrom).toLocaleDateString('fr-FR') : '—'}.
+                        Survolez pour mettre en évidence les filleuls qualifiants.
+                      </title>
+                    </path>
+                  </g>
+                )
+              })}
               {built.edges.map((edge, i) => {
                 const p = layout.positions.get(edge.parent)
                 const c = layout.positions.get(edge.child)
@@ -655,6 +882,19 @@ export default function CommissionOrgChart({ data, selectedClientId, onNodeClick
                 )
                 const isHover = hoverEdge === i
                 const isDimmed = Boolean(lineageIds) && !isActive
+                // Tooltip: "<sponsor/seller> → <buyer/filleul>". Makes the
+                // arrow's meaning unambiguous — the visual arrowhead already
+                // points from parent down to child, but the tooltip spells
+                // out the direction for reviewers.
+                const parentName = built.clientById.get(edge.parent)?.full_name
+                  || built.clientById.get(edge.parent)?.name
+                  || edge.parent
+                const childName = built.clientById.get(edge.child)?.full_name
+                  || built.clientById.get(edge.child)?.name
+                  || edge.child
+                const tooltipText = edge.synthetic
+                  ? `${parentName} → ${childName} (lien déduit d'une vente — pas de parrainage enregistré)`
+                  : `${parentName} → ${childName}`
                 return (
                   <g
                     key={`${edge.parent}-${edge.child}-${i}`}
@@ -665,16 +905,12 @@ export default function CommissionOrgChart({ data, selectedClientId, onNodeClick
                     <path
                       d={connectorPath(p, c)}
                       fill="none"
-                      stroke={isActive ? '#1d4ed8' : '#cbd5e1'}
-                      strokeWidth={isActive ? 2.5 : 1.8}
+                      stroke={isActive ? '#1d4ed8' : '#3b82f6'}
+                      strokeWidth={isActive ? 3 : 2.4}
                       strokeDasharray={edge.synthetic ? '4 4' : undefined}
                       markerEnd={`url(#${isActive ? 'cog-arrow--active' : 'cog-arrow'})`}
                     >
-                      {edge.synthetic ? (
-                        <title>
-                          {'Lien déduit d\'une vente — aucun parrainage enregistré dans seller_relations.'}
-                        </title>
-                      ) : null}
+                      <title>{tooltipText}</title>
                     </path>
                   </g>
                 )
@@ -687,6 +923,11 @@ export default function CommissionOrgChart({ data, selectedClientId, onNodeClick
               if (!c) return null
               const s = built.statsById.get(id) || { total: 0, paid: 0, payable: 0, pending: 0, l1: 0, l2: 0, l3: 0, l4: 0 }
               const salesMade = built.salesCountBySeller.get(id) || 0
+              const reverseCount = built.reverseSalesById.get(id) || 0
+              const grantsGiven  = built.grantCountsBySource.get(id) || 0
+              const grantsGot    = built.grantCountsByBeneficiary.get(id) || 0
+              const qualifyingSet = hoverGrantId ? built.grantQualifyingNodesById.get(hoverGrantId) : null
+              const isQualifying = qualifyingSet && qualifyingSet.has(id)
               const depth = pos.depth
               const genClass = GEN_CLASSES[Math.min(depth, GEN_CLASSES.length - 1)]
               const genLabel = GEN_LABELS[Math.min(depth, GEN_LABELS.length - 1)]
@@ -700,7 +941,7 @@ export default function CommissionOrgChart({ data, selectedClientId, onNodeClick
                 <button
                   type="button"
                   key={id}
-                  className={`cog-card ${genClass} ${isSelected ? 'cog-card--selected' : ''} ${isDimmed ? 'cog-card--dim' : ''}`}
+                  className={`cog-card ${genClass} ${isSelected ? 'cog-card--selected' : ''} ${isDimmed ? 'cog-card--dim' : ''} ${reverseCount > 0 ? 'cog-card--reverse' : ''} ${isQualifying ? 'cog-card--grant-qualifying' : ''}`}
                   style={{ left: pos.x, top: pos.y, width: CARD_W, height: CARD_H }}
                   onClick={() => handleCardClick(id)}
                   aria-label={`${clientName(c)}, ${genLabel}, total ${fmtMoney(s.total)} TND`}
@@ -712,6 +953,30 @@ export default function CommissionOrgChart({ data, selectedClientId, onNodeClick
                       <div className="cog-card__meta">
                         <span className="cog-card__gen">{genLabel}</span>
                         {salesMade > 0 ? <span className="cog-card__sales">· {salesMade} vente{salesMade > 1 ? 's' : ''}</span> : null}
+                        {reverseCount > 0 ? (
+                          <span
+                            className="cog-card__reverse-badge"
+                            title={`${reverseCount} vente${reverseCount > 1 ? 's' : ''} inversée${reverseCount > 1 ? 's' : ''} — un parrain et son filleul ont aussi effectué une transaction dans l'autre sens.`}
+                          >
+                            ⇅ {reverseCount}
+                          </span>
+                        ) : null}
+                        {grantsGiven > 0 ? (
+                          <span
+                            className="cog-card__grant-badge cog-card__grant-badge--source"
+                            title={`${grantsGiven} droit${grantsGiven > 1 ? 's' : ''} acquis — ce client a vendu à un filleul, qui perçoit désormais une commission L1 sur les nouvelles recrues de ce client.`}
+                          >
+                            +{grantsGiven} droit{grantsGiven > 1 ? 's' : ''}
+                          </span>
+                        ) : null}
+                        {grantsGot > 0 ? (
+                          <span
+                            className="cog-card__grant-badge cog-card__grant-badge--beneficiary"
+                            title={`${grantsGot} droit${grantsGot > 1 ? 's' : ''} hérité${grantsGot > 1 ? 's' : ''} — ce client touche une commission L1 sur les nouvelles ventes issues des recrues de la source du droit.`}
+                          >
+                            {grantsGot} hérité{grantsGot > 1 ? 's' : ''}
+                          </span>
+                        ) : null}
                       </div>
                     </div>
                   </div>

@@ -86,7 +86,7 @@ export default function ReferralInvitePage() {
           {(referrer) => (
             <>
               <p style={{ marginTop: 12 }}>Vous êtes invité par <strong>{referrer.full_name}</strong> ({referrer.code}).</p>
-              <p style={{ color: '#5b6a58', fontSize: 14, lineHeight: 1.5, marginTop: 16 }}>
+              <p style={{ color: 'var(--zb-text-dim, #5b6a58)', fontSize: 14, lineHeight: 1.5, marginTop: 16 }}>
                 Créez votre compte pour rejoindre le programme d&apos;investissement dans l&apos;oliveraie. Votre parrain sera automatiquement enregistré.
               </p>
               <button className="btn btn--primary" style={{ marginTop: 24 }} onClick={() => navigate(`/register?ref=${code}`)}>

@@ -36,6 +36,7 @@ export function useCommissionTracker() {
     clients: [],
     sellerRelations: [],
     sales: [],
+    reverseGrants: [],
   })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -53,6 +54,7 @@ export function useCommissionTracker() {
         clients: next?.clients || [],
         sellerRelations: next?.sellerRelations || [],
         sales: next?.sales || [],
+        reverseGrants: next?.reverseGrants || [],
       })
     } catch (e) {
       if (seq !== inflightRef.current) return
@@ -81,6 +83,7 @@ export function useCommissionTracker() {
           clients: next?.clients || [],
           sellerRelations: next?.sellerRelations || [],
           sales: next?.sales || [],
+          reverseGrants: next?.reverseGrants || [],
         })
       } catch (e) {
         if (cancelled || seq !== inflightRef.current) return

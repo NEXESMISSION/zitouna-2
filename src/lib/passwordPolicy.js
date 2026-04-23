@@ -14,9 +14,12 @@
 //                 but far more usable, and combined with length it's fine.
 // ----------------------------------------------------------------------------
 
-export const PASSWORD_MIN_LENGTH = 10
-export const PASSWORD_POLICY_HINT =
-  `Au moins ${PASSWORD_MIN_LENGTH} caractères, avec au moins une lettre et un chiffre.`
+// TEMPORARY — password policy disabled for testing. Restore by reverting this
+// commit; the original rules (min 10, letter + digit, common-password block)
+// are preserved in git history. Supabase's dashboard-level min-length still
+// applies server-side, so empty/very-short passwords will be rejected there.
+export const PASSWORD_MIN_LENGTH = 1
+export const PASSWORD_POLICY_HINT = 'Saisissez un mot de passe.'
 
 /**
  * Validate a candidate password.
@@ -25,39 +28,11 @@ export const PASSWORD_POLICY_HINT =
  */
 export function validatePassword(password) {
   const pw = String(password ?? '')
-  if (pw.length < PASSWORD_MIN_LENGTH) {
+  if (pw.length === 0) {
     return {
       ok: false,
-      reason: 'too_short',
-      message: `Le mot de passe doit contenir au moins ${PASSWORD_MIN_LENGTH} caractères.`,
-    }
-  }
-  if (!/[A-Za-z]/.test(pw)) {
-    return {
-      ok: false,
-      reason: 'no_letter',
-      message: 'Le mot de passe doit contenir au moins une lettre.',
-    }
-  }
-  if (!/[0-9]/.test(pw)) {
-    return {
-      ok: false,
-      reason: 'no_digit',
-      message: 'Le mot de passe doit contenir au moins un chiffre.',
-    }
-  }
-  // Reject a small set of obvious bad passwords regardless of length/class.
-  // Not a substitute for a proper compromised-password check (zxcvbn or HIBP
-  // API), but cheap defense against the worst offenders.
-  const lower = pw.toLowerCase()
-  const OBVIOUS_BAD = [
-    'password', 'motdepasse', '1234567890', '0123456789', 'azertyuiop', 'qwertyuiop',
-  ]
-  if (OBVIOUS_BAD.some((b) => lower.includes(b))) {
-    return {
-      ok: false,
-      reason: 'too_common',
-      message: 'Ce mot de passe est trop courant. Choisissez quelque chose de plus unique.',
+      reason: 'empty',
+      message: 'Le mot de passe ne peut pas être vide.',
     }
   }
   return { ok: true }

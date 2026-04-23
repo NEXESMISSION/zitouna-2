@@ -47,7 +47,7 @@ do $zit_auto_9$ begin
 exception when duplicate_object then null; end $zit_auto_9$;
 
 -- ========= Staff / admin users =========
-create table admin_users (
+create table if not exists admin_users (
   id uuid primary key default gen_random_uuid(),
   code text unique not null,
   full_name text not null,
@@ -69,7 +69,7 @@ create table admin_users (
 );
 
 -- ========= Projects / parcels / offers =========
-create table projects (
+create table if not exists projects (
   id text primary key,
   title text not null,
   city text not null,
@@ -79,11 +79,12 @@ create table projects (
   description text,
   map_url text,
   arabon_default numeric(14,2) not null default 50,
+  annual_revenue_total numeric(14,2) not null default 0,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
-create table project_workflow_settings (
+create table if not exists project_workflow_settings (
   project_id text primary key references projects(id) on delete cascade,
   reservation_duration_hours int not null default 48,
   arabon_policy jsonb not null default '{}'::jsonb,
@@ -94,7 +95,7 @@ create table project_workflow_settings (
   updated_at timestamptz not null default now()
 );
 
-create table parcels (
+create table if not exists parcels (
   id bigint generated always as identity primary key,
   project_id text not null references projects(id) on delete cascade,
   parcel_number int not null,
@@ -109,14 +110,14 @@ create table parcels (
   unique(project_id, parcel_number)
 );
 
-create table parcel_tree_batches (
+create table if not exists parcel_tree_batches (
   id bigint generated always as identity primary key,
   parcel_id bigint not null references parcels(id) on delete cascade,
   batch_year int not null,
   tree_count int not null default 0
 );
 
-create table project_offers (
+create table if not exists project_offers (
   id bigint generated always as identity primary key,
   project_id text not null references projects(id) on delete cascade,
   name text not null,
@@ -127,9 +128,9 @@ create table project_offers (
   updated_at timestamptz not null default now()
 );
 
-create unique index ux_project_offers_project_name on project_offers(project_id, name);
+create unique index if not exists ux_project_offers_project_name on project_offers(project_id, name);
 
-create table project_health_reports (
+create table if not exists project_health_reports (
   id bigint generated always as identity primary key,
   project_id text not null references projects(id) on delete cascade,
   parcel_id bigint references parcels(id) on delete cascade,
@@ -144,7 +145,7 @@ create table project_health_reports (
   unique(project_id, parcel_id)
 );
 
-create table project_commission_rules (
+create table if not exists project_commission_rules (
   id bigint generated always as identity primary key,
   project_id text not null references projects(id) on delete cascade,
   level int not null check (level >= 1),
@@ -158,7 +159,7 @@ create table project_commission_rules (
   unique(project_id, level)
 );
 
-create table project_signature_checklist_items (
+create table if not exists project_signature_checklist_items (
   id bigint generated always as identity primary key,
   project_id text not null references projects(id) on delete cascade,
   item_key text not null,
@@ -172,7 +173,7 @@ create table project_signature_checklist_items (
 );
 
 -- ========= Clients =========
-create table clients (
+create table if not exists clients (
   id uuid primary key default gen_random_uuid(),
   code text unique not null,
   full_name text not null,
@@ -202,11 +203,11 @@ create table clients (
 
 -- Partial UNIQUE index: one clients row per authenticated auth.users id.
 -- Multiple NULLs are allowed (stub clients without an auth account).
-create unique index ux_clients_auth_user on clients(auth_user_id) where auth_user_id is not null;
-create index idx_clients_phone_norm on clients(phone_normalized) where phone_normalized is not null;
+create unique index if not exists ux_clients_auth_user on clients(auth_user_id) where auth_user_id is not null;
+create index if not exists idx_clients_phone_norm on clients(phone_normalized) where phone_normalized is not null;
 
 -- ========= Phone identities (canonical linking across auth/client/admin) =========
-create table client_phone_identities (
+create table if not exists client_phone_identities (
   id uuid primary key default gen_random_uuid(),
   country_code text not null,
   phone_local text not null,
@@ -224,9 +225,9 @@ create table client_phone_identities (
   unique (client_id),
   unique (auth_user_id)
 );
-create index idx_client_phone_identities_canonical on client_phone_identities(phone_canonical);
-create index idx_client_phone_identities_client on client_phone_identities(client_id);
-create index idx_client_phone_identities_auth on client_phone_identities(auth_user_id);
+create index if not exists idx_client_phone_identities_canonical on client_phone_identities(phone_canonical);
+create index if not exists idx_client_phone_identities_client on client_phone_identities(client_id);
+create index if not exists idx_client_phone_identities_auth on client_phone_identities(auth_user_id);
 
 -- O6: phone identity invalidation reason (added idempotently for parallel rollout).
 do $zit_auto_10$ begin
@@ -242,7 +243,7 @@ do $zit_auto_10$ begin
 end $zit_auto_10$;
 
 -- ========= Seller relations / parcel assignments / wallet =========
-create table seller_relations (
+create table if not exists seller_relations (
   id uuid primary key default gen_random_uuid(),
   child_client_id uuid not null references clients(id) on delete cascade,
   parent_client_id uuid not null references clients(id) on delete restrict,
@@ -252,9 +253,9 @@ create table seller_relations (
   unique(child_client_id)
 );
 
-create index idx_seller_relations_parent on seller_relations(parent_client_id);
+create index if not exists idx_seller_relations_parent on seller_relations(parent_client_id);
 
-create table seller_parcel_assignments (
+create table if not exists seller_parcel_assignments (
   id uuid primary key default gen_random_uuid(),
   client_id uuid not null references clients(id) on delete cascade,
   project_id text not null references projects(id) on delete cascade,
@@ -273,19 +274,19 @@ create table seller_parcel_assignments (
   )
 );
 
-create unique index ux_seller_parcel_assignments_active_parcel
+create unique index if not exists ux_seller_parcel_assignments_active_parcel
   on seller_parcel_assignments(parcel_id) where active = true;
-create unique index ux_seller_parcel_assignments_active_client_parcel
+create unique index if not exists ux_seller_parcel_assignments_active_client_parcel
   on seller_parcel_assignments(client_id, parcel_id) where active = true;
 
-create table ambassador_wallets (
+create table if not exists ambassador_wallets (
   client_id uuid primary key references clients(id) on delete cascade,
   balance numeric(14,2) not null default 0,
   updated_at timestamptz not null default now()
 );
 
 -- ========= Sales (immutable snapshots at creation; status is text for flexible pipeline) =========
-create table sales (
+create table if not exists sales (
   id uuid primary key default gen_random_uuid(),
   code text unique not null,
   project_id text not null references projects(id) on delete restrict,
@@ -359,17 +360,19 @@ create table sales (
   constraint sales_completed_has_notary_date check (status <> 'completed' or notary_completed_at is not null)
 );
 
-create index idx_sales_project on sales(project_id);
-create index idx_sales_client on sales(client_id);
-create index idx_sales_agent on sales(agent_id);
-create index idx_sales_status on sales(status);
-create index idx_sales_buyer_phone on sales(buyer_phone_normalized) where buyer_phone_normalized is not null;
-create index idx_sales_reservation_expires on sales(reservation_expires_at) where reservation_expires_at is not null;
+create index if not exists idx_sales_project on sales(project_id);
+create index if not exists idx_sales_client on sales(client_id);
+create index if not exists idx_sales_agent on sales(agent_id);
+create index if not exists idx_sales_status on sales(status);
+create index if not exists idx_sales_buyer_phone on sales(buyer_phone_normalized) where buyer_phone_normalized is not null;
+create index if not exists idx_sales_reservation_expires on sales(reservation_expires_at) where reservation_expires_at is not null;
 
-alter table seller_relations
-  add constraint seller_relations_source_sale_fk foreign key (source_sale_id) references sales(id) on delete set null;
+do $zit_sr_fk$ begin
+  alter table seller_relations
+    add constraint seller_relations_source_sale_fk foreign key (source_sale_id) references sales(id) on delete set null;
+exception when duplicate_object then null; end $zit_sr_fk$;
 
-create table sale_reservation_events (
+create table if not exists sale_reservation_events (
   id uuid primary key default gen_random_uuid(),
   sale_id uuid not null references sales(id) on delete cascade,
   event_type text not null,
@@ -381,10 +384,10 @@ create table sale_reservation_events (
   created_at timestamptz not null default now()
 );
 
-create index idx_sale_reservation_events_sale on sale_reservation_events(sale_id, created_at desc);
+create index if not exists idx_sale_reservation_events_sale on sale_reservation_events(sale_id, created_at desc);
 
 -- ========= Installments =========
-create table installment_plans (
+create table if not exists installment_plans (
   id uuid primary key default gen_random_uuid(),
   code text unique not null,
   sale_id uuid unique not null references sales(id) on delete cascade,
@@ -401,7 +404,7 @@ create table installment_plans (
   updated_at timestamptz not null default now()
 );
 
-create table installment_payments (
+create table if not exists installment_payments (
   id uuid primary key default gen_random_uuid(),
   plan_id uuid not null references installment_plans(id) on delete cascade,
   month_no int not null,
@@ -417,15 +420,16 @@ create table installment_payments (
   unique(plan_id, month_no)
 );
 
-create table installment_payment_receipts (
+create table if not exists installment_payment_receipts (
   id uuid primary key default gen_random_uuid(),
   payment_id uuid not null references installment_payments(id) on delete cascade,
   receipt_url text not null default '',
   file_name text not null default '',
   note text not null default '',
   created_at timestamptz not null default now(),
-  -- Reject javascript:/data:/file: schemes etc. — receipts must be empty
-  -- or an https URL (localhost http allowed for dev only).
+  -- Reject javascript:/data:/file: schemes etc. — receipts must be empty,
+  -- an https URL (localhost http allowed for dev only), or a Supabase
+  -- Storage path under the "installment-receipts" bucket (payments/...).
   constraint installment_payment_receipts_receipt_url_safe check (
     receipt_url = ''
     or (
@@ -433,15 +437,19 @@ create table installment_payment_receipts (
       and (
         receipt_url like 'https://%'
         or receipt_url like 'http://localhost%'
+        or (
+          receipt_url like 'payments/%'
+          and position(':' in split_part(receipt_url, '/', 1)) = 0
+        )
       )
     )
   )
 );
 
-create index idx_installment_payment_receipts_payment on installment_payment_receipts(payment_id);
+create index if not exists idx_installment_payment_receipts_payment on installment_payment_receipts(payment_id);
 
 -- ========= Appointments =========
-create table appointments (
+create table if not exists appointments (
   id uuid primary key default gen_random_uuid(),
   code text unique not null,
   client_id uuid references clients(id) on delete set null,
@@ -459,10 +467,10 @@ create table appointments (
   updated_at timestamptz not null default now()
 );
 
-create index idx_appointments_sale on appointments(sale_id) where sale_id is not null;
+create index if not exists idx_appointments_sale on appointments(sale_id) where sale_id is not null;
 
 -- ========= Public visit slot templates =========
-create table visit_slot_options (
+create table if not exists visit_slot_options (
   id text primary key,
   label text not null,
   hint text not null default '',
@@ -472,7 +480,7 @@ create table visit_slot_options (
 );
 
 -- ========= Commissions =========
-create table commission_events (
+create table if not exists commission_events (
   id uuid primary key default gen_random_uuid(),
   sale_id uuid not null references sales(id) on delete cascade,
   beneficiary_client_id uuid not null references clients(id) on delete restrict,
@@ -486,11 +494,41 @@ create table commission_events (
   updated_at timestamptz not null default now()
 );
 
-create index idx_commission_events_sale on commission_events(sale_id);
-create index idx_commission_events_beneficiary on commission_events(beneficiary_client_id);
-create index idx_commission_events_status on commission_events(status);
+create index if not exists idx_commission_events_sale on commission_events(sale_id);
+create index if not exists idx_commission_events_beneficiary on commission_events(beneficiary_client_id);
+create index if not exists idx_commission_events_status on commission_events(status);
 
-create table commission_payout_requests (
+-- Reverse-sale grants: when a downline client sells to someone in their own
+-- upline (a "reverse sale"), the seller earns a perpetual right to receive a
+-- flat L1 commission on any future sale whose chain traces back to the buyer
+-- (the grant's source) through an edge created AFTER effective_from.
+create table if not exists commission_reverse_grants (
+  id uuid primary key default gen_random_uuid(),
+  beneficiary_client_id uuid not null references clients(id) on delete cascade,
+  source_client_id      uuid not null references clients(id) on delete cascade,
+  trigger_sale_id       uuid not null references sales(id)   on delete cascade,
+  effective_from        timestamptz not null,
+  status                text not null default 'active'
+    check (status in ('active','revoked','superseded')),
+  revoked_at    timestamptz,
+  revoked_by    uuid references admin_users(id) on delete set null,
+  revoke_reason text,
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now(),
+  constraint crg_self_check check (beneficiary_client_id <> source_client_id),
+  unique (beneficiary_client_id, source_client_id, trigger_sale_id)
+);
+
+create index if not exists idx_crg_source_active
+  on commission_reverse_grants (source_client_id, effective_from)
+  where status = 'active';
+create index if not exists idx_crg_beneficiary_active
+  on commission_reverse_grants (beneficiary_client_id)
+  where status = 'active';
+create index if not exists idx_crg_trigger_sale
+  on commission_reverse_grants (trigger_sale_id);
+
+create table if not exists commission_payout_requests (
   id uuid primary key default gen_random_uuid(),
   code text unique not null,
   beneficiary_client_id uuid not null references clients(id) on delete restrict,
@@ -506,14 +544,14 @@ create table commission_payout_requests (
   updated_at timestamptz not null default now()
 );
 
-create table commission_payout_request_items (
+create table if not exists commission_payout_request_items (
   request_id uuid not null references commission_payout_requests(id) on delete cascade,
   commission_event_id uuid not null references commission_events(id) on delete restrict,
   primary key (request_id, commission_event_id)
 );
 
 -- ========= Page access grants (buyer post-signature access) =========
-create table page_access_grants (
+create table if not exists page_access_grants (
   id uuid primary key default gen_random_uuid(),
   client_id uuid not null references clients(id) on delete cascade,
   page_key text not null,
@@ -524,11 +562,11 @@ create table page_access_grants (
   revoked_by uuid references admin_users(id) on delete set null
 );
 
-create unique index ux_page_access_grants_active on page_access_grants(client_id, page_key)
+create unique index if not exists ux_page_access_grants_active on page_access_grants(client_id, page_key)
   where revoked_at is null;
 
 -- ========= Audit =========
-create table audit_logs (
+create table if not exists audit_logs (
   id uuid primary key default gen_random_uuid(),
   actor_user_id uuid references admin_users(id) on delete set null,
   actor_email text,
@@ -544,11 +582,11 @@ create table audit_logs (
   created_at timestamptz not null default now()
 );
 
-create index idx_audit_logs_created on audit_logs(created_at desc);
-create index idx_audit_logs_subject on audit_logs(subject_user_id) where subject_user_id is not null;
+create index if not exists idx_audit_logs_created on audit_logs(created_at desc);
+create index if not exists idx_audit_logs_subject on audit_logs(subject_user_id) where subject_user_id is not null;
 
 -- ========= Identity / phone verification queues =========
-create table data_access_requests (
+create table if not exists data_access_requests (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null,
   user_email text not null,
@@ -562,9 +600,9 @@ create table data_access_requests (
   reviewed_at timestamptz
 );
 
-create index idx_dar_user on data_access_requests(user_id);
+create index if not exists idx_dar_user on data_access_requests(user_id);
 
-create table phone_access_requests (
+create table if not exists phone_access_requests (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null,
   user_email text not null,
@@ -578,7 +616,7 @@ create table phone_access_requests (
   reviewed_at timestamptz
 );
 
-create table phone_access_otp_codes (
+create table if not exists phone_access_otp_codes (
   id uuid primary key default gen_random_uuid(),
   request_id uuid not null references phone_access_requests(id) on delete cascade,
   otp_code text not null,
@@ -588,7 +626,7 @@ create table phone_access_otp_codes (
   created_at timestamptz not null default now()
 );
 
-create table phone_verifications (
+create table if not exists phone_verifications (
   user_id uuid primary key,
   phone text not null,
   verified_at timestamptz not null default now(),
@@ -598,7 +636,7 @@ create table phone_verifications (
 );
 
 -- ========= Legal aux =========
-create table legal_stamps (
+create table if not exists legal_stamps (
   id uuid primary key default gen_random_uuid(),
   sale_id uuid references sales(id) on delete cascade,
   client_name text not null default '',
@@ -611,7 +649,7 @@ create table legal_stamps (
   created_at timestamptz not null default now()
 );
 
-create table legal_notices (
+create table if not exists legal_notices (
   id uuid primary key default gen_random_uuid(),
   sale_id uuid references sales(id) on delete set null,
   client_name text not null default '',
@@ -631,7 +669,7 @@ create table legal_notices (
 );
 
 -- ========= Notifications (Supabase auth.users) =========
-create table user_notifications (
+create table if not exists user_notifications (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
   role_scope text not null check (role_scope in ('investor','admin')),
@@ -642,7 +680,7 @@ create table user_notifications (
   dedupe_key text unique
 );
 
-create index idx_user_notifications_unread on user_notifications(user_id, created_at desc) where read_at is null;
+create index if not exists idx_user_notifications_unread on user_notifications(user_id, created_at desc) where read_at is null;
 
 -- ========= updated_at helper + triggers =========
 create or replace function public.touch_updated_at()
@@ -669,29 +707,224 @@ begin
 end;
 $zit_auto_12$;
 
+drop trigger if exists trg_admin_users_email_norm on admin_users;
 create trigger trg_admin_users_email_norm
   before insert or update of email on admin_users
   for each row execute function normalize_admin_user_email();
 
+drop trigger if exists trg_admin_users_touch on admin_users;
 create trigger trg_admin_users_touch before update on admin_users for each row execute function touch_updated_at();
+drop trigger if exists trg_projects_touch on projects;
 create trigger trg_projects_touch before update on projects for each row execute function touch_updated_at();
+drop trigger if exists trg_project_workflow_touch on project_workflow_settings;
 create trigger trg_project_workflow_touch before update on project_workflow_settings for each row execute function touch_updated_at();
+drop trigger if exists trg_parcels_touch on parcels;
 create trigger trg_parcels_touch before update on parcels for each row execute function touch_updated_at();
+drop trigger if exists trg_offers_touch on project_offers;
 create trigger trg_offers_touch before update on project_offers for each row execute function touch_updated_at();
+drop trigger if exists trg_project_commission_rules_touch on project_commission_rules;
 create trigger trg_project_commission_rules_touch before update on project_commission_rules for each row execute function touch_updated_at();
+drop trigger if exists trg_project_signature_checklist_touch on project_signature_checklist_items;
 create trigger trg_project_signature_checklist_touch before update on project_signature_checklist_items for each row execute function touch_updated_at();
+drop trigger if exists trg_clients_touch on clients;
 create trigger trg_clients_touch before update on clients for each row execute function touch_updated_at();
+drop trigger if exists trg_client_phone_identities_touch on client_phone_identities;
 create trigger trg_client_phone_identities_touch before update on client_phone_identities for each row execute function touch_updated_at();
+drop trigger if exists trg_seller_parcel_touch on seller_parcel_assignments;
 create trigger trg_seller_parcel_touch before update on seller_parcel_assignments for each row execute function touch_updated_at();
+drop trigger if exists trg_sales_touch on sales;
 create trigger trg_sales_touch before update on sales for each row execute function touch_updated_at();
+drop trigger if exists trg_plans_touch on installment_plans;
 create trigger trg_plans_touch before update on installment_plans for each row execute function touch_updated_at();
+drop trigger if exists trg_plan_payments_touch on installment_payments;
 create trigger trg_plan_payments_touch before update on installment_payments for each row execute function touch_updated_at();
+drop trigger if exists trg_appointments_touch on appointments;
 create trigger trg_appointments_touch before update on appointments for each row execute function touch_updated_at();
+drop trigger if exists trg_commission_events_touch on commission_events;
 create trigger trg_commission_events_touch before update on commission_events for each row execute function touch_updated_at();
+drop trigger if exists trg_commission_reverse_grants_touch on commission_reverse_grants;
+create trigger trg_commission_reverse_grants_touch before update on commission_reverse_grants for each row execute function touch_updated_at();
+drop trigger if exists trg_commission_payout_req_touch on commission_payout_requests;
 create trigger trg_commission_payout_req_touch before update on commission_payout_requests for each row execute function touch_updated_at();
+drop trigger if exists trg_visit_slot_options_touch on visit_slot_options;
 create trigger trg_visit_slot_options_touch before update on visit_slot_options for each row execute function touch_updated_at();
+drop trigger if exists trg_legal_notices_touch on legal_notices;
 create trigger trg_legal_notices_touch before update on legal_notices for each row execute function touch_updated_at();
--- project_health_reports and phone_verifications also carry updated_at columns
--- (audited at 2026-04 — they were missing from the touch wiring above).
+drop trigger if exists trg_project_health_reports_touch on project_health_reports;
 create trigger trg_project_health_reports_touch before update on project_health_reports for each row execute function touch_updated_at();
+drop trigger if exists trg_phone_verifications_touch on phone_verifications;
 create trigger trg_phone_verifications_touch before update on phone_verifications for each row execute function touch_updated_at();
+
+-- ============================================================================
+-- Folded from dev/add_project_address.sql
+-- ============================================================================
+alter table public.projects
+  add column if not exists address text;
+
+alter table public.project_workflow_settings
+  add column if not exists default_advance_amount numeric(14,2),
+  add column if not exists installments_first_due_date date,
+  add column if not exists installments_end_date date;
+
+-- ============================================================================
+-- Folded from dev/project_tree_and_health.sql
+-- Project-level tree + health fields (parcels become pure m² surface).
+-- ============================================================================
+alter table public.projects
+  add column if not exists total_trees        int,
+  add column if not exists tree_health_pct    smallint check (tree_health_pct between 0 and 100),
+  add column if not exists soil_humidity_pct  smallint check (soil_humidity_pct between 0 and 100),
+  add column if not exists nutrients_pct      smallint check (nutrients_pct between 0 and 100),
+  -- Project-level cohort composition. Array of {year: int, count: int}.
+  -- Replaces per-parcel parcel_tree_batches. Parcel share of revenue is
+  -- now computed as (parcel.area_m2 / sum(project parcel area_m2)) × net.
+  add column if not exists tree_batches       jsonb not null default '[]'::jsonb;
+
+-- ============================================================================
+-- Folded from dev/phone_change_requests.sql — table + indices
+-- RLS policies live in 04_rls.sql; RPCs in 03_functions.sql.
+-- ============================================================================
+create table if not exists public.phone_change_requests (
+  id uuid primary key default gen_random_uuid(),
+  client_id uuid not null references public.clients(id) on delete cascade,
+  auth_user_id uuid,
+  user_email text not null default '',
+  user_name text not null default '',
+  current_phone text not null default '',
+  requested_phone text not null,
+  reason text not null default '',
+  status text not null default 'pending' check (status in ('pending', 'approved', 'rejected')),
+  reviewer_id uuid references public.admin_users(id) on delete set null,
+  reviewer_note text not null default '',
+  created_at timestamptz not null default now(),
+  reviewed_at timestamptz,
+  applied_at timestamptz,
+  constraint phone_change_requests_new_phone_chk check (length(requested_phone) between 6 and 32)
+);
+
+create index if not exists idx_phone_change_requests_client on public.phone_change_requests(client_id);
+create index if not exists idx_phone_change_requests_status on public.phone_change_requests(status);
+create index if not exists idx_phone_change_requests_email  on public.phone_change_requests(lower(user_email));
+create unique index if not exists ux_phone_change_requests_one_pending
+  on public.phone_change_requests(client_id) where status = 'pending';
+
+-- ============================================================================
+-- Folded from dev/harvest_system.sql — enums, column additions, tables
+-- RLS + views + grants live in 04_rls.sql; functions in 03_functions.sql.
+-- ============================================================================
+do $zit_h_1$ begin
+  create type project_lifecycle_status as enum ('draft', 'selling', 'closed', 'archived');
+exception when duplicate_object then null; end $zit_h_1$;
+
+do $zit_h_2$ begin
+  create type parcel_batch_status as enum ('planned', 'planted', 'grafted', 'lost');
+exception when duplicate_object then null; end $zit_h_2$;
+
+do $zit_h_3$ begin
+  create type harvest_status as enum ('planned', 'in_progress', 'harvested', 'distributed', 'cancelled');
+exception when duplicate_object then null; end $zit_h_3$;
+
+do $zit_h_4$ begin
+  create type harvest_distribution_status as enum ('pending', 'credited', 'paid_out');
+exception when duplicate_object then null; end $zit_h_4$;
+
+do $zit_h_5$ begin
+  create type project_event_kind as enum ('planting', 'pruning', 'irrigation', 'treatment', 'harvest', 'note');
+exception when duplicate_object then null; end $zit_h_5$;
+
+alter table public.projects
+  add column if not exists first_planting_year int,
+  add column if not exists harvest_month       smallint check (harvest_month between 1 and 12),
+  add column if not exists maturity_curve      jsonb,
+  add column if not exists bio_certified       boolean not null default false,
+  add column if not exists certification_body  text,
+  add column if not exists cover_photo_url     text,
+  add column if not exists gallery_urls        text[] not null default '{}',
+  add column if not exists lifecycle_status    project_lifecycle_status not null default 'selling';
+
+alter table public.parcel_tree_batches
+  add column if not exists status     parcel_batch_status not null default 'planted',
+  add column if not exists planted_on date,
+  add column if not exists cultivar   text,
+  add column if not exists notes      text;
+
+create table if not exists public.project_harvests (
+  id                    uuid primary key default gen_random_uuid(),
+  project_id            text not null references public.projects(id) on delete cascade,
+  harvest_year          int  not null,
+  harvest_date          date,
+  status                harvest_status not null default 'planned',
+  projected_gross_tnd   numeric(14, 2) not null default 0,
+  actual_kg             numeric(14, 2) not null default 0,
+  price_per_kg_tnd      numeric(14, 4) not null default 0,
+  actual_gross_tnd      numeric(14, 2) not null default 0,
+  costs_tnd             numeric(14, 2) not null default 0,
+  net_tnd               numeric(14, 2) generated always as
+                          (greatest(actual_gross_tnd - costs_tnd, 0)) stored,
+  notes                 text,
+  distributed_at        timestamptz,
+  distributed_by        uuid references public.admin_users(id) on delete set null,
+  cancelled_reason      text,
+  created_at            timestamptz not null default now(),
+  updated_at            timestamptz not null default now(),
+  unique (project_id, harvest_year)
+);
+
+create index if not exists idx_project_harvests_project on public.project_harvests(project_id);
+create index if not exists idx_project_harvests_status  on public.project_harvests(status);
+create index if not exists idx_project_harvests_year    on public.project_harvests(harvest_year);
+
+create table if not exists public.harvest_distributions (
+  id                     uuid primary key default gen_random_uuid(),
+  harvest_id             uuid not null references public.project_harvests(id) on delete cascade,
+  client_id              uuid not null references public.clients(id) on delete restrict,
+  owned_area_m2          numeric(14, 2) not null,
+  project_area_m2        numeric(14, 2) not null,
+  share_pct              numeric(9, 6)  not null,
+  amount_tnd             numeric(14, 2) not null,
+  credit_status          harvest_distribution_status not null default 'credited',
+  credited_at            timestamptz not null default now(),
+  paid_out_at            timestamptz,
+  payout_request_id      uuid references public.commission_payout_requests(id) on delete set null,
+  created_at             timestamptz not null default now(),
+  updated_at             timestamptz not null default now(),
+  unique (harvest_id, client_id)
+);
+
+create index if not exists idx_harvest_distributions_harvest        on public.harvest_distributions(harvest_id);
+create index if not exists idx_harvest_distributions_client         on public.harvest_distributions(client_id);
+create index if not exists idx_harvest_distributions_credit_status  on public.harvest_distributions(credit_status);
+
+create table if not exists public.project_events (
+  id           uuid primary key default gen_random_uuid(),
+  project_id   text not null references public.projects(id) on delete cascade,
+  event_date   date not null default current_date,
+  kind         project_event_kind not null default 'note',
+  title        text not null,
+  description  text,
+  media_urls   text[] not null default '{}',
+  created_by   uuid references public.admin_users(id) on delete set null,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now()
+);
+
+create index if not exists idx_project_events_project_date on public.project_events(project_id, event_date desc);
+create index if not exists idx_project_events_kind         on public.project_events(kind);
+
+do $zit_h_6$ begin
+  create trigger trg_project_harvests_touch
+    before update on public.project_harvests
+    for each row execute function public.touch_updated_at();
+exception when duplicate_object then null; when undefined_function then null; end $zit_h_6$;
+
+do $zit_h_7$ begin
+  create trigger trg_harvest_distributions_touch
+    before update on public.harvest_distributions
+    for each row execute function public.touch_updated_at();
+exception when duplicate_object then null; when undefined_function then null; end $zit_h_7$;
+
+do $zit_h_8$ begin
+  create trigger trg_project_events_touch
+    before update on public.project_events
+    for each row execute function public.touch_updated_at();
+exception when duplicate_object then null; when undefined_function then null; end $zit_h_8$;

@@ -59,6 +59,31 @@
   flex: 0 0 24px;
 }
 
+/* Reverse-sale grant strip: shown above the 3-stat row when the user is a
+   beneficiary. Purple to match the admin tree's grant-edge color. */
+.mrt__grant-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  margin-bottom: 8px;
+  background: #ede9fe;
+  border: 1px solid #ddd6fe;
+  border-left: 3px solid #7c3aed;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #4c1d95;
+  cursor: help;
+  text-align: left;
+}
+.mrt__grant-icon {
+  font-size: 16px;
+  color: #7c3aed;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.mrt__grant-text strong { font-weight: 700; }
+
 /* 3-stat pill row — compact grid, stacks to 1 col on very narrow. */
 .mrt__stats {
   display: grid;

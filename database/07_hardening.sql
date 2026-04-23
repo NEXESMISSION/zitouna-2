@@ -1258,6 +1258,15 @@ begin
       'business', 'database'
     );
   end if;
+
+  -- Second pass: reverse-sale grants (defined in 03_functions.sql). Guarded
+  -- with exception so this override stays safe if 03 hasn't been applied yet.
+  begin
+    v_inserted := v_inserted + public.compute_reverse_grant_commissions_for_sale(p_sale_id);
+  exception when undefined_function then
+    null;
+  end;
+
   return v_inserted;
 end;
 $zit_auto_4$;
@@ -1270,6 +1279,27 @@ drop trigger if exists zitouna_sales_notary_commissions on public.sales;
 create trigger zitouna_sales_notary_commissions
   after update of notary_completed_at on public.sales
   for each row execute function public.trg_sales_notary_commissions();
+
+-- Re-assert reverse-grant triggers after the hardened overrides so they pair
+-- with the sale-based commission model.
+do $zit_rg_trg_reassert$
+begin
+  if to_regproc('public.trg_sales_create_reverse_grant()') is not null then
+    drop trigger if exists trg_sales_create_reverse_grant on public.sales;
+    create trigger trg_sales_create_reverse_grant
+      after update of notary_completed_at on public.sales
+      for each row execute function public.trg_sales_create_reverse_grant();
+  end if;
+  if to_regproc('public.trg_sales_supersede_reverse_grants()') is not null then
+    drop trigger if exists trg_sales_supersede_reverse_grants on public.sales;
+    create trigger trg_sales_supersede_reverse_grants
+      after update of notary_completed_at on public.sales
+      for each row execute function public.trg_sales_supersede_reverse_grants();
+  end if;
+exception when others then
+  raise notice 'reverse-grant trigger reassert failed: %', sqlerrm;
+end;
+$zit_rg_trg_reassert$;
 
 -- ============================================================================
 -- ===== SECTION E — Parcel labels + Offer payment modes =====================
@@ -1303,6 +1333,9 @@ ALTER TABLE public.project_offers
   ADD COLUMN IF NOT EXISTS cash_amount numeric(14,2);
 ALTER TABLE public.project_offers
   ADD COLUMN IF NOT EXISTS price_per_sqm numeric(14,2);
+-- Optional free-text note shown in the offer editor (internal commentary).
+ALTER TABLE public.project_offers
+  ADD COLUMN IF NOT EXISTS note text;
 
 -- Enforce the two modes at the DB layer.
 DO $zit_offer_mode$

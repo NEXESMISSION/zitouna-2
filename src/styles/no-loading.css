@@ -1,0 +1,109 @@
+/* ============================================================================
+ * no-loading.css — hide every skeleton / spinner / shimmer pattern in the
+ * app. Product decision: pages appear blank while data loads, then snap in
+ * once ready. No placeholder blocks, no pulsing shimmer, no spinners.
+ *
+ * This file is loaded LAST (after every other stylesheet) from main.jsx so
+ * these rules override the per-page skeleton styles without having to edit
+ * each one. Removing this file restores the original loading animations.
+ * ============================================================================ */
+
+/* Shimmer keyframes — neutralize so anything still running an animation
+   token finds a no-op. Keeps JS that reads animation state happy. */
+@keyframes sp-sk-shimmer        { from, to { background-position: 0 0 } }
+@keyframes sk-shimmer           { from, to { background-position: 0 0 } }
+@keyframes pub-sk-shimmer       { from, to { background-position: 0 0 } }
+@keyframes inv-sk-shimmer       { from, to { background-position: 0 0 } }
+@keyframes ip-sk-shimmer        { from, to { background-position: 0 0 } }
+@keyframes ct-skeleton-pulse    { from, to { opacity: 1 } }
+@keyframes zb-sk-shimmer        { from, to { background-position: 0 0 } }
+@keyframes zb-sk-pulse          { from, to { opacity: 1 } }
+@keyframes spin                 { from, to { transform: none } }
+@keyframes auth-stuck-pulse     { from, to { transform: none; box-shadow: none } }
+@keyframes auth-stuck-pulse-light { from, to { transform: none; box-shadow: none } }
+
+/* ── Skeleton shapes — every family, every surface. */
+.sk,
+[class*="sk-"],
+[class*=" sk-"],
+.sp-sk,
+[class*="sp-sk-"],
+.pub-sk,
+[class*="pub-sk-"],
+.inv-sk,
+[class*="inv-sk-"],
+.cp-sk,
+[class*="cp-sk-"],
+.ct-skeleton,
+[class*="ct-skeleton-"],
+.zb-sk,
+[class*="zb-sk-"],
+.ip-sk,
+[class*="ip-sk-"] {
+  display: none !important;
+  animation: none !important;
+  background: transparent !important;
+}
+
+/* Common skeleton *containers* used by page-level skeletons (the
+   wrappers that render placeholder layout boxes). Hide them too. */
+.pdp-skeleton,
+.pdp-skeleton__head,
+.pdp-skeleton__kpi,
+.pdp-skeleton__panel,
+.zb-skeleton,
+.xp-skeleton,
+.cp-skeleton,
+.sp-skeleton {
+  display: none !important;
+}
+
+/* ── App-level spinner (React-Query / bootstrap). */
+.app-loader,
+.app-loader-spinner,
+.app-loader--route,
+.app-loader--route__brand {
+  display: none !important;
+  animation: none !important;
+}
+
+/* ── Any element marked as loading: hide its children so no placeholder
+      flashes. The wrapper itself keeps its box (so layout height is held),
+      but every visible descendant is removed from the paint tree. */
+[aria-busy="true"]::before,
+[aria-busy="true"]::after {
+  display: none !important;
+}
+[aria-busy="true"] > * {
+  visibility: hidden !important;
+  animation: none !important;
+}
+/* …but let aria-live status text through so screen-reader announcements
+   still work. We only want to hide visual placeholders, not text. */
+[aria-busy="true"] [aria-live],
+[aria-busy="true"] [role="status"] {
+  visibility: visible !important;
+}
+
+/* ── Kill every lingering infinite animation in skeleton contexts. */
+[class*="sk-"]::before,
+[class*="sk-"]::after,
+[class*="sp-sk-"]::before,
+[class*="sp-sk-"]::after,
+[class*="inv-sk-"]::before,
+[class*="inv-sk-"]::after,
+[class*="pub-sk-"]::before,
+[class*="pub-sk-"]::after {
+  animation: none !important;
+  display: none !important;
+}
+
+/* ── RenderDataGate fallback "watchdog stuck" / AuthStuckCard dots —
+      keep the card itself (it has real actions) but freeze its pulse. */
+.auth-stuck-dot,
+.app-loader [class*="spinner"] {
+  animation: none !important;
+}
+
+/* ── PullToRefresh indicator (visible only when actively pulling).
+      Keep functional — it's not a skeleton/loader for a page. No change. */

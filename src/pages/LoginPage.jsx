@@ -1,20 +1,14 @@
 import { useRef, useState } from 'react'
-import { useNavigate, useLocation, Navigate } from 'react-router-dom'
+import { useNavigate, Navigate } from 'react-router-dom'
 import { useAuth } from '../lib/AuthContext.jsx'
-import { pickSafePath } from '../lib/safePaths.js'
-import { ErrorPanel } from '../components/ErrorPanel.jsx'
-import appLogo from '../../logo2.png'
-import {
-  IconEye,
-  IconEyeOff,
-  IconKey,
-  IconUser,
-} from '../LoginDecor.jsx'
+import { useAuthLocale } from './authLocale.js'
+import headerLogo from '../../logo-header2.png'
+import './auth.css'
 
 export default function LoginPage() {
   const navigate = useNavigate()
-  const location = useLocation()
   const { loading: authLoading, ready, isAuthenticated, adminUser, clientProfile, login } = useAuth()
+  const { t, dir, lang } = useAuthLocale()
   const [showPassword, setShowPassword] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
@@ -23,22 +17,23 @@ export default function LoginPage() {
   // session state. This avoids the one-frame spinner flash (and potential
   // redirect ping-pong) caused by navigating before `isAuthenticated` flips.
   const [loginResult, setLoginResult] = useState(null)
-  // FE-C1 — ref-based guard. React state batches update on the next
-  // render, so a fast double-Enter can fire two parallel submits before
-  // `disabled={submitting}` reaches the DOM. The ref flips synchronously.
+  // FE-C1 — ref-based guard against double-submit.
   const submittingRef = useRef(false)
 
+  // Trust a fresh successful login result first — login() only returns
+  // ok=true AFTER syncSession has resolved at least one profile, so the
+  // redirect is safe even if React hasn't yet flushed the AuthContext
+  // state into our subscribed value. Waiting for `adminUser || clientProfile`
+  // to flip here caused a user-visible bounce: the onAuthStateChange
+  // listener fires a second syncSession on SIGNED_IN, and if that second
+  // call races to null profiles (transient RLS/network hiccup), hardLogout
+  // runs and the user ends up back at /login. Navigating on the result
+  // avoids that whole window.
+  if (loginResult?.ok) {
+    return <Navigate to={loginResult.redirectTo || '/dashboard'} replace />
+  }
   if (ready && isAuthenticated && (adminUser || clientProfile)) {
-    // Plan 04 §3.7 — when a login has just succeeded, prefer its redirectTo.
-    // Otherwise this also handles "already logged in" visits to /login.
-    if (loginResult?.ok) {
-      const fromPath = typeof location.state?.from === 'string' ? location.state.from : null
-      // S-M4 — strict allowlist, rejects backslash / %2F / protocol-relative
-      const safePath = pickSafePath(fromPath, null)
-      return <Navigate to={loginResult.redirectTo || safePath || '/browse'} replace />
-    }
-    const dest = adminUser ? '/admin' : '/dashboard'
-    return <Navigate to={dest} replace />
+    return <Navigate to="/dashboard" replace />
   }
 
   function handleChange(e) {
@@ -54,142 +49,148 @@ export default function LoginPage() {
     try {
       const result = await login(form.email, form.password)
       if (!result.ok) {
-        setError(result.error || 'Connexion impossible.')
+        setError(result.error || t('loginError'))
         return
       }
-      // Plan 04 §3.7 — DON'T navigate yet. Stash the result and let the
-      // `ready && isAuthenticated` branch above fire a <Navigate> on the
-      // next render, once AuthContext has flushed its state.
       setLoginResult(result)
     } finally {
-      // Release the synchronous guard and the local `submitting` flag.
-      // `pendingAuthFlush` (computed below) keeps the button disabled and
-      // its label on "Connexion en cours…" until the Navigate fires, so
-      // there's no mid-flight flash back to the interactive form.
       submittingRef.current = false
       setSubmitting(false)
     }
   }
 
-  // Plan 04 §3.7 — keep the submit button disabled/pending while we wait
-  // for AuthContext to become ready+authenticated, so there's no mid-flight
-  // flash back to the interactive form after a successful submit.
   const pendingAuthFlush = Boolean(loginResult?.ok) && !(ready && isAuthenticated && (adminUser || clientProfile))
   const submitPending = submitting || pendingAuthFlush
 
   if (authLoading && !loginResult) {
     return (
-      <main className="screen screen--login">
-        <div className="app-loader--route" aria-busy="true" aria-live="polite">
-          <span className="sr-only">Vérification de la session…</span>
-          <div className="app-loader--route__brand">Zitouna Garden</div>
-        </div>
+      <main className="auth-page auth-page--solo" lang={lang} dir={dir}>
+        <section className="auth-pane">
+          <div className="auth-form-wrap" aria-busy="true" aria-live="polite">
+            <p className="auth-status">{t('sessionCheck')}</p>
+          </div>
+        </section>
       </main>
     )
   }
 
   return (
-    <main className="screen screen--login">
-      <div className="auth-bg auth-bg--one" aria-hidden="true" />
-      <div className="auth-bg auth-bg--two" aria-hidden="true" />
-      <div className="login-content">
-        <header className="login-brand">
-          <div className="login-logo-wrap">
-            <img src={appLogo} alt="Zitounat Bladi logo" className="login-logo-image" />
+    <main className="auth-page auth-page--solo" lang={lang} dir={dir}>
+      <section className="auth-pane">
+        <div className="auth-pane__top">
+          <div className="auth-pane__brand" aria-hidden="true">
+            <div className="auth-pane__brand-mark">
+              <img src={headerLogo} alt="" />
+            </div>
+            <span className="auth-pane__brand-name">Zitouna Bladi</span>
           </div>
-        </header>
-
-        <h1 className="login-title">Connexion</h1>
-
-        <div className="divider login-divider">
-          <span>Connectez-vous à votre compte</span>
         </div>
 
-        {error ? (
-          <ErrorPanel
-            error={error}
-            title="Connexion impossible"
-            hint={error}
-            onRetry={() => setError('')}
-            retryLabel="Réessayer"
-          />
-        ) : null}
-
-        <form className="form login-form" onSubmit={handleSubmit}>
-          <div className="login-field">
-            <label htmlFor="login-email">E-mail</label>
-            <div className="input-wrap login-input">
-              <IconUser />
-              <input
-                id="login-email"
-                name="email"
-                type="email"
-                placeholder="Exemple@gmail.com"
-                autoComplete="email"
-                required
-                value={form.email}
-                onChange={handleChange}
-              />
-            </div>
+        <div className="auth-form-wrap">
+          <div className="auth-seg" role="tablist" aria-label="Authentification">
+            <button type="button" className="is-active" role="tab" aria-selected="true">{t('tabLogin')}</button>
+            <button type="button" role="tab" aria-selected="false" onClick={() => navigate('/register')}>{t('tabRegister')}</button>
           </div>
 
-          <div className="login-field login-field--password">
-            <label htmlFor="login-password">Mot de passe</label>
-            <div className="input-wrap login-input">
-              <IconKey />
-              <input
-                id="login-password"
-                name="password"
-                type={showPassword ? 'text' : 'password'}
-                placeholder="••••••••"
-                autoComplete="current-password"
-                required
-                value={form.password}
-                onChange={handleChange}
-              />
-              <button
-                type="button"
-                className="eye-button login-eye"
-                aria-label={showPassword ? 'Masquer' : 'Afficher'}
-                onClick={() => setShowPassword((v) => !v)}
-              >
-                {showPassword ? <IconEye /> : <IconEyeOff />}
+          {error ? (
+            <div className="auth-alert auth-alert--error" role="alert">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+              <span>{error}</span>
+              <button type="button" className="auth-alert__retry" onClick={() => setError('')}>{t('retry')}</button>
+            </div>
+          ) : null}
+
+          <form className="auth-form" onSubmit={handleSubmit} noValidate>
+            <div className="auth-field">
+              <label className="auth-field__label" htmlFor="login-email">{t('email')}</label>
+              <div className="auth-input">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+                  <rect x="3" y="5" width="18" height="14" rx="2" />
+                  <path d="M3 7l9 6 9-6" />
+                </svg>
+                <input
+                  id="login-email"
+                  name="email"
+                  type="email"
+                  placeholder="saif@gmail.com"
+                  autoComplete="email"
+                  required
+                  dir="ltr"
+                  value={form.email}
+                  onChange={handleChange}
+                />
+              </div>
+            </div>
+
+            <div className="auth-field">
+              <label className="auth-field__label" htmlFor="login-password">{t('password')}</label>
+              <div className="auth-input">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden>
+                  <rect x="4" y="11" width="16" height="10" rx="2" />
+                  <path d="M8 11V7a4 4 0 1 1 8 0v4" />
+                </svg>
+                <input
+                  id="login-password"
+                  name="password"
+                  type={showPassword ? 'text' : 'password'}
+                  placeholder="••••••"
+                  autoComplete="current-password"
+                  required
+                  dir="ltr"
+                  value={form.password}
+                  onChange={handleChange}
+                />
+                <button
+                  type="button"
+                  className="auth-input__suffix"
+                  onClick={() => setShowPassword((v) => !v)}
+                  aria-label={showPassword ? t('hidePwdAria') : t('showPwdAria')}
+                >
+                  {showPassword ? t('hidePwd') : t('showPwd')}
+                </button>
+              </div>
+            </div>
+
+            <div className="auth-opts">
+              <label className="auth-check">
+                <input type="checkbox" defaultChecked />
+                {t('keepLogged')}
+              </label>
+              <button type="button" className="auth-forgot" onClick={() => navigate('/forgot-password')}>
+                {t('forgotPwd')}
               </button>
             </div>
-          </div>
 
-          <div className="login-forgot-wrap">
-            <button
-              type="button"
-              className="forgot-password link-btn"
-              onClick={() => navigate('/forgot-password')}
-            >
-              Mot de passe oublié ?
+            <button type="submit" className="auth-btn auth-btn--primary" disabled={submitPending}>
+              {submitPending ? t('loginPending') : (
+                <>
+                  {t('loginBtn')}
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden style={{ transform: dir === 'rtl' ? 'scaleX(-1)' : 'none' }}>
+                    <path d="M5 12h14M13 5l7 7-7 7" />
+                  </svg>
+                </>
+              )}
             </button>
+
+            {pendingAuthFlush ? (
+              <p className="auth-status" role="status" aria-live="polite">{t('loginPending')}</p>
+            ) : null}
+          </form>
+        </div>
+
+        <div className="auth-pane__foot">
+          <div>{t('footCopy', { year: new Date().getFullYear() })}</div>
+          <div className="auth-pane__foot-links">
+            <a href="#/privacy" onClick={(e) => e.preventDefault()}>{t('privacy')}</a>
+            <a href="#/terms" onClick={(e) => e.preventDefault()}>{t('terms')}</a>
+            <a href="#/help" onClick={(e) => e.preventDefault()}>{t('help')}</a>
           </div>
-
-          <button type="submit" className="submit-button login-submit" disabled={submitPending}>
-            {submitPending ? 'Connexion en cours…' : 'Se connecter'}
-          </button>
-          {pendingAuthFlush ? (
-            <p
-              className="login-status"
-              role="status"
-              aria-live="polite"
-              style={{ marginTop: 8, textAlign: 'center', opacity: 0.75, fontSize: 13 }}
-            >
-              Connexion en cours…
-            </p>
-          ) : null}
-        </form>
-
-        <p className="signup-text login-signup">
-          Pas encore de compte ?{' '}
-          <button type="button" className="link-btn" onClick={() => navigate('/register')}>
-            S&apos;inscrire
-          </button>
-        </p>
-      </div>
+        </div>
+      </section>
     </main>
   )
 }

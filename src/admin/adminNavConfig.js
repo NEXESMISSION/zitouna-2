@@ -31,11 +31,11 @@ export const NAV_ITEMS = [
   { to: '/admin/call-center', label: "Centre d'appels", icon: 'phone' },
   { to: '/admin/commercial-calendar', label: 'Calendrier commercial', icon: 'calendar-clock' },
 
-  // Commissions & controle
+  // Commissions & controle — unified shell (/admin/commissions/*) with tabs
+  // for Vue d'ensemble / Réseau / Journal / Analyses / Anomalies.
   { to: '/admin/commissions', label: 'Commissions', icon: 'git-branch' },
-  { to: '/admin/commission-ledger', label: 'Journal des commissions', icon: 'wallet' },
-  { to: '/admin/commissions/analytics', label: 'Analyses commissions', icon: 'tag' },
-  { to: '/admin/commissions/anomalies', label: 'Anomalies parrainage', icon: 'shield' },
+  // Centralised page to process payout requests + distribute harvest revenue.
+  { to: '/admin/distributions', label: 'Distributions', icon: 'send' },
   { to: '/admin/audit-log', label: "Journal d'activite", icon: 'file-text' },
 
   // Gouvernance

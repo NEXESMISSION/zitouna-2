@@ -3,6 +3,7 @@ import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../lib/AuthContext.jsx'
 import { ensureCurrentClientProfile } from '../lib/db.js'
 import { useWatchdog } from '../hooks/useWatchdog.js'
+import { useTheme } from '../lib/ThemeContext.jsx'
 
 // Plan 04 §3.3 — profile-heal UX trap
 // After N seconds of the initial auth loading spinner, surface a
@@ -83,8 +84,8 @@ export default function RequireCustomerAuth({ children }) {
     return (
       <div style={{ minHeight: '60vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <div style={{ maxWidth: 440, textAlign: 'center', padding: '2rem' }}>
-          <h2 style={{ marginBottom: '1rem', color: 'var(--color-text, #fff)' }}>Profil introuvable</h2>
-          <p style={{ marginBottom: '1rem', color: 'var(--color-text-secondary, #ccc)', lineHeight: 1.5 }}>
+          <h2 style={{ marginBottom: '1rem', color: 'var(--zb-text, #fff)' }}>Profil introuvable</h2>
+          <p style={{ marginBottom: '1rem', color: 'var(--zb-text-dim, #ccc)', lineHeight: 1.5 }}>
             {authError
               ? `Erreur : ${authError}`
               : "Votre profil client n'a pas pu être chargé. Il est possible qu'il n'ait pas encore été créé ou qu'il y ait un problème temporaire."}
@@ -100,15 +101,15 @@ export default function RequireCustomerAuth({ children }) {
             </button>
             <button
               className="submit-button"
-              style={{ minWidth: 120, background: 'var(--color-danger, #e74c3c)' }}
+              style={{ minWidth: 120, background: 'var(--zb-danger, #e74c3c)' }}
               onClick={handleLogout}
             >
               Se déconnecter
             </button>
           </div>
           {showSupport ? (
-            <p style={{ marginTop: 20, fontSize: 13, color: 'var(--color-text-secondary, #ccc)' }}>
-              Toujours bloqué ? <a href="mailto:support@zitounabladi.com" style={{ color: 'var(--color-primary, #2e7d32)' }}>Contactez le support</a>.
+            <p style={{ marginTop: 20, fontSize: 13, color: 'var(--zb-text-dim, #ccc)' }}>
+              Toujours bloqué ? <a href="mailto:support@zitounabladi.com" style={{ color: 'var(--zb-primary, #2e7d32)' }}>Contactez le support</a>.
             </p>
           ) : null}
         </div>
@@ -127,39 +128,55 @@ export default function RequireCustomerAuth({ children }) {
 // ----------------------------------------------------------------------------
 function AuthStuckCard({ retrying, onRetry, onLogout }) {
   const [elapsed, setElapsed] = useState(0)
+  const { theme } = useTheme()
+  const isLight = theme === 'light'
   useEffect(() => {
     const t = window.setInterval(() => setElapsed((s) => s + 1), 1000)
     return () => window.clearInterval(t)
   }, [])
 
+  // Palette switches with the active theme so the stuck panel matches
+  // the rest of the UI (light mode was previously stuck in dark olive).
+  const accent       = isLight ? '#2563eb'                : '#a8cc50'
+  const accentSoft   = isLight ? 'rgba(37,99,235,0.14)'   : 'rgba(168,204,80,0.14)'
+  const accentBorder = isLight ? 'rgba(37,99,235,0.3)'    : 'rgba(168,204,80,0.28)'
+  const accentMid    = isLight ? 'rgba(37,99,235,0.6)'    : 'rgba(168,204,80,0.6)'
+  const accentZero   = isLight ? 'rgba(37,99,235,0)'      : 'rgba(168,204,80,0)'
+  const cardBg       = isLight ? '#ffffff'                : 'rgba(22,41,23,0.72)'
+  const textMain     = isLight ? '#0f172a'                : '#f4f9ec'
+  const textDim      = isLight ? 'rgba(15,23,42,0.7)'     : 'rgba(231,239,224,0.78)'
+  const textMuted    = isLight ? 'rgba(15,23,42,0.5)'     : 'rgba(231,239,224,0.55)'
+  const ghostBorder  = isLight ? 'rgba(15,23,42,0.2)'     : 'rgba(231,239,224,0.3)'
+  const shadow       = isLight ? '0 20px 48px rgba(15,23,42,0.14)' : '0 20px 48px rgba(0,0,0,0.35)'
+
   const card = {
     width: '100%',
     maxWidth: 460,
-    background: 'rgba(22,41,23,0.72)',
-    border: '1px solid rgba(168,204,80,0.28)',
+    background: cardBg,
+    border: `1px solid ${accentBorder}`,
     borderRadius: 16,
     padding: '28px 26px',
-    boxShadow: '0 20px 48px rgba(0,0,0,0.35)',
-    backdropFilter: 'blur(8px)',
-    color: '#e7efe0',
+    boxShadow: shadow,
+    backdropFilter: isLight ? 'none' : 'blur(8px)',
+    color: textMain,
     textAlign: 'center',
   }
   const badge = {
     width: 56, height: 56, borderRadius: '50%',
     margin: '0 auto 18px',
     display: 'grid', placeItems: 'center',
-    background: 'rgba(168,204,80,0.14)',
-    border: '1px solid rgba(168,204,80,0.35)',
+    background: accentSoft,
+    border: `1px solid ${accentBorder}`,
   }
   const dot = {
     width: 10, height: 10, borderRadius: '50%',
-    background: '#a8cc50',
-    boxShadow: '0 0 0 0 rgba(168,204,80,0.6)',
-    animation: 'auth-stuck-pulse 1.6s ease-in-out infinite',
+    background: accent,
+    boxShadow: `0 0 0 0 ${accentMid}`,
+    animation: `${isLight ? 'auth-stuck-pulse-light' : 'auth-stuck-pulse'} 1.6s ease-in-out infinite`,
   }
-  const title = { fontSize: 20, fontWeight: 600, margin: '0 0 6px', color: '#f4f9ec' }
-  const hint  = { fontSize: 14, lineHeight: 1.55, margin: '0 0 18px', color: 'rgba(231,239,224,0.78)' }
-  const timer = { fontSize: 12, color: 'rgba(231,239,224,0.55)', margin: '0 0 22px' }
+  const title = { fontSize: 20, fontWeight: 600, margin: '0 0 6px', color: textMain }
+  const hint  = { fontSize: 14, lineHeight: 1.55, margin: '0 0 18px', color: textDim }
+  const timer = { fontSize: 12, color: textMuted, margin: '0 0 22px' }
   const row   = { display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }
   const btnBase = {
     minWidth: 148, padding: '10px 18px', borderRadius: 10,
@@ -168,15 +185,17 @@ function AuthStuckCard({ retrying, onRetry, onLogout }) {
   }
   const btnPrimary = {
     ...btnBase,
-    background: 'linear-gradient(135deg,#a8cc50 0%,#7aa132 100%)',
-    color: '#14210b',
+    background: isLight
+      ? 'linear-gradient(135deg,#2563eb 0%,#1e40af 100%)'
+      : 'linear-gradient(135deg,#a8cc50 0%,#7aa132 100%)',
+    color: isLight ? '#ffffff' : '#14210b',
     opacity: retrying ? 0.7 : 1,
   }
   const btnGhost = {
     ...btnBase,
     background: 'transparent',
-    color: '#e7efe0',
-    borderColor: 'rgba(231,239,224,0.3)',
+    color: textMain,
+    borderColor: ghostBorder,
   }
 
   return (
@@ -191,6 +210,11 @@ function AuthStuckCard({ retrying, onRetry, onLogout }) {
         0%   { transform: scale(1);   box-shadow: 0 0 0 0   rgba(168,204,80,0.55); }
         70%  { transform: scale(1.2); box-shadow: 0 0 0 14px rgba(168,204,80,0); }
         100% { transform: scale(1);   box-shadow: 0 0 0 0   rgba(168,204,80,0); }
+      }
+      @keyframes auth-stuck-pulse-light {
+        0%   { transform: scale(1);   box-shadow: 0 0 0 0   ${accentMid}; }
+        70%  { transform: scale(1.2); box-shadow: 0 0 0 14px ${accentZero}; }
+        100% { transform: scale(1);   box-shadow: 0 0 0 0   ${accentZero}; }
       }`}</style>
       <div style={card} role="alert" aria-live="polite">
         <div style={badge}><span style={dot} /></div>

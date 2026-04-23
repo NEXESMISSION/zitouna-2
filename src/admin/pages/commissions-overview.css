@@ -1,0 +1,340 @@
+/* ============================================================================
+   CommissionsOverviewPage — landing at /admin/commissions.
+   KPI strip + status breakdown bar + two-column (top beneficiaries / recent
+   events). Mobile: strip wraps, columns stack.
+   ============================================================================ */
+
+.cov { display: grid; gap: 18px; }
+
+/* ── KPI strip ───────────────────────────────────────────────────────── */
+.cov__kpis {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.cov__kpi {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-rows: auto auto;
+  column-gap: 10px;
+  row-gap: 2px;
+  padding: 14px 16px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.12s ease, transform 0.12s ease, box-shadow 0.12s ease;
+}
+.cov__kpi--link { cursor: pointer; }
+.cov__kpi--link:hover { border-color: #cbd5e1; transform: translateY(-1px); box-shadow: 0 4px 16px rgba(15,23,42,0.06); }
+.cov__kpi--link:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+
+.cov__kpi-icon {
+  grid-row: span 2;
+  align-self: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  line-height: 1;
+}
+.cov__kpi-icon--warn  { background: #fef3c7; color: #b45309; }
+.cov__kpi-icon--good  { background: #dcfce7; color: #15803d; }
+.cov__kpi-icon--info  { background: #e0e7ff; color: #3730a3; }
+.cov__kpi-icon--muted { background: #f1f5f9; color: #475569; }
+
+.cov__kpi-label {
+  grid-column: 2;
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+}
+
+.cov__kpi-value {
+  grid-column: 2;
+  font-size: 20px;
+  font-weight: 800;
+  color: #0f172a;
+  line-height: 1.15;
+}
+
+.cov__kpi-hint {
+  grid-column: 1 / -1;
+  margin-top: 4px;
+  font-size: 11.5px;
+  color: #94a3b8;
+  line-height: 1.35;
+}
+
+.cov__kpi-chev {
+  grid-row: span 2;
+  align-self: center;
+  color: #cbd5e1;
+  font-size: 16px;
+  transition: color 0.12s ease, transform 0.12s ease;
+}
+.cov__kpi--link:hover .cov__kpi-chev { color: #2563eb; transform: translateX(2px); }
+
+/* ── Sections ───────────────────────────────────────────────────────── */
+.cov__section {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 16px 18px;
+}
+
+.cov__section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.cov__section-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.cov__section-sub {
+  font-size: 12px;
+  color: #64748b;
+}
+
+.cov__link {
+  font-size: 12px;
+  color: #2563eb;
+  text-decoration: none;
+  font-weight: 600;
+}
+.cov__link:hover { text-decoration: underline; }
+
+.cov__empty {
+  margin: 0;
+  padding: 18px 0;
+  text-align: center;
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+/* ── Status bar ─────────────────────────────────────────────────────── */
+.cov__bar {
+  display: flex;
+  height: 12px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #f1f5f9;
+  margin-bottom: 12px;
+}
+
+.cov__bar-seg { height: 100%; transition: width 0.3s ease; }
+.cov__bar-seg--paid    { background: #22c55e; }
+.cov__bar-seg--payable { background: #3b82f6; }
+.cov__bar-seg--pending { background: #f59e0b; }
+
+.cov__bar-legend {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.cov__bar-li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #475569;
+}
+
+.cov__bar-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.cov__bar-li--paid    .cov__bar-dot { background: #22c55e; }
+.cov__bar-li--payable .cov__bar-dot { background: #3b82f6; }
+.cov__bar-li--pending .cov__bar-dot { background: #f59e0b; }
+
+.cov__bar-label { color: #475569; }
+.cov__bar-amt { color: #0f172a; font-weight: 700; }
+
+/* ── Two-column grid ────────────────────────────────────────────────── */
+.cov__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px;
+}
+
+/* ── Top beneficiaries list ─────────────────────────────────────────── */
+.cov__top {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.cov__top-row {
+  display: grid;
+  grid-template-columns: 28px 32px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  transition: background 0.12s ease;
+}
+.cov__top-row:hover { background: #f8fafc; }
+
+.cov__top-rank {
+  font-size: 11px;
+  font-weight: 700;
+  color: #94a3b8;
+  text-align: right;
+}
+
+.cov__top-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #bfdbfe;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.cov__top-main { min-width: 0; display: grid; gap: 2px; }
+
+.cov__top-name {
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cov__top-name:hover { color: #1d4ed8; text-decoration: underline; }
+
+.cov__top-sub {
+  font-size: 11.5px;
+  color: #94a3b8;
+}
+
+.cov__top-amt {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Recent events list ─────────────────────────────────────────────── */
+.cov__recent {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.cov__recent-row {
+  display: grid;
+  grid-template-columns: 34px 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  transition: background 0.12s ease;
+}
+.cov__recent-row:hover { background: #f8fafc; }
+
+.cov__recent-lvl {
+  width: 34px;
+  height: 26px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+}
+.cov__recent-lvl--l1 { background: #2563eb; }
+.cov__recent-lvl--l2 { background: #4f46e5; }
+.cov__recent-lvl--l3 { background: #7c3aed; }
+.cov__recent-lvl--l4 { background: #0e7490; }
+
+.cov__recent-main { min-width: 0; display: grid; gap: 2px; }
+
+.cov__recent-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cov__recent-sub { font-size: 11.5px; color: #94a3b8; }
+
+.cov__recent-amt {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.cov__recent-st {
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.cov__recent-st--orange { background: #fef3c7; color: #92400e; }
+.cov__recent-st--blue   { background: #dbeafe; color: #1d4ed8; }
+.cov__recent-st--green  { background: #dcfce7; color: #15803d; }
+.cov__recent-st--gray   { background: #f1f5f9; color: #64748b; }
+
+/* ── Responsive ─────────────────────────────────────────────────────── */
+@media (max-width: 980px) {
+  .cov__kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cov__grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 540px) {
+  .cov__kpis { grid-template-columns: 1fr; gap: 10px; }
+  .cov__section { padding: 14px; border-radius: 12px; }
+  .cov__kpi { padding: 12px 14px; border-radius: 12px; }
+  .cov__kpi-value { font-size: 18px; }
+  .cov__bar-legend { gap: 10px; }
+  .cov__recent-row { grid-template-columns: 30px 1fr auto; gap: 8px; }
+  .cov__recent-st { display: none; }
+  .cov__top-row { grid-template-columns: 20px 28px 1fr auto; gap: 8px; padding: 6px 8px; }
+  .cov__top-avatar { width: 28px; height: 28px; }
+}

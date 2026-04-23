@@ -364,21 +364,31 @@ export function useNotifications({ userId, scope = null, category = null, limit 
           return { ...n, read_at: nowIso }
         }),
       )
+      // Split the try/catch so ONLY the RPC failure rolls back the
+      // optimistic update. Previously `refreshRef.current()` lived in the
+      // same try — a transient network blip during the refetch reverted a
+      // successful mark-read, which is exactly the "Tout marquer lu
+      // doesn't work" symptom users reported. The refresh is a
+      // nice-to-have (realtime usually handles it), not a correctness
+      // precondition.
       try {
         await markAllReadByCategories({
           scope: opts.scope ?? scope,
           categories: catList,
         })
-        // Realtime postgres_changes should trigger a refetch on its own, but
-        // some environments (replication lag, dropped channels, replica read)
-        // deliver it late or not at all — forcing a refresh here guarantees
-        // the UI reflects the true DB state after the RPC commits. Without
-        // this, if the RPC silently errored the optimistic update would stick
-        // until the user hits F5 and sees the rows pop back as unread.
+      } catch (err) {
+        console.warn('[notifications.markAllRead] RPC failed, reverting optimistic state', err)
+        setNotifs(prevSnapshot)
+        return
+      }
+      try {
+        // Realtime postgres_changes should trigger a refetch on its own,
+        // but replication lag / dropped channels can delay it. A manual
+        // refresh here keeps the UI honest without touching the
+        // already-persisted DB state if the refetch itself errors.
         await refreshRef.current()
       } catch (err) {
-        console.warn('[notifications.markAllRead] failed, reverting optimistic state', err)
-        setNotifs(prevSnapshot)
+        console.warn('[notifications.markAllRead] post-mark refresh failed (RPC succeeded; rows are read server-side)', err)
       }
     },
     [scope, notifs],

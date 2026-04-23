@@ -13,6 +13,7 @@ import { useMemo, useState, useEffect, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useProjects, useOffers, useProjectWorkflow } from '../../lib/useSupabase.js'
 import CommissionRulesEditor from '../components/CommissionRulesEditor.jsx'
+import ProjectHarvestsTab from './ProjectHarvestsTab.jsx'
 import * as db from '../../lib/db.js'
 import { emitInvalidate } from '../../lib/dataEvents.js'
 import { runSafeAction } from '../../lib/runSafeAction.js'
@@ -52,14 +53,35 @@ function sumBatchTrees(list) {
   return (list || []).reduce((s, b) => s + (Number(b.count) || 0), 0)
 }
 
-const EMPTY_PROJECT = { title: '', city: '', region: '', address: '', mapUrl: '' }
-const EMPTY_OFFER = { label: '', mode: 'installments', avancePct: '', duration: '', cashAmount: '', note: '', usePricePerSqm: false, pricePerSqm: '' }
+const EMPTY_PROJECT = {
+  title: '', city: '', region: '', address: '', mapUrl: '',
+  annualRevenueTotal: '',
+  treeHealthPct: '', soilHumidityPct: '', nutrientsPct: '',
+  /** @type {{year: number|string, count: string}[]} Project-level cohorts */
+  treeBatches: [{ year: CY, count: '' }],
+}
+const EMPTY_OFFER = { label: '', mode: 'installments', avancePct: '', avanceTnd: '', avanceInput: 'pct', duration: '', cashAmount: '', note: '', usePricePerSqm: false, pricePerSqm: '' }
 const EMPTY_CHECK_ITEM = { key: '', label: '', required: true, grantAllowedPagesText: '' }
 const DH = { treeSante: 95, humidity: 65, nutrients: 80 }
 
 function fmt(v) { return `${(Number(v) || 0).toLocaleString('fr-FR')} DT` }
 function ti(y) { const a = CY - y; if (a < 3) return { rate: 0, label: 'Jeune' }; if (a < 6) return { rate: 45, label: 'Dev.' }; if (a < 10) return { rate: 75, label: 'Croissance' }; return { rate: 90, label: 'Production' } }
-function pRev(p) { if (!p.treeBatches?.length) return p.trees * 90; return p.treeBatches.reduce((s, b) => s + b.count * ti(b.year).rate, 0) }
+// Per-plot annual revenue estimate. When the project carries an
+// `annualRevenueTotal` figure (entered by the admin from the "Nouveau
+// projet" / "Modifier le projet" modals), each parcelle earns its share
+// of that total pro-rata to its own surface. Falls back to the historical
+// tree-age heuristic for legacy projects without a configured total.
+function pRev(p, proj) {
+  const totalArea = (proj?.plots || []).reduce((s, x) => s + (Number(x.area) || 0), 0)
+  const myArea = Number(p?.area) || 0
+  if (totalArea <= 0 || myArea <= 0) return 0
+  let projRev = Number(proj?.annualRevenueTotal) || 0
+  if (projRev <= 0 && Array.isArray(proj?.treeBatches)) {
+    projRev = proj.treeBatches.reduce((s, b) => s + (Number(b.count) || 0) * ti(Number(b.year) || CY).rate, 0)
+  }
+  if (projRev <= 0) return 0
+  return Math.round((myArea / totalArea) * projRev)
+}
 function sLbl(s) { return s === 'available' ? 'Dispo' : s === 'reserved' ? 'Réservée' : 'Vendue' }
 function pillCls(s) { return s === 'available' ? 'pdp-pill pdp-pill--avail' : s === 'reserved' ? 'pdp-pill pdp-pill--reserved' : 'pdp-pill pdp-pill--sold' }
 
@@ -217,8 +239,27 @@ export default function ProjectDetailPage() {
   const offers = offersByProject[project?.id] || []
   const totalTrees = plots.reduce((s, p) => s + (p.trees || 0), 0)
   const totalAreaM2 = useMemo(() => sumParcelArea(plots), [plots])
-  const totalValue = plots.reduce((s, p) => s + (Number(p.totalPrice) || 0), 0)
-  const totalRevenue = plots.reduce((s, p) => s + pRev(p), 0)
+  // Fallback price source for m²-priced projects: catalog plot.totalPrice is 0
+  // when the sale price lives on the offer (offer.pricePerSqm). We pick the
+  // first cash-mode offer with a price/m² (then any offer with a price/m²,
+  // then any offer with a flat cashAmount) so the KPI strip reflects the
+  // real expected sale value instead of showing 0.
+  const valueFallbackOffer = useMemo(() => (
+    offers.find((o) => o?.mode === 'cash' && Number(o.pricePerSqm) > 0)
+    ?? offers.find((o) => Number(o.pricePerSqm) > 0)
+    ?? offers.find((o) => o?.mode === 'cash' && Number(o.cashAmount) > 0)
+    ?? null
+  ), [offers])
+  const valueForPlot = (p) => {
+    const catalog = Number(p?.totalPrice) || 0
+    if (catalog > 0) return catalog
+    if (!valueFallbackOffer) return 0
+    const sqm = Number(valueFallbackOffer.pricePerSqm) || 0
+    if (sqm > 0) return (Number(p?.area) || 0) * sqm
+    return Number(valueFallbackOffer.cashAmount) || 0
+  }
+  const totalValue = plots.reduce((s, p) => s + valueForPlot(p), 0)
+  const totalRevenue = plots.reduce((s, p) => s + pRev(p, project), 0)
   const avail = plots.filter(p => p.status === 'available').length
   const filteredPlots = useMemo(() => {
     const q = parcelQ.trim()
@@ -232,18 +273,46 @@ export default function ProjectDetailPage() {
     )
   }, [plots, parcelQ])
 
-  const projHealth = healthLocal[project?.id] || { ...DH }
+  // Persisted values straight off the project row — these are the source of
+  // truth. When the user hasn't edited the sliders yet we display these; they
+  // also serve as the "saved baseline" that drives the dirty indicator.
+  const persistedHealth = useMemo(() => ({
+    treeSante: project?.treeHealthPct != null ? Number(project.treeHealthPct) : DH.treeSante,
+    humidity:  project?.soilHumidityPct != null ? Number(project.soilHumidityPct) : DH.humidity,
+    nutrients: project?.nutrientsPct != null ? Number(project.nutrientsPct) : DH.nutrients,
+  }), [project?.treeHealthPct, project?.soilHumidityPct, project?.nutrientsPct])
+  const projHealth = healthLocal[project?.id] || persistedHealth
   const setHealth = (field, val) => { setHealthLocal(prev => ({ ...prev, [project.id]: { ...projHealth, [field]: Number(val) } })) }
-  // Apply = snapshot current values as the "saved" baseline. Cancel = revert
-  // the local edit to the saved baseline. Persistence to DB isn't wired yet
-  // (no column) — this keeps the interaction truthful and ready to plug in.
-  const applyHealth = () => {
-    if (!project?.id) return
-    setHealthSaved(prev => ({ ...prev, [project.id]: { ...projHealth } }))
+  // Apply = persist the three metrics to projects.{tree_health_pct,
+  // soil_humidity_pct, nutrients_pct} and snapshot as the saved baseline so
+  // the dirty indicator clears. Cancel = revert local edits to the baseline.
+  const applyHealth = async () => {
+    if (!project?.id || saving) return
+    const res = await runSafeAction({
+      setBusy: setSaving, onError: reportOpError, label: 'Enregistrer la santé du projet',
+    }, async () => {
+      await db.upsertProject({
+        id: project.id,
+        treeHealthPct: projHealth.treeSante,
+        soilHumidityPct: projHealth.humidity,
+        nutrientsPct: projHealth.nutrients,
+      })
+      await refreshProjects()
+    })
+    if (res.ok) {
+      setHealthSaved(prev => ({ ...prev, [project.id]: { ...projHealth } }))
+      // Clear the local override so the next render reads from the refreshed
+      // project row — keeps state coherent if the DB clamped / adjusted values.
+      setHealthLocal(prev => {
+        const next = { ...prev }
+        delete next[project.id]
+        return next
+      })
+    }
   }
   const cancelHealth = () => {
     if (!project?.id) return
-    const baseline = healthSaved[project.id] || { ...DH }
+    const baseline = healthSaved[project.id] || persistedHealth
     setHealthLocal(prev => ({ ...prev, [project.id]: { ...baseline } }))
   }
 
@@ -280,7 +349,28 @@ export default function ProjectDetailPage() {
   }
   const avgPrice = plots.length ? totalValue / plots.length : 0
 
-  const openEdit = () => { if (!project) return; setPf({ title: project.title, city: project.city, region: project.region || '', address: project.address || '', mapUrl: project.mapUrl || '' }); setModal('edit') }
+  const openEdit = () => {
+    if (!project) return
+    const batches = Array.isArray(project.treeBatches) && project.treeBatches.length
+      ? project.treeBatches.map((b) => ({
+          year: Number(b?.year) || CY,
+          count: b?.count != null ? String(b.count) : '',
+        }))
+      : [{ year: CY, count: '' }]
+    setPf({
+      title: project.title,
+      city: project.city,
+      region: project.region || '',
+      address: project.address || '',
+      mapUrl: project.mapUrl || '',
+      annualRevenueTotal: project.annualRevenueTotal != null ? String(project.annualRevenueTotal) : '',
+      treeHealthPct: project.treeHealthPct != null ? String(project.treeHealthPct) : '',
+      soilHumidityPct: project.soilHumidityPct != null ? String(project.soilHumidityPct) : '',
+      nutrientsPct: project.nutrientsPct != null ? String(project.nutrientsPct) : '',
+      treeBatches: batches,
+    })
+    setModal('edit')
+  }
   const saveEdit = async () => {
     if (saving) return
     const res = await runSafeAction({
@@ -289,15 +379,32 @@ export default function ProjectDetailPage() {
       // Preserve existing area / year (no longer editable from this form) —
       // db.upsertProject always writes these columns so we echo the stored
       // values rather than clobbering them with empty strings / current year.
+      // Same logic now applies to every other scalar string field: if the
+      // form value is empty we keep the previously-stored value instead of
+      // writing `''`. This protects against a half-initialized pf (e.g.
+      // modal opened before the project finished loading) silently wiping
+      // region / address / mapUrl — the bug behind "fields disappear after
+      // fill" reports.
+      const trimOrKeep = (v, fallback) => {
+        const s = (v ?? '').toString().trim()
+        return s || fallback || ''
+      }
       await db.upsertProject({
         id: project.id,
-        title: pf.title.trim() || project.title,
-        city: pf.city.trim() || project.city,
-        region: pf.region.trim(),
-        address: pf.address.trim(),
+        title: trimOrKeep(pf.title, project.title),
+        city: trimOrKeep(pf.city, project.city),
+        region: trimOrKeep(pf.region, project.region),
+        address: trimOrKeep(pf.address, project.address),
         area: project.area || '',
         year: project.year || new Date().getFullYear(),
-        mapUrl: pf.mapUrl.trim(),
+        mapUrl: trimOrKeep(pf.mapUrl, project.mapUrl),
+        annualRevenueTotal: pf.annualRevenueTotal === '' || pf.annualRevenueTotal == null
+          ? (Number(project.annualRevenueTotal) || 0)
+          : (Number(pf.annualRevenueTotal) || 0),
+        treeBatches: normalizeBatchInput(pf.treeBatches),
+        treeHealthPct: pf.treeHealthPct === '' ? null : pf.treeHealthPct,
+        soilHumidityPct: pf.soilHumidityPct === '' ? null : pf.soilHumidityPct,
+        nutrientsPct: pf.nutrientsPct === '' ? null : pf.nutrientsPct,
       })
       emitInvalidate('projects')
       await refreshProjects()
@@ -319,33 +426,66 @@ export default function ProjectDetailPage() {
     setPcf({ ...EMPTY_PARCEL, status: 'available', treeBatches: [{ year: CY, count: '' }] })
     setModal('add-parcel')
   }
+
+  // Bulk parcel creation: generate N parcels with the same surface,
+  // labels like "a1","a2",…,"a99" (prefix + incrementing integer).
+  const [bulk, setBulk] = useState({ prefix: '', from: '1', to: '10', area: '' })
+  const openBulk = () => {
+    setBulk({ prefix: '', from: '1', to: '10', area: '' })
+    setModal('add-parcels-bulk')
+  }
+  const saveBulk = async () => {
+    if (saving) return
+    const area = Number(bulk.area)
+    const from = Math.max(1, Math.floor(Number(bulk.from) || 0))
+    const to = Math.floor(Number(bulk.to) || 0)
+    const prefix = String(bulk.prefix || '').trim().toLowerCase().slice(0, 12)
+    if (!Number.isFinite(area) || area <= 0) return
+    if (!Number.isFinite(to) || to < from) return
+    if (to - from + 1 > 500) return
+    const res = await runSafeAction({
+      setBusy: setSaving, onError: reportOpError, label: 'Ajouter en série',
+    }, async () => {
+      for (let i = from; i <= to; i++) {
+        const label = `${prefix}${i}`.slice(0, 16)
+        // Best-effort serial insert. Unique-label conflicts throw —
+        // runSafeAction reports the first one; the rest are skipped.
+        await db.upsertParcelForProject(project.id, {
+          plotNumber: 0,
+          label,
+          trees: 0,
+          area,
+          pricePerTree: 0,
+          totalPrice: 0,
+          status: 'available',
+          treeBatches: [],
+        })
+      }
+      emitInvalidate('projects')
+      await refreshProjects()
+    })
+    if (res.ok) setModal(null)
+  }
   const saveNew = async () => {
-    const batches = normalizeBatchInput(pcf.treeBatches)
-    const t = batches.length ? sumBatchTrees(batches) : Number(pcf.trees)
     const a = Number(pcf.area)
-    if (!Number.isFinite(t) || t <= 0) return
-    // The user-facing identifier (free-form text, optional but recommended).
-    // Trim + lowercase for storage / comparison; length capped by input.
+    if (!Number.isFinite(a) || a <= 0) return
     const label = String(pcf.label || '').trim().toLowerCase().slice(0, 16)
     if (!label) return
     if (saving) return
     const res = await runSafeAction({
       setBusy: setSaving, onError: reportOpError, label: 'Ajouter la parcelle',
     }, async () => {
-      // New parcels: no price/tree collected in the add form — pricing is
-      // handled later (per-batch). Start with pricePerTree=0 and let the
-      // edit flow / public pricing fill it in.
-      // `plotNumber: 0` asks db.upsertParcelForProject to auto-assign the
-      // next integer for this project (race-safe via unique index).
+      // Parcels-are-surface model: no trees, no cohorts at parcel level.
+      // Revenue is derived from project.treeBatches × (parcel.area / project.area).
       await db.upsertParcelForProject(project.id, {
         plotNumber: 0,
         label,
-        trees: t,
-        area: a > 0 ? a : 0,
+        trees: 0,
+        area: a,
         pricePerTree: 0,
         totalPrice: 0,
         status: 'available',
-        treeBatches: batches,
+        treeBatches: [],
       })
       emitInvalidate('projects')
       await refreshProjects()
@@ -372,12 +512,9 @@ export default function ProjectDetailPage() {
     setModal({ type: 'edit-parcel', plotId: pl.id, plot: pl })
   }
   const saveEditPl = async (pl) => {
-    const batches = normalizeBatchInput(pcf.treeBatches)
-    const t = batches.length ? sumBatchTrees(batches) : Number(pcf.trees)
     const a = Number(pcf.area)
-    if (!Number.isFinite(t) || t <= 0) return
+    if (!Number.isFinite(a) || a <= 0) return
     if (saving) return
-    // Prix/arbre is no longer editable here — carry over the existing value.
     const pp = Number(pl.pricePerTree) || 0
     const label = String(pcf.label || '').trim().toLowerCase().slice(0, 16)
     const res = await runSafeAction({
@@ -387,40 +524,17 @@ export default function ProjectDetailPage() {
         dbId: pl.dbId || pcf.dbId,
         plotNumber: pl.id,
         label,
-        trees: t,
-        area: a > 0 ? a : pl.area,
+        trees: Number(pl.trees) || 0,
+        area: a,
         pricePerTree: pp,
-        totalPrice: Math.max(0, t * pp),
+        totalPrice: Number(pl.totalPrice) || 0,
         status: pcf.status || pl.status,
-        treeBatches: batches,
+        treeBatches: [],
       })
       emitInvalidate('projects')
       await refreshProjects()
     })
     if (res.ok) setModal(null)
-  }
-
-  const parcelBatchRows = pcf.treeBatches?.length ? pcf.treeBatches : [{ year: CY, count: '' }]
-  const updateBatchRow = (idx, patch) => {
-    setPcf((f) => {
-      const rows = [...(f.treeBatches?.length ? f.treeBatches : [{ year: CY, count: '' }])]
-      rows[idx] = { ...rows[idx], ...patch }
-      return { ...f, treeBatches: rows }
-    })
-  }
-  const addBatchRow = () => {
-    setPcf((f) => ({
-      ...f,
-      treeBatches: [...(f.treeBatches?.length ? f.treeBatches : [{ year: CY, count: '' }]), { year: CY, count: '' }],
-    }))
-  }
-  const removeBatchRow = (idx) => {
-    setPcf((f) => {
-      const rows = [...(f.treeBatches?.length ? f.treeBatches : [{ year: CY, count: '' }])]
-      if (rows.length <= 1) return f
-      rows.splice(idx, 1)
-      return { ...f, treeBatches: rows }
-    })
   }
 
   const delPl = async (dbId) => {
@@ -444,6 +558,8 @@ export default function ProjectDetailPage() {
       label: o.name || o.label,
       mode,
       avancePct: String(o.downPayment ?? o.avancePct ?? ''),
+      avanceTnd: '',
+      avanceInput: 'pct',
       duration: String(o.duration ?? ''),
       cashAmount: String(o.cashAmount ?? ''),
       note: o.note || '',
@@ -456,12 +572,23 @@ export default function ProjectDetailPage() {
     if (!of.label.trim()) return
     if (saving) return
     const isCash = of.mode === 'cash'
+    // When the admin enters the avance in absolute TND, convert to a
+    // percentage using the project's average parcel price. Parcels of
+    // varying price will round-trip with small error — percentage is the
+    // canonical stored form (schema: down_payment_pct).
+    let effectiveAvancePct = Number(of.avancePct) || 0
+    if (!isCash && of.avanceInput === 'tnd') {
+      const tnd = Number(of.avanceTnd) || 0
+      if (tnd > 0 && avgPrice > 0) {
+        effectiveAvancePct = Math.min(100, Math.max(0, (tnd / avgPrice) * 100))
+      }
+    }
     const payload = {
       dbId: editOfferDbId,
       label: of.label.trim(),
       note: of.note.trim(),
       mode: of.mode,
-      avancePct: isCash ? 0 : (Number(of.avancePct) || 0),
+      avancePct: isCash ? 0 : effectiveAvancePct,
       duration: isCash ? 0 : (Number(of.duration) || 0),
       cashAmount: isCash ? (Number(of.cashAmount) || 0) : 0,
       pricePerSqm: of.usePricePerSqm ? (Number(of.pricePerSqm) || 0) : 0,
@@ -707,6 +834,7 @@ export default function ProjectDetailPage() {
             { k: 'commissions', label: 'Commissions', icon: '💰' },
             { k: 'parcels',     label: 'Parcelles',   icon: '🗺️', count: plots.length },
             { k: 'offers',      label: 'Offres',      icon: '🏷️', count: offers.length },
+            { k: 'harvests',    label: 'Récoltes',    icon: '🌳' },
           ].map((t) => (
             <button
               key={t.k}
@@ -726,8 +854,9 @@ export default function ProjectDetailPage() {
         {/* ── Tab: Aperçu (Santé du projet) ── */}
         {activeTab === 'overview' && (() => {
           // Snapshot of the last-applied values so we can show Apply/Cancel
-          // only when the user actually edits something.
-          const savedHealth = healthSaved[project?.id] || { ...DH }
+          // only when the user actually edits something. Falls back to the
+          // persisted DB values so a freshly-loaded page isn't flagged dirty.
+          const savedHealth = healthSaved[project?.id] || persistedHealth
           const isDirty = (
             Number(projHealth.treeSante) !== Number(savedHealth.treeSante) ||
             Number(projHealth.humidity) !== Number(savedHealth.humidity) ||
@@ -932,10 +1061,14 @@ export default function ProjectDetailPage() {
               </h2>
               <p className="pdp-section__hint">Cliquez une ligne pour modifier (arbres, prix, statut). Utilisez la recherche pour filtrer.</p>
             </div>
-            <div className="pdp-section__actions">
+            <div className="pdp-section__actions" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button type="button" className="pdp-btn pdp-btn--primary" onClick={openAdd}>
                 <span className="pdp-btn__icon" aria-hidden>＋</span>
                 <span>Ajouter une parcelle</span>
+              </button>
+              <button type="button" className="pdp-btn" onClick={openBulk} title="Créer plusieurs parcelles avec des identifiants incrémentaux et la même surface.">
+                <span className="pdp-btn__icon" aria-hidden>⧉</span>
+                <span>Ajouter en série</span>
               </button>
             </div>
           </div>
@@ -1053,6 +1186,13 @@ export default function ProjectDetailPage() {
         </section>
         )}
 
+        {/* ── Tab: Récoltes ── */}
+        {activeTab === 'harvests' && (
+          <section className="pdp-section">
+            <ProjectHarvestsTab projectId={project?.id} />
+          </section>
+        )}
+
         {/* ── Modals ── */}
         <AdminModal open={modal === 'edit'} onClose={() => setModal(null)} title="Modifier le projet">
           <div className="pdp-modal-body">
@@ -1070,6 +1210,136 @@ export default function ProjectDetailPage() {
             </div>
             <div className="zitu-page__field"><label className="zitu-page__field-label">Adresse</label><input className="zitu-page__input" placeholder="Ex : 12 rue des Oliviers, Borj Cedria" value={pf.address || ''} onChange={e => setPf(f => ({ ...f, address: e.target.value }))} /></div>
             <div className="zitu-page__field"><label className="zitu-page__field-label">URL carte</label><input className="zitu-page__input" value={pf.mapUrl} onChange={e => setPf(f => ({ ...f, mapUrl: e.target.value }))} /></div>
+            <div className="zitu-page__field">
+              <label className="zitu-page__field-label">Revenu annuel total estimé (DT / an)</label>
+              <input
+                className="zitu-page__input"
+                type="number"
+                inputMode="numeric"
+                min="0"
+                step="100"
+                placeholder="Ex : 120000"
+                value={pf.annualRevenueTotal ?? ''}
+                onChange={e => setPf(f => ({ ...f, annualRevenueTotal: e.target.value }))}
+              />
+              {totalAreaM2 > 0 && Number(pf.annualRevenueTotal) > 0 ? (
+                <span className="pdp-field__hint">
+                  ≈ {(Number(pf.annualRevenueTotal) / totalAreaM2).toLocaleString('fr-FR', { maximumFractionDigits: 2 })} DT / m² — réparti au prorata de la surface de chaque parcelle.
+                </span>
+              ) : (
+                <span className="pdp-field__hint">Réparti automatiquement entre les parcelles au prorata de leur surface.</span>
+              )}
+            </div>
+
+            <div className="pdp-batches pdp-batches--edit">
+              <div className="pdp-field__label">Composition du verger *</div>
+              <p className="pdp-field__hint" style={{ margin: '0 0 8px' }}>
+                Une ligne par cohorte (année de plantation + nombre d'arbres). Défini au niveau du projet — les parcelles sont de pures surfaces, leur revenu est calculé au prorata de leur surface.
+              </p>
+              {(pf.treeBatches?.length ? pf.treeBatches : [{ year: CY, count: '' }]).map((b, i) => {
+                const info = ti(Number(b.year) || CY)
+                return (
+                  <div className="pdp-batch-edit-row" key={i}>
+                    <label className="pdp-batch-edit-row__lbl">Année
+                      <input className="zitu-page__input" type="number" min="1900" max="2100" step="1"
+                        value={b.year}
+                        onChange={e => setPf(f => {
+                          const rows = [...(f.treeBatches?.length ? f.treeBatches : [{ year: CY, count: '' }])]
+                          rows[i] = { ...rows[i], year: e.target.value }
+                          return { ...f, treeBatches: rows }
+                        })}
+                      />
+                    </label>
+                    <label className="pdp-batch-edit-row__lbl">Arbres
+                      <input className="zitu-page__input" type="number" min="0" step="1"
+                        value={b.count}
+                        onChange={e => setPf(f => {
+                          const rows = [...(f.treeBatches?.length ? f.treeBatches : [{ year: CY, count: '' }])]
+                          rows[i] = { ...rows[i], count: e.target.value }
+                          return { ...f, treeBatches: rows }
+                        })}
+                      />
+                    </label>
+                    <span className="pdp-batch-edit-row__age">
+                      {CY - (Number(b.year) || CY)}a · {info.label}
+                      {info.rate === 0 ? <em style={{ marginLeft: 6, color: '#92400e' }}>Non prod.</em> : null}
+                    </span>
+                    <button
+                      type="button"
+                      className="pdp-batch-edit-row__rm"
+                      disabled={(pf.treeBatches?.length || 0) <= 1}
+                      onClick={() => setPf(f => {
+                        const rows = [...(f.treeBatches?.length ? f.treeBatches : [{ year: CY, count: '' }])]
+                        if (rows.length <= 1) return f
+                        rows.splice(i, 1)
+                        return { ...f, treeBatches: rows }
+                      })}
+                      aria-label="Retirer cette cohorte"
+                    >
+                      −
+                    </button>
+                  </div>
+                )
+              })}
+              <button
+                type="button"
+                className="pdp-batch-add"
+                onClick={() => setPf(f => ({
+                  ...f,
+                  treeBatches: [...(f.treeBatches?.length ? f.treeBatches : [{ year: CY, count: '' }]), { year: CY, count: '' }],
+                }))}
+              >
+                + Ajouter une génération
+              </button>
+              <div className="pdp-batch-total">
+                Total : <strong>{sumBatchTrees(normalizeBatchInput(pf.treeBatches)).toLocaleString('fr-FR')}</strong> arbres
+              </div>
+            </div>
+
+            <div className="pdp-field__label" style={{ marginTop: 12, fontSize: 13, fontWeight: 600, color: '#0f172a' }}>Santé du projet (0–100)</div>
+            <p className="pdp-field__hint" style={{ margin: '0 0 8px' }}>Affiché au client sur la page du projet. Laissez vide pour masquer la section.</p>
+            <div className="zitu-page__form-grid">
+              <div className="zitu-page__field">
+                <label className="zitu-page__field-label">Santé des arbres (%)</label>
+                <input
+                  className="zitu-page__input"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="1"
+                  placeholder="95"
+                  value={pf.treeHealthPct ?? ''}
+                  onChange={e => setPf(f => ({ ...f, treeHealthPct: e.target.value }))}
+                />
+              </div>
+              <div className="zitu-page__field">
+                <label className="zitu-page__field-label">Humidité du sol (%)</label>
+                <input
+                  className="zitu-page__input"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="1"
+                  placeholder="65"
+                  value={pf.soilHumidityPct ?? ''}
+                  onChange={e => setPf(f => ({ ...f, soilHumidityPct: e.target.value }))}
+                />
+              </div>
+              <div className="zitu-page__field">
+                <label className="zitu-page__field-label">Nutriments (%)</label>
+                <input
+                  className="zitu-page__input"
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="1"
+                  placeholder="80"
+                  value={pf.nutrientsPct ?? ''}
+                  onChange={e => setPf(f => ({ ...f, nutrientsPct: e.target.value }))}
+                />
+              </div>
+            </div>
+
             <div className="zitu-page__form-actions">
               <button type="button" className="zitu-page__btn zitu-page__btn--danger" disabled={saving} onClick={delProject}>Supprimer</button>
               <button type="button" className="zitu-page__btn" onClick={() => setModal(null)}>Annuler</button>
@@ -1092,63 +1362,7 @@ export default function ProjectDetailPage() {
               />
               <span className="pdp-field__hint">Texte libre, unique dans le projet. Le n° interne est attribué automatiquement.</span>
             </div>
-            <div className="pdp-batches pdp-batches--edit">
-              <div className="pdp-field__label">Composition du verger *</div>
-              <p className="pdp-field__hint" style={{ margin: '0 0 8px' }}>Une ligne par cohorte (année de plantation + nombre d’arbres). Le total alimente le catalogue comme sur le site public.</p>
-              {parcelBatchRows.map((b, i) => {
-                const info = ti(Number(b.year) || CY)
-                return (
-                  <div key={i} className="pdp-batch-edit-row">
-                    <label className="pdp-batch-edit-row__field">
-                      <span className="pdp-batch-edit-row__lbl">Année</span>
-                      <input
-                        className="zitu-page__input"
-                        type="number"
-                        min={1980}
-                        max={2035}
-                        placeholder={String(CY)}
-                        value={b.year}
-                        onChange={(e) => updateBatchRow(i, { year: e.target.value })}
-                      />
-                    </label>
-                    <label className="pdp-batch-edit-row__field">
-                      <span className="pdp-batch-edit-row__lbl">Arbres</span>
-                      <input
-                        className="zitu-page__input"
-                        type="number"
-                        min={0}
-                        placeholder="120"
-                        value={b.count}
-                        onChange={(e) => updateBatchRow(i, { count: e.target.value })}
-                      />
-                    </label>
-                    <div className="pdp-batch-edit-row__meta" title="Aperçu productivité">
-                      <span className="pdp-batch-edit-row__age">{CY - (Number(b.year) || CY)}a · {info.label}</span>
-                      {Number(b.count) > 0 && info.rate > 0 && (
-                        <span className="pdp-batch-edit-row__rev">~{Math.round(Number(b.count) * info.rate).toLocaleString('fr-FR')} DT/an</span>
-                      )}
-                      {Number(b.count) > 0 && info.rate === 0 && <span className="pdp-batch-edit-row__rev">Non prod.</span>}
-                    </div>
-                    <button
-                      type="button"
-                      className="pdp-batch-edit-row__rm"
-                      disabled={parcelBatchRows.length <= 1}
-                      onClick={() => removeBatchRow(i)}
-                      aria-label="Retirer cette cohorte"
-                    >
-                      −
-                    </button>
-                  </div>
-                )
-              })}
-              <button type="button" className="pdp-batch-add" onClick={addBatchRow}>
-                + Ajouter une génération
-              </button>
-              <div className="pdp-batch-total">
-                Total : <strong>{sumBatchTrees(normalizeBatchInput(pcf.treeBatches)).toLocaleString('fr-FR')}</strong> arbres
-              </div>
-            </div>
-            <div className="zitu-page__field"><label className="zitu-page__field-label">Surface m²</label><input className="zitu-page__input" type="number" placeholder="400" value={pcf.area} onChange={e => setPcf(f => ({ ...f, area: e.target.value }))} /></div>
+            <div className="zitu-page__field"><label className="zitu-page__field-label">Surface m² *</label><input className="zitu-page__input" type="number" min="1" placeholder="400" value={pcf.area} onChange={e => setPcf(f => ({ ...f, area: e.target.value }))} /><span className="pdp-field__hint">La parcelle est une surface pure. Sa part du revenu = surface / surface totale du projet.</span></div>
             <p className="pdp-field__hint" style={{ margin: 0 }}>La nouvelle parcelle est créée avec le statut <strong>Disponible</strong>. Le prix se règle depuis l’édition de la parcelle.</p>
             <div className="zitu-page__form-actions">
               <button type="button" className="zitu-page__btn" onClick={() => setModal(null)}>Annuler</button>
@@ -1157,12 +1371,99 @@ export default function ProjectDetailPage() {
                 className="zitu-page__btn zitu-page__btn--primary"
                 disabled={
                   !String(pcf.label || '').trim()
-                  || sumBatchTrees(normalizeBatchInput(pcf.treeBatches)) <= 0
+                  || !(Number(pcf.area) > 0)
                   || saving
                 }
                 onClick={saveNew}
               >
                 {saving ? 'Ajout…' : 'Ajouter'}
+              </button>
+            </div>
+          </div>
+        </AdminModal>
+
+        {/* ── Bulk parcel creation ── */}
+        <AdminModal open={modal === 'add-parcels-bulk'} onClose={() => setModal(null)} title="Ajouter des parcelles en série">
+          <div className="pdp-modal-body">
+            <p className="pdp-field__hint" style={{ margin: '0 0 12px' }}>
+              Crée plusieurs parcelles avec la même surface et des identifiants incrémentaux (ex : <em>a1, a2, …, a99</em>). Maximum 500 à la fois.
+            </p>
+            <div className="zitu-page__form-grid">
+              <div className="zitu-page__field">
+                <label className="zitu-page__field-label">Préfixe (optionnel)</label>
+                <input
+                  className="zitu-page__input"
+                  type="text"
+                  maxLength={12}
+                  placeholder="a, P-, parcelle-…"
+                  value={bulk.prefix}
+                  onChange={e => setBulk(f => ({ ...f, prefix: e.target.value }))}
+                />
+                <span className="pdp-field__hint">Texte ajouté devant chaque numéro. Laissez vide pour des identifiants purement numériques (« 1 », « 2 »…).</span>
+              </div>
+              <div className="zitu-page__field">
+                <label className="zitu-page__field-label">Surface (m²) *</label>
+                <input
+                  className="zitu-page__input"
+                  type="number"
+                  min="1"
+                  step="1"
+                  placeholder="400"
+                  value={bulk.area}
+                  onChange={e => setBulk(f => ({ ...f, area: e.target.value }))}
+                />
+              </div>
+            </div>
+            <div className="zitu-page__form-grid">
+              <div className="zitu-page__field">
+                <label className="zitu-page__field-label">De *</label>
+                <input
+                  className="zitu-page__input"
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={bulk.from}
+                  onChange={e => setBulk(f => ({ ...f, from: e.target.value }))}
+                />
+              </div>
+              <div className="zitu-page__field">
+                <label className="zitu-page__field-label">À *</label>
+                <input
+                  className="zitu-page__input"
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={bulk.to}
+                  onChange={e => setBulk(f => ({ ...f, to: e.target.value }))}
+                />
+              </div>
+            </div>
+            {(() => {
+              const from = Math.floor(Number(bulk.from) || 0)
+              const to = Math.floor(Number(bulk.to) || 0)
+              const count = Math.max(0, to - from + 1)
+              if (count <= 0) return null
+              const preview = [`${bulk.prefix || ''}${from}`, `${bulk.prefix || ''}${from + 1}`, '…', `${bulk.prefix || ''}${to}`]
+              return (
+                <p className="pdp-field__hint" style={{ margin: '8px 0 0' }}>
+                  <strong>{count}</strong> parcelle{count > 1 ? 's' : ''} sera{count > 1 ? 'nt' : ''} créée{count > 1 ? 's' : ''} — {preview.join(' · ')}
+                </p>
+              )
+            })()}
+            <div className="zitu-page__form-actions">
+              <button type="button" className="zitu-page__btn" onClick={() => setModal(null)}>Annuler</button>
+              <button
+                type="button"
+                className="zitu-page__btn zitu-page__btn--primary"
+                disabled={
+                  saving
+                  || !(Number(bulk.area) > 0)
+                  || !(Number(bulk.to) >= Number(bulk.from))
+                  || (Number(bulk.to) - Number(bulk.from) + 1) > 500
+                }
+                onClick={saveBulk}
+              >
+                {saving ? 'Création…' : 'Créer les parcelles'}
               </button>
             </div>
           </div>
@@ -1223,9 +1524,29 @@ export default function ProjectDetailPage() {
               </div>
             </div>
 
+            {wfMsg && (
+              <div className="pdp-field__hint" style={{ color: wfErr ? '#b91c1c' : '#047857' }} role={wfErr ? 'alert' : 'status'}>
+                {wfMsg}
+              </div>
+            )}
             <div className="zitu-page__form-actions">
-              <button type="button" className="zitu-page__btn" onClick={() => setModal(null)}>Fermer</button>
-              <button type="button" className="zitu-page__btn zitu-page__btn--primary" onClick={() => setModal(null)}>Valider</button>
+              <button type="button" className="zitu-page__btn" onClick={() => setModal(null)}>Annuler</button>
+              <button
+                type="button"
+                className="zitu-page__btn zitu-page__btn--primary"
+                disabled={workflowLoading}
+                onClick={async () => {
+                  // Valider was closing the modal without persisting — the
+                  // "Enregistrer le workflow" button at the top of the
+                  // section is the only place that actually called the RPC.
+                  // Now Valider saves AND closes so Modifier → tweak → Valider
+                  // flow works end-to-end.
+                  await saveWorkflowConfig()
+                  setModal(null)
+                }}
+              >
+                Valider
+              </button>
             </div>
           </div>
         </AdminModal>
@@ -1327,10 +1648,69 @@ export default function ProjectDetailPage() {
                 <span className="pdp-field__hint">Prix unique à régler en une fois.</span>
               </div>
             ) : (
-              <div className="zitu-page__form-grid">
-                <div className="zitu-page__field"><label className="zitu-page__field-label">Avance %</label><input className="zitu-page__input" type="number" placeholder="20" value={of.avancePct} onChange={e => setOf(f => ({ ...f, avancePct: e.target.value }))} /></div>
+              <>
+                <div className="zitu-page__field">
+                  <label className="zitu-page__field-label">Avance</label>
+                  <div role="radiogroup" aria-label="Unité de l'avance" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+                    {[
+                      { v: 'pct', lbl: '% du prix' },
+                      { v: 'tnd', lbl: 'Montant fixe (DT)' },
+                    ].map((opt) => {
+                      const active = (of.avanceInput || 'pct') === opt.v
+                      return (
+                        <button
+                          key={opt.v}
+                          type="button"
+                          role="radio"
+                          aria-checked={active}
+                          onClick={() => setOf((f) => ({ ...f, avanceInput: opt.v }))}
+                          className={`pdp-btn${active ? ' pdp-btn--primary' : ''}`}
+                          style={{ justifyContent: 'center' }}
+                        >
+                          {opt.lbl}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  {(of.avanceInput || 'pct') === 'tnd' ? (
+                    <>
+                      <input
+                        className="zitu-page__input"
+                        type="number"
+                        min="0"
+                        step="100"
+                        placeholder="5000"
+                        value={of.avanceTnd}
+                        onChange={e => setOf(f => ({ ...f, avanceTnd: e.target.value }))}
+                      />
+                      <span className="pdp-field__hint">
+                        {avgPrice > 0 && Number(of.avanceTnd) > 0
+                          ? `≈ ${((Number(of.avanceTnd) / avgPrice) * 100).toFixed(1)} % du prix moyen d'une parcelle (${fmt(avgPrice)}).`
+                          : 'Montant fixe à verser à la signature, quel que soit le prix de la parcelle.'}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <input
+                        className="zitu-page__input"
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="1"
+                        placeholder="20"
+                        value={of.avancePct}
+                        onChange={e => setOf(f => ({ ...f, avancePct: e.target.value }))}
+                      />
+                      <span className="pdp-field__hint">
+                        {avgPrice > 0 && Number(of.avancePct) > 0
+                          ? `≈ ${fmt(avgPrice * Number(of.avancePct) / 100)} sur une parcelle moyenne (${fmt(avgPrice)}).`
+                          : 'Pourcentage du prix de la parcelle.'}
+                      </span>
+                    </>
+                  )}
+                </div>
                 <div className="zitu-page__field"><label className="zitu-page__field-label">Mois</label><input className="zitu-page__input" type="number" placeholder="24" value={of.duration} onChange={e => setOf(f => ({ ...f, duration: e.target.value }))} /></div>
-              </div>
+              </>
             )}
 
             <div className="zitu-page__field"><label className="zitu-page__field-label">Note</label><input className="zitu-page__input" placeholder="Le plus populaire…" value={of.note} onChange={e => setOf(f => ({ ...f, note: e.target.value }))} /></div>
@@ -1352,13 +1732,21 @@ export default function ProjectDetailPage() {
               </div>
             )}
 
-            {of.mode !== 'cash' && avgPrice > 0 && Number(of.avancePct) > 0 && Number(of.duration) > 0 && (
-              <div className="pdp-offer-preview">
-                <span className="pdp-offer-preview__label">Simulation (parcelle moy. {fmt(avgPrice)})</span>
-                <div className="pdp-offer-preview__row"><span>Avance</span><strong>{fmt(avgPrice * Number(of.avancePct) / 100)}</strong></div>
-                <div className="pdp-offer-preview__row"><span>Mensualité</span><strong>{fmt((avgPrice - avgPrice * Number(of.avancePct) / 100) / Number(of.duration))}</strong></div>
-              </div>
-            )}
+            {(() => {
+              if (of.mode === 'cash' || avgPrice <= 0 || !(Number(of.duration) > 0)) return null
+              const useTnd = (of.avanceInput || 'pct') === 'tnd'
+              const avance = useTnd
+                ? Math.min(avgPrice, Number(of.avanceTnd) || 0)
+                : avgPrice * (Number(of.avancePct) || 0) / 100
+              if (avance <= 0) return null
+              return (
+                <div className="pdp-offer-preview">
+                  <span className="pdp-offer-preview__label">Simulation (parcelle moy. {fmt(avgPrice)})</span>
+                  <div className="pdp-offer-preview__row"><span>Avance</span><strong>{fmt(avance)}</strong></div>
+                  <div className="pdp-offer-preview__row"><span>Mensualité</span><strong>{fmt((avgPrice - avance) / Number(of.duration))}</strong></div>
+                </div>
+              )
+            })()}
             <div className="zitu-page__form-actions">
               {eoIdx >= 0 && editOfferDbId && <button type="button" className="zitu-page__btn zitu-page__btn--danger" disabled={saving} onClick={delO}>Supprimer</button>}
               <button type="button" className="zitu-page__btn" onClick={() => setModal(null)}>Annuler</button>
@@ -1401,77 +1789,15 @@ export default function ProjectDetailPage() {
                 />
                 <span className="pdp-field__hint">Unique dans le projet. Laisser vide pour revenir au N° interne.</span>
               </div>
-              <div className="zitu-page__field"><label className="zitu-page__field-label">Surface m²</label><input className="zitu-page__input" type="number" value={pcf.area} onChange={e => setPcf(f => ({ ...f, area: e.target.value }))} /></div>
-              <div className="pdp-batches pdp-batches--edit">
-                <div className="pdp-field__label">Composition du verger</div>
-                <p className="pdp-field__hint" style={{ margin: '0 0 8px' }}>Même présentation que sur le site public — modifiez les cohortes ci-dessous.</p>
-                {parcelBatchRows.map((b, i) => {
-                  const info = ti(Number(b.year) || CY)
-                  return (
-                    <div key={i} className="pdp-batch-edit-row">
-                      <label className="pdp-batch-edit-row__field">
-                        <span className="pdp-batch-edit-row__lbl">Année</span>
-                        <input
-                          className="zitu-page__input"
-                          type="number"
-                          min={1980}
-                          max={2035}
-                          placeholder={String(CY)}
-                          value={b.year}
-                          onChange={(e) => updateBatchRow(i, { year: e.target.value })}
-                        />
-                      </label>
-                      <label className="pdp-batch-edit-row__field">
-                        <span className="pdp-batch-edit-row__lbl">Arbres</span>
-                        <input
-                          className="zitu-page__input"
-                          type="number"
-                          min={0}
-                          value={b.count}
-                          onChange={(e) => updateBatchRow(i, { count: e.target.value })}
-                        />
-                      </label>
-                      <div className="pdp-batch-edit-row__meta" title="Aperçu productivité">
-                        <span className="pdp-batch-edit-row__age">{CY - (Number(b.year) || CY)}a · {info.label}</span>
-                        {Number(b.count) > 0 && info.rate > 0 && (
-                          <span className="pdp-batch-edit-row__rev">~{Math.round(Number(b.count) * info.rate).toLocaleString('fr-FR')} DT/an</span>
-                        )}
-                        {Number(b.count) > 0 && info.rate === 0 && <span className="pdp-batch-edit-row__rev">Non prod.</span>}
-                      </div>
-                      <button
-                        type="button"
-                        className="pdp-batch-edit-row__rm"
-                        disabled={parcelBatchRows.length <= 1}
-                        onClick={() => removeBatchRow(i)}
-                        aria-label="Retirer cette cohorte"
-                      >
-                        −
-                      </button>
-                    </div>
-                  )
-                })}
-                <button type="button" className="pdp-batch-add" onClick={addBatchRow}>
-                  + Ajouter une génération
-                </button>
-                <div className="pdp-batch-total">
-                  Total : <strong>{sumBatchTrees(normalizeBatchInput(pcf.treeBatches)).toLocaleString('fr-FR')}</strong> arbres
-                </div>
-              </div>
+              <div className="zitu-page__field"><label className="zitu-page__field-label">Surface m² *</label><input className="zitu-page__input" type="number" min="1" value={pcf.area} onChange={e => setPcf(f => ({ ...f, area: e.target.value }))} /><span className="pdp-field__hint">La parcelle est une surface pure. Sa part du revenu = surface / surface totale du projet.</span></div>
               <div className="zitu-page__field"><label className="zitu-page__field-label">Statut</label><select className="zitu-page__input" value={pcf.status} onChange={e => setPcf(f => ({ ...f, status: e.target.value }))}><option value="available">Disponible</option><option value="reserved">Réservée</option><option value="sold">Vendue</option></select></div>
               {(() => {
-                const draft = normalizeBatchInput(pcf.treeBatches)
-                const previewPlot = {
-                  ...epData.plot,
-                  trees: draft.length ? sumBatchTrees(draft) : Number(pcf.trees) || 0,
-                  treeBatches: draft.length ? draft : [],
-                }
-                const batches = previewPlot.treeBatches || []
-                const batchTotal = batches.reduce((s, b) => s + (Number(b.count) || 0) * (Number(b.pricePerTree) || 0), 0)
-                const totalPrice = batchTotal > 0 ? batchTotal : (Number(epData.plot.totalPrice) || 0)
+                const previewPlot = { ...epData.plot, area: Number(pcf.area) || 0 }
+                const totalPrice = Number(epData.plot.totalPrice) || 0
                 return (
                   <div className="pdp-edit-preview">
                     <div className="pdp-edit-preview__item"><span>Prix total</span><strong>{fmt(totalPrice)}</strong></div>
-                    <div className="pdp-edit-preview__item"><span>Revenu/an</span><strong>~{pRev(previewPlot).toLocaleString('fr-FR')} DT</strong></div>
+                    <div className="pdp-edit-preview__item"><span>Revenu/an</span><strong>~{pRev(previewPlot, project).toLocaleString('fr-FR')} DT</strong></div>
                   </div>
                 )
               })()}

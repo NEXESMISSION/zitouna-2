@@ -13,7 +13,7 @@ import { getPagerPages } from './pager-util.js'
 import './sell-field.css'
 import './projects-admin.css'
 
-const EMPTY_FORM = { title: '', city: '', region: '', address: '', mapUrl: '' }
+const EMPTY_FORM = { title: '', city: '', region: '', address: '', mapUrl: '', annualRevenueTotal: '' }
 const PROJECTS_PER_PAGE = 12
 
 function initials(title) {
@@ -136,6 +136,7 @@ export default function ProjectsPage() {
           city: form.city.trim(),
           region: form.region.trim(),
           mapUrl: form.mapUrl.trim(),
+          annualRevenueTotal: Number(form.annualRevenueTotal) || 0,
         })
         emitInvalidate('projects')
       },
@@ -405,6 +406,23 @@ function ProjectForm({ form, onChange }) {
       <Field id="pj-address" label="Adresse">
         <input id="pj-address" className="sp-cat-search" placeholder="Ex : 12 rue des Oliviers, Borj Cedria" value={form.address || ''} onChange={set('address')} />
       </Field>
+      <Field
+        id="pj-annual-revenue"
+        label="Revenu annuel total estimé (DT / an)"
+        hint="Sera réparti entre les parcelles au prorata de leur surface. Chaque acheteur voit sa part projetée sur la fiche parcelle."
+      >
+        <input
+          id="pj-annual-revenue"
+          className="sp-cat-search"
+          type="number"
+          inputMode="numeric"
+          min="0"
+          step="100"
+          placeholder="Ex : 120000"
+          value={form.annualRevenueTotal ?? ''}
+          onChange={set('annualRevenueTotal')}
+        />
+      </Field>
       <Field id="pj-map" label="URL de la carte (Google Maps)">
         <input id="pj-map" className="sp-cat-search" placeholder="https://…" value={form.mapUrl} onChange={set('mapUrl')} />
       </Field>
@@ -412,13 +430,18 @@ function ProjectForm({ form, onChange }) {
   )
 }
 
-function Field({ id, label, children }) {
+function Field({ id, label, children, hint }) {
   return (
     <label htmlFor={id} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       <span style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '.03em' }}>
         {label}
       </span>
       {children}
+      {hint && (
+        <span style={{ fontSize: 11, color: '#64748b', lineHeight: 1.4 }}>
+          {hint}
+        </span>
+      )}
     </label>
   )
 }

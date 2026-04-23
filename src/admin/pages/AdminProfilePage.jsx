@@ -322,11 +322,11 @@ export default function AdminProfilePage() {
       <button
         type="button"
         className="sp-back-btn"
-        onClick={() => navigate('/browse')}
-        aria-label="Retour au site public"
+        onClick={() => navigate('/dashboard')}
+        aria-label="Retour au dashboard"
       >
         <span className="sp-back-btn__icon-wrap" aria-hidden>←</span>
-        <span>Retour au site</span>
+        <span>Retour au dashboard</span>
       </button>
 
       <header className="sp-hero">

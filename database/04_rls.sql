@@ -268,19 +268,42 @@ create policy client_update_own_payment_submit on public.installment_payments
     -- rejection are staff decisions — they must not appear in the client
     -- allow-list, otherwise a buyer could short-circuit admin queues.
     and public.installment_payments.status in ('pending','submitted')
-    -- Pin every column except receipt_url, status, and updated_at so the
-    -- client cannot tamper with amount/due_date/approved_at before
-    -- submitting. Mirrors the pattern used in client_update_safe_self
-    -- (public.clients). A mismatch aborts the UPDATE.
-    and public.installment_payments.amount                is not distinct from (select amount                from public.installment_payments where id = public.installment_payments.id)
-    and public.installment_payments.due_date              is not distinct from (select due_date              from public.installment_payments where id = public.installment_payments.id)
-    and public.installment_payments.month_no              is not distinct from (select month_no              from public.installment_payments where id = public.installment_payments.id)
-    and public.installment_payments.plan_id               is not distinct from (select plan_id               from public.installment_payments where id = public.installment_payments.id)
-    and public.installment_payments.approved_at           is not distinct from (select approved_at           from public.installment_payments where id = public.installment_payments.id)
-    and public.installment_payments.rejected_note         is not distinct from (select rejected_note         from public.installment_payments where id = public.installment_payments.id)
-    and public.installment_payments.auto_paid_from_wallet is not distinct from (select auto_paid_from_wallet from public.installment_payments where id = public.installment_payments.id)
-    and public.installment_payments.created_at            is not distinct from (select created_at            from public.installment_payments where id = public.installment_payments.id)
+    -- Column-pinning (amount/due_date/plan_id/etc. immutable on self-updates)
+    -- is enforced by trg_installment_payments_pin_columns below, not here.
+    -- A self-referential WITH CHECK subselect would re-trigger RLS and hit
+    -- Postgres' "infinite recursion detected in policy" guard.
   );
+
+-- Pin every column except receipt_url, status, and updated_at on non-staff
+-- UPDATEs. Triggers see OLD/NEW directly so there's no RLS recursion — this
+-- is the enforcement arm of client_update_own_payment_submit.
+create or replace function public.installment_payments_pin_columns()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if public.is_active_staff() then
+    return new;
+  end if;
+  if new.amount                is distinct from old.amount                then raise exception 'PAYMENT_IMMUTABLE_AMOUNT'                using errcode = '42501'; end if;
+  if new.due_date              is distinct from old.due_date              then raise exception 'PAYMENT_IMMUTABLE_DUE_DATE'              using errcode = '42501'; end if;
+  if new.month_no              is distinct from old.month_no              then raise exception 'PAYMENT_IMMUTABLE_MONTH_NO'              using errcode = '42501'; end if;
+  if new.plan_id               is distinct from old.plan_id               then raise exception 'PAYMENT_IMMUTABLE_PLAN_ID'               using errcode = '42501'; end if;
+  if new.approved_at           is distinct from old.approved_at           then raise exception 'PAYMENT_IMMUTABLE_APPROVED_AT'           using errcode = '42501'; end if;
+  if new.rejected_note         is distinct from old.rejected_note         then raise exception 'PAYMENT_IMMUTABLE_REJECTED_NOTE'         using errcode = '42501'; end if;
+  if new.auto_paid_from_wallet is distinct from old.auto_paid_from_wallet then raise exception 'PAYMENT_IMMUTABLE_AUTO_PAID_FROM_WALLET' using errcode = '42501'; end if;
+  if new.created_at            is distinct from old.created_at            then raise exception 'PAYMENT_IMMUTABLE_CREATED_AT'            using errcode = '42501'; end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_installment_payments_pin_columns on public.installment_payments;
+create trigger trg_installment_payments_pin_columns
+  before update on public.installment_payments
+  for each row
+  execute function public.installment_payments_pin_columns();
 
 -- installment_payment_receipts
 alter table public.installment_payment_receipts enable row level security;
@@ -339,6 +362,21 @@ drop policy if exists client_select_own_commission_events on public.commission_e
 create policy client_select_own_commission_events on public.commission_events
   for select to authenticated
   using (public.commission_events.beneficiary_client_id = public.current_client_id());
+
+-- Reverse-sale grants: staff CRUD; clients read rows where they are the
+-- beneficiary (acquired right) or the source (granted right).
+alter table public.commission_reverse_grants enable row level security;
+drop policy if exists staff_commission_reverse_grants_crud on public.commission_reverse_grants;
+create policy staff_commission_reverse_grants_crud on public.commission_reverse_grants
+  for all to authenticated
+  using (public.is_active_staff()) with check (public.is_active_staff());
+drop policy if exists client_select_own_reverse_grants on public.commission_reverse_grants;
+create policy client_select_own_reverse_grants on public.commission_reverse_grants
+  for select to authenticated
+  using (
+    public.commission_reverse_grants.beneficiary_client_id = public.current_client_id()
+    or public.commission_reverse_grants.source_client_id = public.current_client_id()
+  );
 
 alter table public.commission_payout_requests enable row level security;
 drop policy if exists staff_commission_payout_requests_crud on public.commission_payout_requests;
@@ -634,3 +672,83 @@ drop policy if exists delegated_users_audit_logs_select on public.audit_logs;
 create policy delegated_users_audit_logs_select on public.audit_logs for select
   to authenticated
   using (public.is_delegated_seller() or public.is_active_staff());
+
+-- ============================================================================
+-- Folded from dev/phone_change_requests.sql — RLS
+-- ============================================================================
+alter table public.phone_change_requests enable row level security;
+
+drop policy if exists staff_phone_change_requests_crud on public.phone_change_requests;
+create policy staff_phone_change_requests_crud on public.phone_change_requests
+  for all to authenticated
+  using (public.is_active_staff())
+  with check (public.is_active_staff());
+
+drop policy if exists client_select_own_phone_change on public.phone_change_requests;
+create policy client_select_own_phone_change on public.phone_change_requests
+  for select to authenticated
+  using (client_id = public.current_client_id());
+
+grant select, insert, update, delete on public.phone_change_requests to authenticated;
+
+-- ============================================================================
+-- Folded from dev/harvest_system.sql — RLS, public views, grants
+-- ============================================================================
+alter table public.project_harvests      enable row level security;
+alter table public.harvest_distributions enable row level security;
+alter table public.project_events        enable row level security;
+
+drop policy if exists public_select_project_harvests on public.project_harvests;
+create policy public_select_project_harvests on public.project_harvests
+  for select to anon using (true);
+drop policy if exists public_select_project_harvests_auth on public.project_harvests;
+create policy public_select_project_harvests_auth on public.project_harvests
+  for select to authenticated using (true);
+drop policy if exists staff_project_harvests_crud on public.project_harvests;
+create policy staff_project_harvests_crud on public.project_harvests
+  for all to authenticated
+  using (public.is_active_staff()) with check (public.is_active_staff());
+
+drop policy if exists public_select_project_events on public.project_events;
+create policy public_select_project_events on public.project_events
+  for select to anon using (true);
+drop policy if exists public_select_project_events_auth on public.project_events;
+create policy public_select_project_events_auth on public.project_events
+  for select to authenticated using (true);
+drop policy if exists staff_project_events_crud on public.project_events;
+create policy staff_project_events_crud on public.project_events
+  for all to authenticated
+  using (public.is_active_staff()) with check (public.is_active_staff());
+
+drop policy if exists client_select_own_harvest_distributions on public.harvest_distributions;
+create policy client_select_own_harvest_distributions on public.harvest_distributions
+  for select to authenticated
+  using (
+    exists (
+      select 1 from public.clients c
+      where c.id = harvest_distributions.client_id
+        and c.auth_user_id = auth.uid()
+    )
+  );
+drop policy if exists staff_harvest_distributions_crud on public.harvest_distributions;
+create policy staff_harvest_distributions_crud on public.harvest_distributions
+  for all to authenticated
+  using (public.is_active_staff()) with check (public.is_active_staff());
+
+create or replace view public.public_project_harvests as
+  select id, project_id, harvest_year, harvest_date, status,
+         projected_gross_tnd, actual_kg, actual_gross_tnd,
+         costs_tnd, net_tnd, price_per_kg_tnd
+    from public.project_harvests;
+
+grant select on public.public_project_harvests to anon, authenticated;
+
+create or replace view public.public_project_events as
+  select id, project_id, event_date, kind, title, description, media_urls
+    from public.project_events;
+
+grant select on public.public_project_events to anon, authenticated;
+
+grant select, insert, update, delete on public.project_harvests      to authenticated;
+grant select, insert, update, delete on public.harvest_distributions to authenticated;
+grant select, insert, update, delete on public.project_events        to authenticated;

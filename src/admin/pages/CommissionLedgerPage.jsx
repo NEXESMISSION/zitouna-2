@@ -10,23 +10,11 @@ import RenderDataGate from '../../components/RenderDataGate.jsx'
 import EmptyState from '../../components/EmptyState.jsx'
 import { SkeletonCard } from '../../components/skeletons/index.js'
 import { getPagerPages } from './pager-util.js'
+import { fmtMoney, fmtMoneyBare, fmtDate } from '../lib/commissionFormat.js'
 import './sell-field.css'
 import './commission-ledger.css'
 
 const EVENTS_PER_PAGE = 15
-
-function fmtMoney(v) {
-  return `${(Number(v) || 0).toLocaleString('fr-FR')} TND`
-}
-
-function fmtDate(iso) {
-  if (!iso) return '—'
-  try {
-    return new Date(iso).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' })
-  } catch {
-    return String(iso)
-  }
-}
 
 function initials(name) {
   const parts = String(name || '').trim().split(/\s+/).filter(Boolean)
@@ -179,6 +167,8 @@ export default function CommissionLedgerPage() {
           throw new Error('Aucune ligne payable libre pour ce bénéficiaire')
         } else if (r.reason === 'invalid') {
           throw new Error('Bénéficiaire invalide')
+        } else if (r.reason === 'not_admin') {
+          throw new Error('Action réservée aux administrateurs')
         } else {
           throw new Error('Impossible de créer la demande')
         }
@@ -201,7 +191,10 @@ export default function CommissionLedgerPage() {
       if (decision === 'rejected') opts.reason = rejectReasonByReq[reqId] || 'Rejeté'
       if (decision === 'paid') opts.paymentRef = payRefByReq[reqId] || `REF-${Date.now()}`
       const r = await reviewPayoutRequest(reqId, decision, opts)
-      if (!r.ok) throw new Error('Action impossible sur cette demande')
+      if (!r.ok) {
+        if (r.reason === 'not_admin') throw new Error('Action réservée aux administrateurs')
+        throw new Error('Action impossible sur cette demande')
+      }
     })
     if (res.ok) {
       addToast(decision === 'paid' ? 'Paiement enregistré' : 'Demande mise à jour')
@@ -437,7 +430,7 @@ export default function CommissionLedgerPage() {
 
                 <div className="sp-card__body">
                   <div className="sp-card__price">
-                    <span className="sp-card__amount">{(row.gross || 0).toLocaleString('fr-FR')}</span>
+                    <span className="sp-card__amount">{fmtMoneyBare(row.gross)}</span>
                     <span className="sp-card__currency">TND</span>
                   </div>
                   <div className="sp-card__info" style={{ gap: 6 }}>
@@ -510,7 +503,7 @@ export default function CommissionLedgerPage() {
 
                 <div className="sp-card__body">
                   <div className="sp-card__price">
-                    <span className="sp-card__amount">{(Number(req.grossAmount) || 0).toLocaleString('fr-FR')}</span>
+                    <span className="sp-card__amount">{fmtMoneyBare(req.grossAmount)}</span>
                     <span className="sp-card__currency">TND</span>
                   </div>
                   <div className="sp-card__info">
@@ -570,7 +563,7 @@ export default function CommissionLedgerPage() {
 
                   <div className="sp-card__body">
                     <div className="sp-card__price">
-                      <span className="sp-card__amount">{(Number(e.amount) || 0).toLocaleString('fr-FR')}</span>
+                      <span className="sp-card__amount">{fmtMoneyBare(e.amount)}</span>
                       <span className="sp-card__currency">TND</span>
                     </div>
                     <div className="sp-card__info">
@@ -650,7 +643,7 @@ export default function CommissionLedgerPage() {
                   <span className="sp-detail__date">{fmtDate(req.createdAt)}</span>
                 </div>
                 <div className="sp-detail__price">
-                  <span className="sp-detail__price-num">{(Number(req.grossAmount) || 0).toLocaleString('fr-FR')}</span>
+                  <span className="sp-detail__price-num">{fmtMoneyBare(req.grossAmount)}</span>
                   <span className="sp-detail__price-cur">TND</span>
                 </div>
                 <p className="sp-detail__banner-sub">
@@ -780,7 +773,7 @@ export default function CommissionLedgerPage() {
                   <span className="sp-detail__date">{rows.length} ligne{rows.length > 1 ? 's' : ''}</span>
                 </div>
                 <div className="sp-detail__price">
-                  <span className="sp-detail__price-num">{gross.toLocaleString('fr-FR')}</span>
+                  <span className="sp-detail__price-num">{fmtMoneyBare(gross)}</span>
                   <span className="sp-detail__price-cur">TND</span>
                 </div>
                 <p className="sp-detail__banner-sub">{name}</p>

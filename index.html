@@ -8,9 +8,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 
     <!-- Color scheme hints: Chrome tab bar, Safari status bar, Android address bar. -->
-    <meta name="theme-color" content="#0b150c" media="(prefers-color-scheme: dark)" />
-    <meta name="theme-color" content="#f8fafc" media="(prefers-color-scheme: light)" />
-    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#f8fafc" />
+    <meta name="color-scheme" content="light" />
 
     <!-- iOS web app behaviour: full-screen when launched from Home Screen. -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -29,10 +28,20 @@
     <!-- PWA manifest. -->
     <link rel="manifest" href="/manifest.webmanifest" />
 
+    <!-- Dashboard fonts — Inter + Inter Tight (portfolio dashboard) and
+         IBM Plex Sans Arabic + Readex Pro for the bilingual auth pages.
+         IBM Plex Sans Arabic renders modern, clean Arabic glyphs that
+         pair well with Inter for mixed FR/AR labels. Readex Pro acts as
+         a display Arabic face for the hero headline. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=Inter+Tight:wght@500;600;700;800&family=Readex+Pro:wght@500;600;700;800&display=swap" rel="stylesheet">
+
     <style>
-      html, body, #root { background: #071009; min-height: 100vh; min-height: 100dvh; }
-      html[data-theme="admin"], html[data-theme="admin"] body, html[data-theme="admin"] #root { background: #f8fafc; }
-      html[data-theme="auth"],  html[data-theme="auth"]  body, html[data-theme="auth"]  #root { background: #0b150c; }
+      /* Light canvas everywhere — dark-green theme retired. Colour
+         matches --zb-bg in src/styles/theme-light.css and the admin
+         canvas background so pre-React paint never flashes. */
+      html, body, #root { background: #f8fafc; min-height: 100vh; min-height: 100dvh; }
       /* Prevent the 300ms iOS tap delay + suppress tap highlight colour globally.
          Our buttons use :active / :hover / :focus for feedback. */
       html { -webkit-tap-highlight-color: transparent; }
