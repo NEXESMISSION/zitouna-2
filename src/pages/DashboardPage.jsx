@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useCountUp } from '../hooks/useCountUp.js'
 import { useNavigate } from 'react-router-dom'
-import TopBar from '../TopBar.jsx'
 import { useAuth } from '../lib/AuthContext.jsx'
+import { useTheme } from '../lib/ThemeContext.jsx'
+import NotificationsMenu from '../components/NotificationsMenu.jsx'
+import headerLogo from '../../logo-header2.png'
 
 
 import { supabase } from '../lib/supabase.js'
@@ -16,9 +18,9 @@ import {
 } from '../lib/useSupabase.js'
 import {
   addInstallmentReceiptRecord,
-  fetchMyPhoneChangeRequest,
+  fetchMyHarvestDistributions,
+  fetchUpcomingHarvestsForClient,
   requestAmbassadorPayout,
-  submitPhoneChangeRequest,
   updatePaymentStatus,
   uploadInstallmentReceipt,
 } from '../lib/db.js'
@@ -29,8 +31,7 @@ import ErrorPanel from '../components/ErrorPanel.jsx'
 import MyReferralTree from '../components/MyReferralTree.jsx'
 import './dashboard-page.css'
 import './installments-page.css'
-
-const REVENUE_PER_TREE = 90
+import { buildMyPurchases } from '../lib/buildMyPurchases.js'
 const MAX_IMAGE_DIMENSION = 1600
 const IMAGE_QUALITY = 0.76
 // Receipts are phone camera shots of bank slips — after webp compression at
@@ -85,6 +86,7 @@ function saleInInvestorPortfolio(s) {
 
 export default function DashboardPage() {
   const navigate = useNavigate()
+  const auth = useAuth()
   const {
     user,
     ready,
@@ -92,10 +94,25 @@ export default function DashboardPage() {
     clientProfile,
     profileStatus,
     logout,
-    refreshAuth,
-  } = useAuth()
+  } = auth
+
+  // Admin/sell portal shortcuts — mirrors TopBar so the dashboard header
+  // can surface the key + notifications + home buttons without the legacy
+  // top bar above it.
+  const hasAdminAccess = auth?.hasAdminAccess
+  const canAccessSellPortal = auth?.canAccessSellPortal
+  const adminTarget = auth?.adminTarget || '/admin'
+  const showAdminEntry = Boolean(hasAdminAccess || canAccessSellPortal)
+  const adminEntryTarget = hasAdminAccess ? adminTarget : '/admin/sell'
+
+  const { theme } = useTheme()
+  const isLightTheme = theme === 'light'
 
   const displayName = adminUser?.name || user?.firstname || user?.name || 'Investisseur'
+  // Revolut-vibe: single electric-blue accent across both themes.
+  const forecastAccentCurrent   = '#0a84ff'
+  const forecastAccentPotential = isLightTheme ? '#0062cc' : '#409cff'
+  const payoutIconBg            = 'rgba(10, 132, 255, 0.14)'
 
   // Plan 04 §3.1 — pass the resolved clientId into every scoped hook.
   // `ready && clientProfile?.id` ensures we never fire fetches while
@@ -131,6 +148,48 @@ export default function DashboardPage() {
   const showAmbassadorCard = Boolean(clientId)
   const { summary: referralSummary, loading: referralLoading, refresh: refreshReferralSummary } =
     useAmbassadorReferralSummary(showAmbassadorCard)
+
+  // Harvest income — separate stream from commissions. Pulled independently
+  // so a slow query on one doesn't block the other. `distributions` lists
+  // the client's past credited harvests; `upcomingHarvests` is the next
+  // planned/in_progress row across all their projects for the "Prochaine
+  // récolte" card.
+  const [harvestDistributions, setHarvestDistributions] = useState(null)
+  const [upcomingHarvests, setUpcomingHarvests] = useState(null)
+  useEffect(() => {
+    if (!clientId) {
+      setHarvestDistributions([])
+      setUpcomingHarvests([])
+      return undefined
+    }
+    let cancelled = false
+    ;(async () => {
+      try {
+        const [dists, upcoming] = await Promise.all([
+          fetchMyHarvestDistributions({ clientId }),
+          fetchUpcomingHarvestsForClient(clientId),
+        ])
+        if (cancelled) return
+        setHarvestDistributions(dists)
+        setUpcomingHarvests(upcoming)
+      } catch (err) {
+        if (cancelled) return
+        console.warn('[dashboard] harvest fetch failed', err?.message || err)
+        setHarvestDistributions([])
+        setUpcomingHarvests([])
+      }
+    })()
+    return () => { cancelled = true }
+  }, [clientId])
+
+  const currentYear = new Date().getFullYear()
+  const harvestThisYearTnd = (harvestDistributions || [])
+    .filter((d) => d.harvestYear === currentYear)
+    .reduce((s, d) => s + d.amountTnd, 0)
+  const harvestLifetimeTnd = (harvestDistributions || []).reduce((s, d) => s + d.amountTnd, 0)
+  const nextHarvest = (upcomingHarvests || []).find(
+    (h) => h.status === 'planned' || h.status === 'in_progress',
+  ) || null
   // PLAN 02 §14 — migrated from boolean form to canonical {clientId, enabled}.
   const { events: myCommissionEvents, loading: ledgerLoading, refresh: refreshCommissionLedger } = useMyCommissionLedger({ clientId: clientId || null, enabled: Boolean(clientId) })
   // The hook's own withTimeout (8s) already resolves loading=false on failure,
@@ -201,46 +260,10 @@ export default function DashboardPage() {
   // hint while projects catch up — does NOT block the portfolio render.
   void projectsLoading
 
-  const { myPurchases } = useMemo(() => {
-    // Pre-index projects and plots once to avoid O(n·m·k) nested .find()
-    // inside the per-sale loop (was up to ~20k lookups on larger accounts).
-    const projectsById = new Map()
-    const plotsByKey = new Map()
-    for (const p of allProjects || []) {
-      projectsById.set(p.id, p)
-      for (const pl of p.plots || []) {
-        plotsByKey.set(`${p.id}:${pl.id}`, pl)
-      }
-    }
-    const flat = []
-    for (const sale of mySales) {
-      const proj = projectsById.get(sale.projectId)
-      const plotIds = Array.isArray(sale.plotIds) ? sale.plotIds : (sale.plotId ? [sale.plotId] : [])
-      for (const pid of plotIds) {
-        const plot =
-          plotsByKey.get(`${sale.projectId}:${pid}`) ||
-          plotsByKey.get(`${sale.projectId}:${Number(pid)}`)
-        const trees = plot?.trees || 0
-        const invested = plot?.totalPrice || 0
-        const annualRevenue = trees * REVENUE_PER_TREE
-        flat.push({
-          saleId: sale.id,
-          projectId: sale.projectId,
-          plotId: pid,
-          city: proj?.city || '',
-          region: proj?.region || '',
-          projectTitle: proj?.title || sale.projectId,
-          trees,
-          invested,
-          annualRevenue,
-          mapUrl: plot?.mapUrl || '',
-          status: sale.status,
-          createdAt: sale.createdAt,
-        })
-      }
-    }
-    return { myPurchases: flat }
-  }, [mySales, allProjects])
+  const myPurchases = useMemo(
+    () => buildMyPurchases(mySales, allProjects),
+    [mySales, allProjects],
+  )
 
   const ambassadorReferralRows = useMemo(() => {
     if (!clientId) return []
@@ -510,112 +533,7 @@ export default function DashboardPage() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [focusedPlanId, ipPayTarget])
-  const [showProfile, setShowProfile] = useState(false)
-  const [profileForm, setProfileForm] = useState({})
-  const [profileSaving, setProfileSaving] = useState(false)
-  const [profileMsg, setProfileMsg] = useState('')
-
-  // Phone-change demande (dashboard-side half of the super-admin flow).
-  const [phoneChange, setPhoneChange] = useState({
-    open: false,
-    newPhone: '',
-    reason: '',
-    saving: false,
-    msg: '',
-    request: null, // { id, status, requested_phone, created_at, reviewer_note, ... }
-    loading: false,
-  })
-
-  const loadMyPhoneChangeRequest = useCallback(async () => {
-    try {
-      setPhoneChange((p) => ({ ...p, loading: true }))
-      const req = await fetchMyPhoneChangeRequest()
-      setPhoneChange((p) => ({ ...p, request: req || null, loading: false }))
-    } catch (err) {
-      console.warn('[dashboard] fetchMyPhoneChangeRequest:', err?.message || err)
-      setPhoneChange((p) => ({ ...p, loading: false }))
-    }
-  }, [])
-
-  useEffect(() => {
-    if (showProfile) loadMyPhoneChangeRequest()
-  }, [showProfile, loadMyPhoneChangeRequest])
-
-  const handleSubmitPhoneChange = useCallback(async () => {
-    const trimmed = String(phoneChange.newPhone || '').trim()
-    if (trimmed.length < 6) {
-      setPhoneChange((p) => ({ ...p, msg: 'Numéro invalide (6 caractères minimum).' }))
-      return
-    }
-    setPhoneChange((p) => ({ ...p, saving: true, msg: '' }))
-    try {
-      await submitPhoneChangeRequest({ newPhone: trimmed, reason: phoneChange.reason || '' })
-      setPhoneChange((p) => ({ ...p, saving: false, msg: 'Demande envoyée.', newPhone: '', reason: '', open: false }))
-      await loadMyPhoneChangeRequest()
-    } catch (err) {
-      const raw = String(err?.message || err || '')
-      let msg = raw
-      if (/PHONE_UNCHANGED/i.test(raw)) msg = 'Le nouveau numéro est identique à l\'actuel.'
-      else if (/INVALID_PHONE/i.test(raw)) msg = 'Numéro invalide.'
-      else if (/NOT_AUTHENTICATED/i.test(raw)) msg = 'Session expirée : reconnectez-vous.'
-      setPhoneChange((p) => ({ ...p, saving: false, msg }))
-    }
-  }, [phoneChange.newPhone, phoneChange.reason, loadMyPhoneChangeRequest])
-
-  const profileFields = useMemo(() => {
-    const u = user || {}
-    const adm = adminUser || {}
-    const nameParts = (adm.name || '').split(/\s+/)
-    const admFirst = nameParts.length >= 2 ? nameParts.slice(0, -1).join(' ') : (adm.name || '')
-    const admLast = nameParts.length >= 2 ? nameParts[nameParts.length - 1] : ''
-    return [
-      { key: 'firstname', label: 'Prénom', value: admFirst || u.firstname || '' },
-      { key: 'lastname', label: 'Nom', value: admLast || u.lastname || '' },
-      { key: 'email', label: 'Email', value: adm.email || u.email || '', locked: true },
-      { key: 'phone', label: 'Téléphone', value: adm.phone || u.phone || '' },
-    ]
-  }, [user, adminUser])
-
-  const openProfile = useCallback(() => {
-    const init = {}
-    for (const f of profileFields) init[f.key] = f.value
-    setProfileForm(init)
-    setProfileMsg('')
-    setShowProfile(true)
-  }, [profileFields])
-
-  const handleProfileSave = useCallback(async () => {
-    setProfileSaving(true)
-    setProfileMsg('')
-    try {
-      const meta = {}
-      let changed = false
-      for (const f of profileFields) {
-        if (f.locked) continue
-        const original = f.value || ''
-        const current = (profileForm[f.key] || '').trim()
-        if (!original && current) {
-          meta[f.key] = current
-          changed = true
-        }
-      }
-      if (!changed) { setProfileMsg('Aucune modification.'); setProfileSaving(false); return }
-      if (meta.firstname || meta.lastname) {
-        const fn = meta.firstname || profileForm.firstname || ''
-        const ln = meta.lastname || profileForm.lastname || ''
-        meta.name = `${fn} ${ln}`.trim()
-      }
-      const { error } = await supabase.auth.updateUser({ data: meta })
-      if (error) throw error
-      refreshAuth()
-      setProfileMsg('Profil mis à jour.')
-      setShowProfile(false)
-    } catch (e) {
-      setProfileMsg(e?.message || 'Erreur.')
-    } finally {
-      setProfileSaving(false)
-    }
-  }, [profileFields, profileForm, refreshAuth])
+  /* Profile editing moved to /my/profile (standalone page). */
 
   /* ── Installment handlers (inline) ── */
   const ipHandleReceiptChange = useCallback(async (file) => {
@@ -696,218 +614,666 @@ export default function DashboardPage() {
   const animInvested = useCountUp(totalInvested, { duration: KPI_COUNT_MS, delay: 85 })
   const animRevenue = useCountUp(totalRevenue, { duration: KPI_COUNT_MS, delay: 170 })
   const animRoi = useCountUp(roiTarget, { duration: KPI_COUNT_MS, delay: 255 })
+  const commissionBalance = Number(referralSummary?.walletBalance) || 0
+  const animCommission = useCountUp(commissionBalance, { duration: KPI_COUNT_MS, delay: 340 })
 
   async function handleLogout() {
     await logout()
     navigate('/login', { replace: true })
   }
 
+  // Avatar dropdown (Profil / Déconnexion). Closes on click outside + ESC.
+  const [avatarMenuOpen, setAvatarMenuOpen] = useState(false)
+  const avatarMenuRef = useRef(null)
+  useEffect(() => {
+    if (!avatarMenuOpen) return undefined
+    const onDoc = (e) => {
+      if (avatarMenuRef.current && !avatarMenuRef.current.contains(e.target)) {
+        setAvatarMenuOpen(false)
+      }
+    }
+    const onKey = (e) => { if (e.key === 'Escape') setAvatarMenuOpen(false) }
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [avatarMenuOpen])
+
   return (
     <main className="screen screen--app">
-      <section className="inv-dash">
-        <TopBar />
-        {/* ── Header Card ── */}
-        <div className="inv-header">
-          <div className="inv-header__top">
-            <div className="inv-header__avatar">
-              <img
-                src={`https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(displayName)}&backgroundColor=7ab020&textColor=0b150c&fontSize=40`}
-                alt={displayName}
-              />
+      <section className="zb-dash">
+        <div className="zb-page">
+        {/* ── Sidebar: brand · nav · referral CTA ── */}
+        <aside className="zb-side">
+          <div className="zb-brand">
+            <div className="zb-brand-mark" aria-hidden>
+              <img src={headerLogo} alt="" />
             </div>
-            <div className="inv-header__meta">
-              <h2 className="inv-header__name">Bonjour, {displayName}</h2>
-              <p className="inv-header__subtitle">Votre portefeuille d&apos;oliviers</p>
+            <div>
+              <div className="zb-brand-name">Zitouna Bladi</div>
+              <div className="zb-brand-sub">Smart Agriculture</div>
             </div>
-            <button type="button" className="inv-header__profile-btn" onClick={openProfile} aria-label="Mon profil">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-            </button>
           </div>
-        </div>
 
-        {/* ── Profile Edit Panel ── */}
-        {showProfile && (
-          <div className="inv-profile">
-            <div className="inv-profile__head">
-              <h3 className="inv-profile__title">Mon profil</h3>
-              <button type="button" className="inv-profile__close" onClick={() => setShowProfile(false)}>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
-              </button>
-            </div>
-            <div className="inv-profile__fields">
-              {profileFields.map(f => {
-                const original = f.value || ''
-                const isLocked = f.locked || Boolean(original)
-                return (
-                  <div key={f.key} className="inv-profile__field">
-                    <label className="inv-profile__label">{f.label}</label>
-                    <div className="inv-profile__input-wrap">
-                      <input
-                        type={f.key === 'email' ? 'email' : 'text'}
-                        className={`inv-profile__input${isLocked ? ' inv-profile__input--locked' : ''}`}
-                        value={profileForm[f.key] ?? f.value}
-                        readOnly={isLocked}
-                        dir={f.key === 'phone' || f.key === 'email' ? 'ltr' : undefined}
-                        placeholder={isLocked ? '' : `Saisir ${f.label.toLowerCase()}…`}
-                        onChange={e => !isLocked && setProfileForm(p => ({ ...p, [f.key]: e.target.value }))}
-                      />
-                      {isLocked && <span className="inv-profile__lock">🔒</span>}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-            {profileMsg && <p className="inv-profile__msg">{profileMsg}</p>}
-            <button
-              type="button"
-              className="inv-profile__save"
-              onClick={handleProfileSave}
-              disabled={profileSaving}
-            >
-              {profileSaving ? 'Enregistrement…' : 'Enregistrer'}
+          <nav className="zb-nav">
+            <button type="button" className="zb-nav-active">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
+              Tableau de bord
+            </button>
+            <button type="button" onClick={() => navigate('/browse')}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M4 20l8-16 8 16H4z"/><path d="M8 16l4-8 4 8"/></svg>
+              Portefeuille
+            </button>
+            <button type="button" onClick={() => navigate('/installments')}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M3 7h18M3 12h18M3 17h12"/></svg>
+              Échéances
+            </button>
+            <button type="button" onClick={() => navigate('/my/commissions')}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18"/></svg>
+              Commissions
+            </button>
+            <button type="button" onClick={() => navigate('/my/tree')}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M7.8 7.8l3.4 8.4M16.2 7.8l-3.4 8.4"/></svg>
+              Arbre
+            </button>
+            <button type="button" onClick={() => navigate('/my/payout')}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M4 12h12M12 5l7 7-7 7"/></svg>
+              Retirer
             </button>
 
-            {/* Phone-change demande. A client cannot edit phone directly —
-                they submit a request reviewed by a super admin. */}
-            <div className="inv-profile__phone-change">
-              <div className="inv-profile__phone-change-header">
-                <span className="inv-profile__phone-change-title">
-                  Changer le numéro de téléphone
-                </span>
-                {!phoneChange.open && !phoneChange.request && (
-                  <button
-                    type="button"
-                    className="inv-profile__phone-change-toggle"
-                    onClick={() => setPhoneChange((p) => ({ ...p, open: true, msg: '' }))}
-                  >
-                    Demander un changement
-                  </button>
+            <div className="zb-nav-group-title">Compte</div>
+            <button type="button" onClick={() => navigate('/my/profile')}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
+              Profil
+            </button>
+            {showAdminEntry && (
+              <button type="button" onClick={() => navigate(adminEntryTarget)}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4" /></svg>
+                {hasAdminAccess ? 'Admin' : 'Ventes'}
+              </button>
+            )}
+            <button type="button" onClick={handleLogout}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+              Déconnexion
+            </button>
+          </nav>
+
+        </aside>
+
+        <main className="zb-main">
+          {/* Topbar: search · notifications · avatar */}
+          <div className="zb-topbar">
+            <div className="zb-search">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+              <input type="text" placeholder="Rechercher une parcelle, un projet…" readOnly />
+            </div>
+            <div className="zb-topbar-actions">
+              <NotificationsMenu />
+              <div className="zb-avatar-wrap" ref={avatarMenuRef}>
+                <button
+                  type="button"
+                  className="zb-avatar"
+                  onClick={() => setAvatarMenuOpen((v) => !v)}
+                  aria-haspopup="menu"
+                  aria-expanded={avatarMenuOpen}
+                  aria-label="Menu du compte"
+                  title={displayName}
+                >
+                  {(displayName || 'ZB').split(/\s+/).filter(Boolean).map(w => w[0]).slice(0, 2).join('').toUpperCase() || 'ZB'}
+                </button>
+                {avatarMenuOpen && (
+                  <div className="zb-avatar-menu" role="menu">
+                    <button type="button" role="menuitem" onClick={() => { setAvatarMenuOpen(false); navigate('/my/profile') }}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
+                      Mon profil
+                    </button>
+                    {showAdminEntry && (
+                      <button type="button" role="menuitem" onClick={() => { setAvatarMenuOpen(false); navigate(adminEntryTarget) }}>
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2l8 4v6c0 5-3.5 9-8 10-4.5-1-8-5-8-10V6l8-4z"/><path d="M9 12l2 2 4-4"/></svg>
+                        {hasAdminAccess ? 'Admin' : 'Ventes'}
+                      </button>
+                    )}
+                    <hr />
+                    <button type="button" role="menuitem" className="zb-danger" onClick={() => { setAvatarMenuOpen(false); handleLogout() }}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                      Déconnexion
+                    </button>
+                  </div>
                 )}
               </div>
-
-              {phoneChange.request && phoneChange.request.status === 'pending' && (
-                <div className="inv-profile__phone-change-status inv-profile__phone-change-status--pending">
-                  <strong>Demande en cours</strong>
-                  <span>Nouveau numéro : <span dir="ltr">{phoneChange.request.requested_phone}</span></span>
-                  <span className="inv-profile__phone-change-note">
-                    Un super administrateur examinera votre demande.
-                  </span>
-                </div>
-              )}
-
-              {phoneChange.request && phoneChange.request.status === 'approved' && !phoneChange.open && (
-                <div className="inv-profile__phone-change-status inv-profile__phone-change-status--approved">
-                  <strong>Dernière demande approuvée</strong>
-                  <span>Numéro actuel : <span dir="ltr">{phoneChange.request.requested_phone}</span></span>
-                  <button
-                    type="button"
-                    className="inv-profile__phone-change-toggle"
-                    onClick={() => setPhoneChange((p) => ({ ...p, open: true, msg: '' }))}
-                  >
-                    Nouvelle demande
-                  </button>
-                </div>
-              )}
-
-              {phoneChange.request && phoneChange.request.status === 'rejected' && !phoneChange.open && (
-                <div className="inv-profile__phone-change-status inv-profile__phone-change-status--rejected">
-                  <strong>Dernière demande refusée</strong>
-                  {phoneChange.request.reviewer_note && (
-                    <span className="inv-profile__phone-change-note">
-                      Motif : {phoneChange.request.reviewer_note}
-                    </span>
-                  )}
-                  <button
-                    type="button"
-                    className="inv-profile__phone-change-toggle"
-                    onClick={() => setPhoneChange((p) => ({ ...p, open: true, msg: '' }))}
-                  >
-                    Soumettre une nouvelle demande
-                  </button>
-                </div>
-              )}
-
-              {phoneChange.open && (
-                <div className="inv-profile__phone-change-form">
-                  <label className="inv-profile__label" htmlFor="pc-new-phone">
-                    Nouveau numéro
-                  </label>
-                  <input
-                    id="pc-new-phone"
-                    type="tel"
-                    dir="ltr"
-                    className="inv-profile__input"
-                    placeholder="+216 XX XXX XXX"
-                    value={phoneChange.newPhone}
-                    onChange={(e) => setPhoneChange((p) => ({ ...p, newPhone: e.target.value }))}
-                  />
-                  <label className="inv-profile__label" htmlFor="pc-reason" style={{ marginTop: 8 }}>
-                    Motif (optionnel)
-                  </label>
-                  <textarea
-                    id="pc-reason"
-                    className="inv-profile__input"
-                    rows={2}
-                    placeholder="Pourquoi voulez-vous changer de numéro ?"
-                    value={phoneChange.reason}
-                    onChange={(e) => setPhoneChange((p) => ({ ...p, reason: e.target.value }))}
-                  />
-                  {phoneChange.msg && (
-                    <p className="inv-profile__msg">{phoneChange.msg}</p>
-                  )}
-                  <div className="inv-profile__phone-change-actions">
-                    <button
-                      type="button"
-                      className="inv-profile__phone-change-cancel"
-                      onClick={() => setPhoneChange((p) => ({ ...p, open: false, msg: '' }))}
-                      disabled={phoneChange.saving}
-                    >
-                      Annuler
-                    </button>
-                    <button
-                      type="button"
-                      className="inv-profile__phone-change-submit"
-                      onClick={handleSubmitPhoneChange}
-                      disabled={phoneChange.saving || !phoneChange.newPhone.trim()}
-                    >
-                      {phoneChange.saving ? 'Envoi…' : 'Envoyer la demande'}
-                    </button>
-                  </div>
-                </div>
-              )}
             </div>
           </div>
-        )}
 
-        {/* ── Tabs ── */}
-        <div className="inv-tabs">
-          <button
-            type="button"
-            className={`inv-tab${activeTab === 'portfolio' ? ' inv-tab--active' : ''}`}
-            onClick={() => setActiveTab('portfolio')}
-          >
-            Mon Portefeuille
-          </button>
-          <button
-            type="button"
-            className={`inv-tab${activeTab === 'echeances' ? ' inv-tab--active' : ''}`}
-            onClick={() => setActiveTab('echeances')}
-          >
-            Mes Échéances
-          </button>
-          <button
-            type="button"
-            className={`inv-tab${activeTab === 'parrainage' ? ' inv-tab--active' : ''}`}
-            onClick={() => setActiveTab('parrainage')}
-          >
-            Commissions
-          </button>
-        </div>
+          {/* Greeting */}
+          <div className="zb-greeting">
+            <div className="zb-greeting-sub">Bonjour {displayName} 👋</div>
+            <h1 className="zb-greeting-title">Voici votre portefeuille.</h1>
+          </div>
 
-        {/* ══════════════════════════════════════
-           TAB: Mon Portefeuille
-           ══════════════════════════════════════ */}
-        {activeTab === 'portfolio' && (
+
+        {/* ══════════════════════════════════════════════════════════
+           Unified dashboard — hero · parcelles · grid-2 (échéances + activity).
+           Commissions and Retirer moved to /my/commissions and /my/payout.
+           Échéances detail moved to /installments.
+           ══════════════════════════════════════════════════════════ */}
+        {(() => {
+          // Upcoming payments — pick the next unresolved payment from each
+          // plan, sort chronologically, cap at 4 for the preview.
+          const upcomingPayments = []
+          for (const plan of myPlans || []) {
+            const next = (plan.payments || []).find(
+              (p) => p.status === 'pending' || p.status === 'rejected' || p.status === 'submitted',
+            )
+            if (next) upcomingPayments.push({ ...next, plan })
+          }
+          upcomingPayments.sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate))
+          const upcomingPreview = upcomingPayments.slice(0, 4)
+
+          const monthAbbr = (iso) => {
+            const m = ['JAN', 'FÉV', 'MAR', 'AVR', 'MAI', 'JUI', 'JUL', 'AOÛ', 'SEP', 'OCT', 'NOV', 'DÉC']
+            try { return m[new Date(iso).getMonth()] } catch { return '' }
+          }
+          const dayNum = (iso) => {
+            try { return String(new Date(iso).getDate()).padStart(2, '0') } catch { return '' }
+          }
+
+          // Recent activity — mix last commission events for a feed.
+          const recentActivity = (myCommissionEvents || []).slice(0, 5)
+
+          return (
+            <>
+              {/* ── Hero: two earnings cards — Commissions + Récoltes ── */}
+              <section className="zb-hero zb-hero--earn">
+                {/* Commissions card */}
+                <article
+                  className="zb-earn zb-earn--commission"
+                  onClick={() => navigate('/my/commissions')}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => { if (e.key === 'Enter') navigate('/my/commissions') }}
+                >
+                  <div className="zb-earn-head">
+                    <div className="zb-earn-ic zb-earn-ic--commission">
+                      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="9" />
+                        <path d="M12 7v10M9 9.5c0-1 1-2 3-2s3 1 3 2-1 1.5-3 2-3 1-3 2 1 2 3 2 3-1 3-2" />
+                      </svg>
+                    </div>
+                    <div className="zb-earn-head-tx">
+                      <div className="zb-earn-t">Commissions</div>
+                      <div className="zb-earn-s">{showAmbassadorCard ? 'Solde disponible · prêt à retirer' : 'Activez votre compte ambassadeur'}</div>
+                    </div>
+                  </div>
+                  <div className="zb-earn-v">
+                    {referralLoading ? '—' : Math.round(animCommission).toLocaleString('fr-FR')}
+                    <span className="zb-earn-u">TND</span>
+                  </div>
+                  <div className="zb-earn-meta">
+                    {showAmbassadorCard && Number(referralSummary?.commissionsReleased) > 0 ? (
+                      <>
+                        <span className="zb-earn-pill zb-earn-pill--green">
+                          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M6 14l6-6 6 6" /></svg>
+                          {Math.max(1, Math.round((commissionBalance / Number(referralSummary.commissionsReleased)) * 100))}%
+                        </span>
+                        <span className="zb-earn-sub">
+                          {Math.round(Number(referralSummary.commissionsReleased)).toLocaleString('fr-FR')} TND libérés · lifetime
+                        </span>
+                      </>
+                    ) : showAmbassadorCard ? (
+                      <span className="zb-earn-sub">Aucune commission encore libérée</span>
+                    ) : (
+                      <span className="zb-earn-sub">Parrainez pour toucher des commissions L1 + L2</span>
+                    )}
+                  </div>
+                  <div className="zb-earn-cta">
+                    {showAmbassadorCard
+                      ? (commissionBalance > 0 ? 'Retirer maintenant →' : 'Voir mes commissions →')
+                      : 'Découvrir le parrainage →'}
+                  </div>
+                </article>
+
+                {/* Récoltes card */}
+                <article
+                  className="zb-earn zb-earn--harvest"
+                  onClick={() => navigate('/my/harvests')}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => { if (e.key === 'Enter') navigate('/my/harvests') }}
+                >
+                  <div className="zb-earn-head">
+                    <div className="zb-earn-ic zb-earn-ic--harvest">
+                      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 3c4 3 6 7 6 11a6 6 0 0 1-12 0c0-4 2-8 6-11z" />
+                        <path d="M12 14v6" />
+                      </svg>
+                    </div>
+                    <div className="zb-earn-head-tx">
+                      <div className="zb-earn-t">Récoltes {currentYear}</div>
+                      <div className="zb-earn-s">Revenu des oliviers distribué cette année</div>
+                    </div>
+                  </div>
+                  <div className="zb-earn-v">
+                    {salesLoading ? '—' : Math.round(harvestThisYearTnd).toLocaleString('fr-FR')}
+                    <span className="zb-earn-u">TND</span>
+                  </div>
+                  <div className="zb-earn-meta">
+                    {totalRevenue > 0 ? (
+                      <>
+                        <span className="zb-earn-pill zb-earn-pill--blue">
+                          {Math.min(100, Math.max(0, Math.round((harvestThisYearTnd / totalRevenue) * 100)))}%
+                        </span>
+                        <span className="zb-earn-sub">
+                          du revenu annuel projeté ({Math.round(totalRevenue).toLocaleString('fr-FR')} TND)
+                        </span>
+                      </>
+                    ) : nextHarvest ? (
+                      <span className="zb-earn-sub">
+                        Prochaine récolte · {nextHarvest.date
+                          ? new Date(nextHarvest.date).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
+                          : nextHarvest.year}
+                      </span>
+                    ) : (
+                      <span className="zb-earn-sub">Premiers revenus à partir de la 3ᵉ année</span>
+                    )}
+                  </div>
+                  <div className="zb-earn-cta">
+                    {nextHarvest ? `Prochaine : ${nextHarvest.date ? new Date(nextHarvest.date).toLocaleDateString('fr-FR', { month: 'short', year: 'numeric' }) : nextHarvest.year} →` : 'Voir mes récoltes →'}
+                  </div>
+                </article>
+              </section>
+
+              {/* Quick actions + portfolio rail */}
+              <section className="zb-card zb-hero-actions">
+                <div className="zb-actions">
+                  {showAdminEntry && (
+                    <button className="zb-btn zb-btn-primary" type="button" onClick={() => navigate(adminEntryTarget)}>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4" /></svg>
+                      {hasAdminAccess ? 'Admin' : 'Espace ventes'}
+                    </button>
+                  )}
+                  <button className="zb-btn zb-btn-ghost" type="button" onClick={() => navigate('/my/payout')}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M4 12h12M12 5l7 7-7 7" /></svg>
+                    Retirer
+                  </button>
+                  <button className="zb-btn zb-btn-ghost" type="button" onClick={() => navigate('/my/commissions')}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="6" width="18" height="13" rx="2" /><path d="M3 10h18" /></svg>
+                    Commissions
+                  </button>
+                  <button className="zb-btn zb-btn-ghost" type="button" onClick={() => navigate('/my/tree')}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M7.8 7.8l3.4 8.4M16.2 7.8l-3.4 8.4"/></svg>
+                    Arbre
+                  </button>
+                  <button className="zb-btn zb-btn-ghost" type="button" onClick={() => navigate('/installments')}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M3 7h18M3 12h18M3 17h12" /></svg>
+                    Échéances
+                  </button>
+                  <button className="zb-btn zb-btn-ghost" type="button" onClick={() => navigate('/browse')}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/><path d="M8 11h6M11 8v6"/></svg>
+                    Explorer
+                  </button>
+                </div>
+
+                <div className="zb-rail zb-rail--3">
+                  <div>
+                    <div className="zb-k">Oliviers</div>
+                    <div className="zb-v">{salesLoading ? '—' : Math.round(animTrees).toLocaleString('fr-FR')}</div>
+                  </div>
+                  <div>
+                    <div className="zb-k">Revenu annuel projeté</div>
+                    <div className="zb-v zb-blue">
+                      {salesLoading ? '—' : Math.round(animRevenue).toLocaleString('fr-FR')}
+                      <span className="zb-s">TND</span>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="zb-k">Capital placé</div>
+                    <div className="zb-v">
+                      {salesLoading ? '—' : Math.round(animInvested).toLocaleString('fr-FR')}
+                      <span className="zb-s">TND · ROI {animRoi.toFixed(1)}%</span>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              {/* ── Two income tracks: Récoltes (harvests) + Commissions ── */}
+              <section className="zb-income-tracks">
+                <article
+                  className="zb-income zb-income--harvest"
+                  onClick={() => navigate('/my/harvests')}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => { if (e.key === 'Enter') navigate('/my/harvests') }}
+                >
+                  <div className="zb-income-head">
+                    <div className="zb-income-ic">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 3c4 3 6 7 6 11a6 6 0 0 1-12 0c0-4 2-8 6-11z" />
+                        <path d="M12 14v6" />
+                      </svg>
+                    </div>
+                    <div className="zb-income-head-tx">
+                      <div className="zb-income-t">Récoltes</div>
+                      <div className="zb-income-s">Revenu annuel des oliviers</div>
+                    </div>
+                  </div>
+                  <div className="zb-income-v">
+                    {Math.round(harvestThisYearTnd).toLocaleString('fr-FR')}
+                    <span className="zb-s">TND</span>
+                  </div>
+                  <div className="zb-income-meta">
+                    cette année · {Math.round(harvestLifetimeTnd).toLocaleString('fr-FR')} TND cumulé
+                  </div>
+                  <div className="zb-income-foot">Voir l&apos;historique →</div>
+                </article>
+
+                <article
+                  className="zb-income zb-income--commission"
+                  onClick={() => navigate('/my/commissions')}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => { if (e.key === 'Enter') navigate('/my/commissions') }}
+                >
+                  <div className="zb-income-head">
+                    <div className="zb-income-ic">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="6" cy="6" r="2.5" /><circle cx="18" cy="6" r="2.5" /><circle cx="12" cy="18" r="2.5" />
+                        <path d="M7.8 7.8l3.4 8.4M16.2 7.8l-3.4 8.4" />
+                      </svg>
+                    </div>
+                    <div className="zb-income-head-tx">
+                      <div className="zb-income-t">Commissions</div>
+                      <div className="zb-income-s">Parrainage direct + indirect</div>
+                    </div>
+                  </div>
+                  <div className="zb-income-v">
+                    {Math.round(Number(referralSummary?.commissionsReleased) || 0).toLocaleString('fr-FR')}
+                    <span className="zb-s">TND</span>
+                  </div>
+                  <div className="zb-income-meta">
+                    {Math.round(Number(referralSummary?.walletBalance) || 0).toLocaleString('fr-FR')} TND disponible
+                  </div>
+                  <div className="zb-income-foot">Voir le détail →</div>
+                </article>
+              </section>
+
+              {/* ── Prochaine récolte — featured card when one exists ── */}
+              {nextHarvest && (
+                <section
+                  className="zb-next-harvest"
+                  onClick={() => navigate(`/project/${nextHarvest.projectId}`)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => { if (e.key === 'Enter') navigate(`/project/${nextHarvest.projectId}`) }}
+                >
+                  <div className="zb-next-harvest-bubble">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="10" /><path d="M12 6v6l4 2" />
+                    </svg>
+                  </div>
+                  <div className="zb-next-harvest-body">
+                    <div className="zb-k">Prochaine récolte</div>
+                    <div className="zb-next-harvest-v">
+                      {nextHarvest.date
+                        ? new Date(nextHarvest.date).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
+                        : nextHarvest.year}
+                    </div>
+                    <div className="zb-next-harvest-s">
+                      Projet {nextHarvest.projectId}
+                      {nextHarvest.status === 'in_progress' ? ' · récolte en cours' : ''}
+                      {nextHarvest.projectedGrossTnd > 0
+                        ? ` · ≈ ${Math.round(nextHarvest.projectedGrossTnd).toLocaleString('fr-FR')} TND prévus`
+                        : ''}
+                    </div>
+                  </div>
+                  <svg className="zb-next-harvest-arrow" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M9 6l6 6-6 6" />
+                  </svg>
+                </section>
+              )}
+
+              {/* ── Mes parcelles ── */}
+              <section>
+                <div className="zb-section-head">
+                  <h2>Mes parcelles</h2>
+                  {myPurchases.length > 0 && (
+                    <button type="button" onClick={() => navigate('/my/parcelles')}>Voir toutes →</button>
+                  )}
+                </div>
+
+                <RenderDataGate
+                  loading={portfolioLoading}
+                  error={null}
+                  data={myPurchases}
+                  watchdogMs={4000}
+                  skeleton={() => (
+                    <div className="zb-parcelles zb-parcelles--slim" aria-busy="true">
+                      {[0, 1, 2].map((i) => (
+                        <div key={i} className="zb-card zb-parcelle zb-parcelle--slim">
+                          <div className="zb-parcelle-body">
+                            <div className="zb-parcelle-head">
+                              <div className="sk sk-line sk-line--title" style={{ width: '55%' }} />
+                              <div className="sk sk-line sk-line--sub" style={{ width: '30%' }} />
+                            </div>
+                            <div className="sk sk-line sk-line--sub" style={{ width: '70%' }} />
+                            <div className="sk sk-line sk-line--sub" style={{ width: '50%' }} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  onRetry={() => {
+                    try { refreshPlans?.() } catch { /* ignore */ }
+                    try { refreshProjects?.() } catch { /* ignore */ }
+                  }}
+                  empty={mySalesInProgress.length > 0 ? (
+                    <div className="zb-card" style={{ padding: 22, color: 'var(--zb-muted)', fontSize: 13 }}>
+                      Vous avez {mySalesInProgress.length} achat{mySalesInProgress.length !== 1 ? 's' : ''} en cours de finalisation.
+                      Les parcelles s&apos;affichent ici après la <strong style={{ color: 'var(--zb-ink)' }}>finalisation notaire</strong>.
+                    </div>
+                  ) : (
+                    <EmptyState
+                      title="Aucune parcelle"
+                      description="Vous ne possédez pas encore de parcelles."
+                      action={{ label: 'Explorer les projets', onClick: () => navigate('/browse') }}
+                    />
+                  )}
+                >
+                  {(purchases) => (
+                    <div className="zb-parcelles zb-parcelles--slim">
+                      {purchases.slice(0, 3).map((parcel) => {
+                        const progress = Math.min(100, Math.max(8, (parcel.annualRevenue / (parcel.invested || 1)) * 100))
+                        return (
+                          <div
+                            key={`${parcel.saleId}-${parcel.plotId}`}
+                            className="zb-card zb-parcelle zb-parcelle--slim"
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => navigate(`/project/${parcel.projectId}/plot/${parcel.plotId}`)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault()
+                                navigate(`/project/${parcel.projectId}/plot/${parcel.plotId}`)
+                              }
+                            }}
+                          >
+                            <div className="zb-parcelle-body">
+                              <div className="zb-parcelle-head">
+                                <div className="zb-parcelle-title">Parcelle #{parcel.plotId}</div>
+                                {parcel.city && (
+                                  <span className="zb-parcelle-city">
+                                    <span className="zb-d" />{parcel.city}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="zb-parcelle-subtitle">{parcel.projectTitle}</div>
+                              <div className="zb-parcelle-stats">
+                                <div className="zb-kv">
+                                  <span className="zb-k">Investi</span>
+                                  <span className="zb-v">{Math.round(parcel.invested).toLocaleString('fr-FR')}<span className="zb-v-unit">DT</span></span>
+                                </div>
+                                <div className="zb-kv">
+                                  <span className="zb-k">Revenu / an</span>
+                                  <span className="zb-v zb-blue">{Math.round(parcel.annualRevenue).toLocaleString('fr-FR')}<span className="zb-v-unit">DT</span></span>
+                                </div>
+                              </div>
+                              <div className="zb-parcelle-foot">
+                                <div className="zb-progress"><span style={{ width: `${progress}%` }} /></div>
+                                <button
+                                  type="button"
+                                  className="zb-parcelle-detail"
+                                  onClick={(e) => { e.stopPropagation(); navigate(`/project/${parcel.projectId}/plot/${parcel.plotId}`) }}
+                                >
+                                  Détail
+                                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 12h14M13 5l7 7-7 7" /></svg>
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </RenderDataGate>
+              </section>
+
+              {/* ── Grid-2: Échéances preview · Activité récente ── */}
+              <section className="zb-grid-2">
+                <div className="zb-card zb-ech">
+                  <div className="zb-ech-head">
+                    <div>
+                      <h2>Prochaines échéances</h2>
+                      <div className="zb-ech-sub">
+                        {ipStats.total} plan{ipStats.total !== 1 ? 's' : ''} actif{ipStats.total !== 1 ? 's' : ''}
+                        {ipStats.rejected > 0 && ` · ${ipStats.rejected} à corriger`}
+                      </div>
+                    </div>
+                    <button type="button" className="zb-ech-link" onClick={() => navigate('/installments')}>Tout voir →</button>
+                  </div>
+
+                  {upcomingPreview.length === 0 ? (
+                    plansLoadingRaw ? (
+                      <div className="zb-ech-list" aria-busy="true" aria-live="polite">
+                        {[0, 1, 2].map((i) => (
+                          <div key={i} className="zb-ech-row zb-ech-row--sk">
+                            <div className="zb-date-chip zb-date-chip--sk" aria-hidden="true">
+                              <span className="sk sk-line zb-sk-date-d" />
+                              <span className="sk sk-line zb-sk-date-m" />
+                            </div>
+                            <div className="zb-ech-txt">
+                              <div className="sk sk-line" style={{ width: '70%', height: 12 }} />
+                              <div className="sk sk-line" style={{ width: '45%', height: 10, marginTop: 6 }} />
+                            </div>
+                            <div className="zb-ech-side">
+                              <div className="sk sk-line" style={{ width: 72, height: 14, marginLeft: 'auto' }} />
+                              <div className="sk sk-line sk-line--badge" style={{ marginTop: 6, marginLeft: 'auto' }} />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="zb-ech-empty">Aucune échéance en attente.</div>
+                    )
+                  ) : (
+                    <div className="zb-ech-list">
+                      {upcomingPreview.map((p) => {
+                        const meta = ipStatusMeta(p.status)
+                        const statusClass =
+                          meta.tone === 'approved' ? 'zb-status-paid'
+                            : meta.tone === 'submitted' ? 'zb-status-up'
+                              : meta.tone === 'rejected' ? 'zb-status-bad'
+                                : 'zb-status-due'
+                        return (
+                          <div
+                            key={`${p.plan.id}:${p.month}`}
+                            className="zb-ech-row"
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => navigate('/installments')}
+                            onKeyDown={(e) => { if (e.key === 'Enter') navigate('/installments') }}
+                            style={{ cursor: 'pointer' }}
+                          >
+                            <div className="zb-date-chip">
+                              <div className="zb-d">{dayNum(p.dueDate)}</div>
+                              <div className="zb-m">{monthAbbr(p.dueDate)}</div>
+                            </div>
+                            <div className="zb-ech-txt">
+                              <div className="zb-ech-txt-t">Facilité {p.month} · {p.plan.projectTitle}</div>
+                              <div className="zb-ech-txt-s">{p.plan.projectCity || 'Plan d\'échéances'}</div>
+                            </div>
+                            <div className="zb-ech-side">
+                              <div className="zb-ech-amt">{p.amount.toLocaleString('fr-FR')}<span className="zb-u">DT</span></div>
+                              <span className={`zb-status ${statusClass}`}>{meta.label}</span>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div className="zb-card zb-act">
+                  <div className="zb-act-head">
+                    <h2>Activité récente</h2>
+                    <button type="button" className="zb-ech-link" onClick={() => navigate('/my/activity')}>Historique →</button>
+                  </div>
+
+                  {recentActivity.length === 0 ? (
+                    ledgerLoading ? (
+                      <div aria-busy="true" aria-live="polite">
+                        {[0, 1, 2].map((i) => (
+                          <div key={i} className="zb-act-row zb-act-row--sk">
+                            <div className="sk sk-box zb-sk-act-ic" aria-hidden="true" />
+                            <div className="zb-info">
+                              <div className="sk sk-line" style={{ width: '65%', height: 12 }} />
+                              <div className="sk sk-line" style={{ width: '40%', height: 10, marginTop: 6 }} />
+                            </div>
+                            <div className="sk sk-line zb-sk-act-amt" aria-hidden="true" />
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="zb-ech-empty">Aucune activité récente.</div>
+                    )
+                  ) : (
+                    recentActivity.map((ev) => {
+                      const isPayout = ev.kind === 'payout'
+                      const amount = Number(ev.amount || 0)
+                      const dateIso = ev.createdAt || ev.sale?.notaryCompletedAt || ev.paidAt || ev.reviewedAt
+                      const sub = dateIso ? fmtDate(dateIso) : ''
+                      const title = isPayout
+                        ? 'Demande de retrait'
+                        : `Commission L${ev.level || '?'} · ${ev.project?.title || 'Vente'}`
+                      return (
+                        <div key={ev.id} className="zb-act-row">
+                          <div className={`zb-act-ic ${isPayout ? 'zb-act-ic-out' : 'zb-act-ic-in'}`}>
+                            {isPayout ? (
+                              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 12h12M12 5l7 7-7 7" /></svg>
+                            ) : (
+                              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 19V5M5 12l7 7 7-7" /></svg>
+                            )}
+                          </div>
+                          <div className="zb-info">
+                            <div className="zb-info-t">{title}</div>
+                            <div className="zb-info-s">{sub}</div>
+                          </div>
+                          <div className={`zb-a ${isPayout ? 'zb-out' : 'zb-in'}`}>
+                            {isPayout ? '−' : '+'}{Math.abs(amount).toLocaleString('fr-FR')}
+                            <span className="zb-u">DT</span>
+                          </div>
+                        </div>
+                      )
+                    })
+                  )}
+                </div>
+              </section>
+            </>
+          )
+        })()}
+
+        {/* Legacy tab blocks removed: échéances → /installments, commissions → /my/commissions, retirer → /my/payout. */}
+        {false && activeTab === 'portfolio' && (
           <>
             <div className="inv-kpi-strip" aria-live="polite">
               <div className="inv-kpi">
@@ -938,6 +1304,18 @@ export default function DashboardPage() {
                 <span className="inv-kpi__label">ROI</span>
               </div>
             </div>
+
+            {/* "Mes revenus" — rich revenue breakdown surfaced directly on
+                the dashboard (used to live inside the Mon profil modal).
+                Shares its data source (myPurchases) with the portfolio so
+                all numbers stay in sync with the KPI strip above. */}
+            {!salesLoading && (
+              <ProfileRevenuePanel
+                purchases={myPurchases}
+                totalInvested={totalInvested}
+                totalRevenue={totalRevenue}
+              />
+            )}
 
             <h3 className="inv-section-title">Mes parcelles</h3>
 
@@ -1067,10 +1445,14 @@ export default function DashboardPage() {
           <div className="ip ip--embedded">
             <div className="ip__hero ip__hero--embedded">
               <div className="ip__hero-intro">
-                <span className="ip__hero-icon" aria-hidden>📅</span>
+                <span className="ip__hero-icon" aria-hidden>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+                  </svg>
+                </span>
                 <div>
                   <h1 className="ip__hero-title">Mes échéances</h1>
-                  <p className="ip__hero-sub">Suivez vos facilités en temps réel</p>
+                  <p className="ip__hero-sub">Suivez vos paiements en temps réel</p>
                 </div>
               </div>
               <div className="ip__hero-kpi ip__hero-kpi--strip" role="list">
@@ -1175,7 +1557,9 @@ export default function DashboardPage() {
                       <h2 id="ip-plan-detail-title" className="ip__modal-title">{focusedPlan.projectTitle}</h2>
                       <p className="ip__modal-sub">{focusedPlan.projectCity} · #{focusedPlan.id}</p>
                     </div>
-                    <button type="button" className="ip__modal-close" onClick={() => setFocusedPlanId(null)} aria-label="Fermer le détail du plan">✕</button>
+                    <button type="button" className="ip__modal-close" onClick={() => setFocusedPlanId(null)} aria-label="Fermer le détail du plan">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
                   </div>
                   <div className="ip__modal-body ip__modal-body--plan-detail">
                     {(() => {
@@ -1240,12 +1624,27 @@ export default function DashboardPage() {
                                     <span className={`ip__status ip__status--${meta.tone}`}>{meta.label}</span>
                                   </div>
                                   <div className="ip__pay-hint">{meta.hint}</div>
-                                  {p.status === 'rejected' && p.rejectedNote && <div className="ip__pay-reject">⚠ {p.rejectedNote}</div>}
+                                  {p.status === 'rejected' && p.rejectedNote && (
+                                    <div className="ip__pay-reject">
+                                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                                        </svg>
+                                        {p.rejectedNote}
+                                      </span>
+                                    </div>
+                                  )}
                                   {receipt && (
                                     <div className="ip__receipt">
                                       {receiptIsImage
                                         ? <img src={receipt.url} alt="Reçu" className="ip__receipt-thumb" />
-                                        : <div className="ip__receipt-file-icon">📄</div>}
+                                        : (
+                                          <div className="ip__receipt-file-icon" aria-hidden>
+                                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+                                            </svg>
+                                          </div>
+                                        )}
                                       <div className="ip__receipt-info">
                                         <div className="ip__receipt-name">{receipt.name}</div>
                                         {receipt.date && <div className="ip__receipt-date">{fmtDate(receipt.date)}</div>}
@@ -1255,7 +1654,21 @@ export default function DashboardPage() {
                                   )}
                                   {isPayable(p.status) && (
                                     <button type="button" className={`ip__pay-btn${p.status === 'submitted' ? ' ip__pay-btn--correct' : ''}`} onClick={() => ipOpenPay(focusedPlan, p)}>
-                                      {p.status === 'submitted' ? '📝 Corriger le reçu' : '📤 Envoyer un reçu'}
+                                      {p.status === 'submitted' ? (
+                                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                            <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/>
+                                          </svg>
+                                          Corriger le reçu
+                                        </span>
+                                      ) : (
+                                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+                                          </svg>
+                                          Envoyer un reçu
+                                        </span>
+                                      )}
                                     </button>
                                   )}
                                 </div>
@@ -1291,7 +1704,9 @@ export default function DashboardPage() {
                   <h3 className="ip__modal-title">Soumettre votre reçu</h3>
                   <p className="ip__modal-sub">Validation rapide de votre mensualité</p>
                 </div>
-                <button type="button" className="ip__modal-close" onClick={ipClosePay}>✕</button>
+                <button type="button" className="ip__modal-close" onClick={ipClosePay} aria-label="Fermer">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
               </div>
               <div className="ip__modal-body">
                 <div className="ip__modal-info ip__modal-info--receipt">
@@ -1345,9 +1760,6 @@ export default function DashboardPage() {
               <header className="inv-wallet__header">
                 <div>
                   <h3 className="inv-wallet__title">Commissions</h3>
-                  <p className="inv-wallet__lead">
-                    Retraits soumis aux règles finance (après tampon légal).
-                  </p>
                   {!showAmbassadorCard && (
                     <p className="inv-wallet__lead inv-wallet__lead--muted">
                       Reliez votre profil client pour activer l’accès.
@@ -1400,24 +1812,24 @@ export default function DashboardPage() {
                           <span className="inv-wallet__hero-currency">DT</span>
                         </strong>
                         <span className="inv-wallet__hero-meta">
-                          Retrait min. {showAmbassadorCard ? (referralSummary?.minPayoutAmount ?? 0) : 0} DT · virement validé par la finance
+                          Retrait min. {showAmbassadorCard ? (referralSummary?.minPayoutAmount ?? 0) : 0} DT
                         </span>
+                        <div className="inv-wallet__hero-breakdown">
+                          <span className="inv-wallet__chip">
+                            <span className="inv-wallet__chip-lbl">En attente</span>
+                            <span className="inv-wallet__chip-val">
+                              {(showAmbassadorCard ? (referralSummary?.gainsAccrued ?? 0) : 0).toLocaleString('fr-FR', { maximumFractionDigits: 2 })} DT
+                            </span>
+                          </span>
+                          <span className="inv-wallet__chip">
+                            <span className="inv-wallet__chip-lbl">Crédit légal</span>
+                            <span className="inv-wallet__chip-val">
+                              {(showAmbassadorCard ? (referralSummary?.commissionsReleased ?? 0) : 0).toLocaleString('fr-FR', { maximumFractionDigits: 2 })} DT
+                            </span>
+                          </span>
+                        </div>
                       </div>
                       <div className="inv-wallet__stats">
-                        <div className="inv-wallet__stat">
-                          <span className="inv-wallet__stat-lbl">En attente</span>
-                          <span className="inv-wallet__stat-val">
-                            {(showAmbassadorCard ? (referralSummary?.gainsAccrued ?? 0) : 0).toLocaleString('fr-FR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} DT
-                          </span>
-                          <span className="inv-wallet__stat-sub">Avant tampon</span>
-                        </div>
-                        <div className="inv-wallet__stat">
-                          <span className="inv-wallet__stat-lbl">Crédit légal</span>
-                          <span className="inv-wallet__stat-val">
-                            {(showAmbassadorCard ? (referralSummary?.commissionsReleased ?? 0) : 0).toLocaleString('fr-FR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} DT
-                          </span>
-                          <span className="inv-wallet__stat-sub">Non versé</span>
-                        </div>
                         <div className="inv-wallet__stat">
                           <span className="inv-wallet__stat-lbl">Direct (L1)</span>
                           <span className="inv-wallet__stat-val">
@@ -1485,15 +1897,15 @@ export default function DashboardPage() {
                             const potentialW = Math.max(2, (parrainageForecast.potentialTotal / max) * 210)
                             return (
                               <>
-                                <rect x="5" y="8" width={currentW} height="16" rx="4" fill="#a8cc50" opacity="0.85" />
-                                <rect x="5" y="36" width={potentialW} height="16" rx="4" fill="#7ab020" />
+                                <rect x="5" y="8" width={currentW} height="16" rx="4" fill={forecastAccentCurrent} opacity="0.85" />
+                                <rect x="5" y="36" width={potentialW} height="16" rx="4" fill={forecastAccentPotential} />
                               </>
                             )
                           })()}
                         </svg>
                         <div className="inv-forecast__legend">
-                          <span><span className="inv-forecast__dot" style={{ background: '#a8cc50' }} /> Actuel</span>
-                          <span><span className="inv-forecast__dot" style={{ background: '#7ab020' }} /> Potentiel</span>
+                          <span><span className="inv-forecast__dot" style={{ background: forecastAccentCurrent }} /> Actuel</span>
+                          <span><span className="inv-forecast__dot" style={{ background: forecastAccentPotential }} /> Potentiel</span>
                         </div>
                         </section>
                       </details>
@@ -1528,9 +1940,6 @@ export default function DashboardPage() {
                             )}
                           </div>
                         </div>
-                        <p className="inv-ledger__hint">
-                          L1 = votre vente · L2+ = vente dans votre ligne de commissions.
-                        </p>
                         <RenderDataGate
                           loading={ledgerLoading && myCommissionEvents.length === 0}
                           data={myCommissionEvents}
@@ -1562,7 +1971,11 @@ export default function DashboardPage() {
                             const st = statusMap[pr.status] || { label: pr.status || '—', tone: 'warn' }
                             return (
                               <li key={pr.id} className="inv-ledger__row">
-                                <div className="inv-ledger__lvl" style={{ background: '#0f766e' }}>💸</div>
+                                <div className="inv-ledger__lvl" style={{ background: payoutIconBg, color: '#fff' }} aria-hidden>
+                                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/>
+                                  </svg>
+                                </div>
                                 <div className="inv-ledger__body">
                                   <div className="inv-ledger__top">
                                     <span className="inv-ledger__amount inv-ledger__amount--neg">−{(Number(pr.amount) || 0).toLocaleString('fr-FR')} <small>DT</small></span>
@@ -1599,6 +2012,8 @@ export default function DashboardPage() {
                             const sellerName = ev.seller?.name || '—'
                             const buyerName = ev.buyer?.name || '—'
                             const project = ev.project?.title || '—'
+                            const snap = ev.rule_snapshot || ev.ruleSnapshot || null
+                            const isGrantBased = snap && snap.source === 'reverse_sale_grant'
                             // Honest display: show the raw facts (actual seller, actual
                             // buyer, level) without inferring a story. User can spot
                             // anomalies themselves (e.g. L1 credited but they weren't
@@ -1609,24 +2024,37 @@ export default function DashboardPage() {
                                 <div className="inv-ledger__body">
                                   <div className="inv-ledger__top">
                                     <span className="inv-ledger__amount">+{(Number(ev.amount) || 0).toLocaleString('fr-FR')} <small>DT</small></span>
+                                    {isGrantBased ? (
+                                      <span
+                                        className="inv-ledger__vi-pill"
+                                        title="Vente inversée : commission versée grâce à un droit acquis — un filleul de la source a vendu, ce qui déclenche votre commission L1."
+                                      >
+                                        V.I.
+                                      </span>
+                                    ) : null}
                                     <span className={`inv-ledger__status inv-ledger__status--${st.tone}`}>{st.label}</span>
                                   </div>
-                                  <div className="inv-ledger__grid">
-                                    <span className="inv-ledger__lbl">Vendeur</span>
-                                    <span className="inv-ledger__val">{sellerName}</span>
-                                    <span className="inv-ledger__lbl">Acheteur</span>
-                                    <span className="inv-ledger__val">{buyerName}</span>
-                                    <span className="inv-ledger__lbl">Projet</span>
-                                    <span className="inv-ledger__val">{project}</span>
-                                    {ev.sale?.code && (<>
-                                      <span className="inv-ledger__lbl">Code vente</span>
-                                      <span className="inv-ledger__val"><code style={{ fontSize: 11 }}>{ev.sale.code}</code></span>
-                                    </>)}
-                                    {ev.sale?.notaryCompletedAt && (<>
-                                      <span className="inv-ledger__lbl">Finalisé</span>
-                                      <span className="inv-ledger__val">{fmtDate(ev.sale.notaryCompletedAt)}</span>
-                                    </>)}
+                                  <div className="inv-ledger__summary">
+                                    <span className="inv-ledger__summary-project">{project}</span>
+                                    {ev.sale?.notaryCompletedAt && (
+                                      <span className="inv-ledger__summary-date">{fmtDate(ev.sale.notaryCompletedAt)}</span>
+                                    )}
                                   </div>
+                                  {(sellerName !== '—' || buyerName !== '—' || ev.sale?.code) && (
+                                    <details className="inv-ledger__details">
+                                      <summary className="inv-ledger__details-summary">Détails</summary>
+                                      <div className="inv-ledger__grid">
+                                        <span className="inv-ledger__lbl">Vendeur</span>
+                                        <span className="inv-ledger__val">{sellerName}</span>
+                                        <span className="inv-ledger__lbl">Acheteur</span>
+                                        <span className="inv-ledger__val">{buyerName}</span>
+                                        {ev.sale?.code && (<>
+                                          <span className="inv-ledger__lbl">Code</span>
+                                          <span className="inv-ledger__val"><code style={{ fontSize: 11 }}>{ev.sale.code}</code></span>
+                                        </>)}
+                                      </div>
+                                    </details>
+                                  )}
                                 </div>
                               </li>
                             )
@@ -1635,19 +2063,19 @@ export default function DashboardPage() {
                             <>
                               {directEvents.length > 0 && (
                                 <div className="inv-ledger__section">
-                                  <div className="inv-ledger__section-title">Vos ventes directes</div>
+                                  <div className="inv-ledger__section-title">Ventes directes (L1)</div>
                                   <ul className="inv-ledger__list">{directEvents.map(renderCard)}</ul>
                                 </div>
                               )}
                               {indirectEvents.length > 0 && (
                                 <div className="inv-ledger__section">
-                                  <div className="inv-ledger__section-title">Ventes de votre ligne (commissions)</div>
+                                  <div className="inv-ledger__section-title">Votre ligne (L2+)</div>
                                   <ul className="inv-ledger__list">{indirectEvents.map(renderCard)}</ul>
                                 </div>
                               )}
                               {payoutsOnly.length > 0 && (
                                 <div className="inv-ledger__section">
-                                  <div className="inv-ledger__section-title">Demandes de retrait</div>
+                                  <div className="inv-ledger__section-title">Retraits</div>
                                   <ul className="inv-ledger__list">{payoutsOnly.map(renderPayoutCard)}</ul>
                                 </div>
                               )}
@@ -1775,7 +2203,11 @@ export default function DashboardPage() {
                       <div className="inv-payout__overlay" role="dialog" aria-modal="true" onClick={() => !payoutBusy && setPayoutConfirmOpen(false)}>
                         <div className="inv-payout__modal" onClick={(e) => e.stopPropagation()}>
                           <header className="inv-payout__head">
-                            <div style={{ fontSize: 28 }}>💸</div>
+                            <div aria-hidden>
+                              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/>
+                              </svg>
+                            </div>
                             <div>
                               <h3 className="inv-payout__title">Confirmer le retrait</h3>
                               <p className="inv-payout__sub">Votre demande sera transmise à la finance.</p>
@@ -1826,13 +2258,365 @@ export default function DashboardPage() {
           </>
         )}
 
-        {/* ── Footer ── */}
-        <footer className="inv-footer">
-          <button type="button" className="inv-footer__btn" onClick={handleLogout}>
-            Se déconnecter
-          </button>
-        </footer>
+          <div className="zb-footer-note">Données indicatives · Portfolio Zitouna Bladi</div>
+        </main>
+        </div>
       </section>
     </main>
+  )
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   RevenueSparkCard — cumulative revenue curve over 10 years.
+   The curve shows REAL cumulative revenue = annual × t (TND on Y, years
+   on X). A dashed horizontal line marks the investment (break-even);
+   a diamond marker highlights the year the portfolio breaks even.
+   When the user has no revenue yet, we still show a light illustrative
+   curve and invite them to buy their first plot.
+   ══════════════════════════════════════════════════════════════════════ */
+function RevenueSparkCard({ totalRevenue, totalInvested, onExplore }) {
+  const HORIZON = 10
+  const W = 520
+  const H = 120
+  const PAD_T = 10
+  const PAD_B = 18
+  const PLOT_H = H - PAD_T - PAD_B
+
+  const annual = Math.max(0, Number(totalRevenue) || 0)
+  const invested = Math.max(0, Number(totalInvested) || 0)
+  const hasData = annual > 0 && invested > 0
+
+  // Cumulative revenue at horizon + break-even year (may fall past horizon).
+  const cumulAtHorizon = annual * HORIZON
+  const paybackYears = annual > 0 ? invested / annual : 0
+  // Y-axis max: whichever is bigger so the break-even line is visible.
+  const yMax = Math.max(cumulAtHorizon, invested) * 1.08 || 1
+
+  // 24 sample points along the straight cumul line (kept as a polyline so
+  // the gradient fill under it looks smooth).
+  const points = useMemo(() => {
+    const pts = []
+    const steps = 24
+    for (let i = 0; i <= steps; i++) {
+      const t = (i / steps) * HORIZON
+      const cumul = annual * t
+      const x = (i / steps) * W
+      const y = PAD_T + (1 - cumul / yMax) * PLOT_H
+      pts.push([x, y])
+    }
+    return pts
+  }, [annual, yMax, PLOT_H])
+
+  const pathD = useMemo(() => {
+    if (!points.length) return ''
+    return points.map(([x, y], i) => `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ')
+  }, [points])
+  const areaD = `${pathD} L${W},${H - PAD_B} L0,${H - PAD_B} Z`
+
+  // Where the dashed break-even line sits on the Y axis.
+  const breakEvenY = PAD_T + (1 - invested / yMax) * PLOT_H
+  // Where the break-even diamond sits on the curve (if reached in horizon).
+  const breakEvenReached = paybackYears > 0 && paybackYears <= HORIZON
+  const breakEvenX = breakEvenReached ? (paybackYears / HORIZON) * W : null
+
+  const endPt = points[points.length - 1]
+
+  // Endpoint label formatting.
+  const fmtTND = (n) => Math.round(n).toLocaleString('fr-FR')
+  const pwYears = Math.floor(paybackYears)
+  const pwMonths = Math.round((paybackYears - pwYears) * 12)
+  const paybackLabel = !hasData
+    ? null
+    : pwYears > 0
+      ? (pwMonths > 0 ? `${pwYears} an${pwYears > 1 ? 's' : ''} ${pwMonths} mois` : `${pwYears} an${pwYears > 1 ? 's' : ''}`)
+      : `${pwMonths} mois`
+
+  return (
+    <div className="zb-card zb-spark">
+      <div className="zb-spark-head">
+        <div>
+          <h3>Mes revenus</h3>
+          <div className="zb-sub">
+            {hasData
+              ? <>Cumul projeté sur {HORIZON} ans · <strong>{fmtTND(cumulAtHorizon)} TND</strong></>
+              : <>Projection sur {HORIZON} ans — ajoutez une parcelle pour démarrer</>}
+          </div>
+        </div>
+        {hasData && breakEvenReached && (
+          <span className="zb-spark-chip" title="Année où vos revenus cumulés égalent votre investissement">
+            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+            Remboursé en {paybackLabel}
+          </span>
+        )}
+      </div>
+
+      <svg className="zb-spark-svg" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-label="Courbe de revenu cumulé">
+        <defs>
+          <linearGradient id="zb-spark-g1" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor="#1E5CFF" stopOpacity={hasData ? 0.22 : 0.08} />
+            <stop offset="100%" stopColor="#1E5CFF" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+
+        {/* Baseline */}
+        <line x1="0" y1={H - PAD_B} x2={W} y2={H - PAD_B} stroke="#ECECEC" strokeWidth="1" />
+
+        {/* Break-even dashed line (investment level) */}
+        {hasData && invested > 0 && breakEvenY > PAD_T && breakEvenY < H - PAD_B && (
+          <>
+            <line
+              x1="0" y1={breakEvenY} x2={W} y2={breakEvenY}
+              stroke="#B9A769" strokeWidth="1" strokeDasharray="4 4" opacity="0.8"
+            />
+            <text x={W - 6} y={breakEvenY - 4} textAnchor="end" fontSize="10" fill="#9A864F" fontWeight="600">
+              Investi · {fmtTND(invested)} TND
+            </text>
+          </>
+        )}
+
+        {/* Filled area + curve */}
+        <path d={areaD} fill="url(#zb-spark-g1)" />
+        <path
+          d={pathD}
+          fill="none"
+          stroke={hasData ? '#1E5CFF' : '#C8C8C0'}
+          strokeWidth="2.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeDasharray={hasData ? undefined : '5 5'}
+        />
+
+        {/* Break-even diamond on the curve */}
+        {hasData && breakEvenReached && breakEvenX != null && (
+          <g transform={`translate(${breakEvenX},${breakEvenY})`}>
+            <rect x="-6" y="-6" width="12" height="12" transform="rotate(45)" fill="#FFFFFF" stroke="#B9A769" strokeWidth="2" />
+            <rect x="-2.5" y="-2.5" width="5" height="5" transform="rotate(45)" fill="#B9A769" />
+          </g>
+        )}
+
+        {/* Endpoint marker */}
+        {hasData && endPt && (
+          <>
+            <circle cx={endPt[0]} cy={endPt[1]} r="8" fill="#1E5CFF" opacity="0.15" />
+            <circle cx={endPt[0]} cy={endPt[1]} r="4" fill="#1E5CFF" />
+          </>
+        )}
+      </svg>
+
+      <div className="zb-spark-footer">
+        {[0, 2, 4, 6, 8, 10].map((y) => (
+          <span key={y}>{y === 0 ? 'Aujourd’hui' : `${y} ans`}</span>
+        ))}
+      </div>
+
+      {!hasData && onExplore && (
+        <button className="zb-btn zb-btn-primary zb-spark-empty-cta" type="button" onClick={onExplore}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+          Explorer les projets
+        </button>
+      )}
+    </div>
+  )
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   ProfileRevenuePanel — rich "Mes revenus" section surfaced at the top
+   of Mon profil. Aggregates per-plot annual revenue from `myPurchases`
+   (which flows through computePlotAnnualRevenue → project.annualRevenueTotal
+   × surface share) and derives:
+     · mensuel / journalier projections
+     · ROI ring + payback horizon
+     · cumul 1 / 3 / 5 / 10 ans (switchable)
+     · répartition stackée par projet
+     · top 3 parcelles (médailles)
+   Empty state shown when user has no purchases yet.
+   ══════════════════════════════════════════════════════════════════════ */
+function ProfileRevenuePanel({ purchases, totalInvested, totalRevenue }) {
+  const hasData = (purchases?.length ?? 0) > 0 && totalRevenue > 0
+  const monthly = totalRevenue / 12
+  const daily = totalRevenue / 365
+  const roiPct = totalInvested > 0 ? (totalRevenue / totalInvested) * 100 : 0
+  const paybackYears = totalRevenue > 0 ? (totalInvested / totalRevenue) : 0
+
+  const byProject = useMemo(() => {
+    const map = new Map()
+    for (const p of purchases || []) {
+      const key = p.projectId
+      const row = map.get(key) || { projectId: key, title: p.projectTitle || key, city: p.city, revenue: 0, plots: 0, area: 0 }
+      row.revenue += Number(p.annualRevenue) || 0
+      row.plots += 1
+      row.area += Number(p.area) || 0
+      map.set(key, row)
+    }
+    const list = Array.from(map.values()).sort((a, b) => b.revenue - a.revenue)
+    const tot = list.reduce((s, x) => s + x.revenue, 0) || 1
+    return list.map((x, i) => ({ ...x, pct: (x.revenue / tot) * 100, colorIdx: i }))
+  }, [purchases])
+
+  const topPlots = useMemo(() => (
+    [...(purchases || [])]
+      .sort((a, b) => (Number(b.annualRevenue) || 0) - (Number(a.annualRevenue) || 0))
+      .slice(0, 3)
+  ), [purchases])
+
+  const animRevenue = useCountUp(totalRevenue, { duration: 1100, delay: 40 })
+  const animMonthly = useCountUp(Math.round(monthly), { duration: 1100, delay: 120 })
+  const animDaily = useCountUp(Math.round(daily), { duration: 1100, delay: 200 })
+
+  const RING_SIZE = 104
+  const RING_STROKE = 10
+  const r = (RING_SIZE - RING_STROKE) / 2
+  const circ = 2 * Math.PI * r
+  // Ring fills proportionally to ROI%. Anything past 100% still shows a
+  // full ring — the badge number keeps the precise figure.
+  const ringPct = Math.max(0, Math.min(100, roiPct))
+  const offset = circ - (ringPct / 100) * circ
+
+  // Project palette — six distinct hues that work on the dashboard's
+  // dark-green background. Cycled when a user owns >6 projects.
+  const PROJECT_COLORS = ['#0a84ff', '#30d158', '#bf5af2', '#64d2ff', '#ff9f0a', '#ff453a']
+
+  if (!hasData) {
+    return (
+      <section className="inv-rev-panel inv-rev-panel--empty" aria-label="Mes revenus">
+        <div className="inv-rev-panel__empty-icon" aria-hidden>
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22V12m0 0C12 7 7 4 3 6m9 6c0-5 5-8 9-6"/></svg>
+        </div>
+        <div className="inv-rev-panel__empty-title">Aucun revenu projeté</div>
+        <div className="inv-rev-panel__empty-sub">
+          Achetez votre première parcelle pour voir ici votre rendement détaillé.
+        </div>
+      </section>
+    )
+  }
+
+  // Condensed "Mes revenus" panel. The top KPI strip already shows the big
+  // numbers (oliviers / TND investis / TND an / ROI), so this block only
+  // carries the unique value-adds: the /mois & /jour breakdown, payback,
+  // per-project split (when >1 project) and the top-3 parcelles.
+  const showProjectBreakdown = byProject.length > 1
+  const mostProductivePlot = topPlots[0] || null
+  void roiPct; void animRevenue; void RING_SIZE; void RING_STROKE; void r; void circ; void offset; void PROJECT_COLORS
+
+  return (
+    <section className="inv-rev-panel inv-rev-panel--slim" aria-labelledby="inv-rev-panel-title">
+      <header className="inv-rev-panel__slim-head">
+        <h4 className="inv-rev-panel__slim-title" id="inv-rev-panel-title">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/>
+          </svg>
+          Mes revenus
+        </h4>
+        <span
+          className="inv-rev-panel__slim-help"
+          title="Projection basée sur le rendement annuel total de chaque projet, réparti au prorata de la surface de vos parcelles."
+          aria-label="Aide sur le calcul"
+        >
+          ⓘ
+        </span>
+      </header>
+
+      {/* Chips row: monthly / daily / payback — the unique insights */}
+      <div className="inv-rev-panel__chips">
+        <div className="inv-rev-panel__chip">
+          <span className="inv-rev-panel__chip-num">{Math.round(animMonthly).toLocaleString('fr-FR')}</span>
+          <span className="inv-rev-panel__chip-lbl">DT / mois</span>
+        </div>
+        <div className="inv-rev-panel__chip">
+          <span className="inv-rev-panel__chip-num">{Math.round(animDaily).toLocaleString('fr-FR')}</span>
+          <span className="inv-rev-panel__chip-lbl">DT / jour</span>
+        </div>
+        {paybackYears > 0 && (
+          <div className="inv-rev-panel__chip inv-rev-panel__chip--accent">
+            <span className="inv-rev-panel__chip-num">
+              {paybackYears >= 10 ? Math.round(paybackYears) : paybackYears.toFixed(1)}
+              <small>&nbsp;an{paybackYears >= 2 ? 's' : ''}</small>
+            </span>
+            <span className="inv-rev-panel__chip-lbl">Recouvrement</span>
+          </div>
+        )}
+      </div>
+
+      {/* Project breakdown — only when the user owns ≥2 projects */}
+      {showProjectBreakdown && (
+        <div className="inv-rev-panel__slim-proj">
+          <div className="inv-rev-panel__slim-proj-head">
+            <span className="inv-rev-panel__slim-label">Par projet</span>
+          </div>
+          <div className="inv-rev-panel__stack" role="img" aria-label="Répartition par projet">
+            {byProject.map((row) => (
+              <span
+                key={row.projectId}
+                className="inv-rev-panel__stack-seg"
+                style={{ width: `${row.pct}%`, background: PROJECT_COLORS[row.colorIdx % PROJECT_COLORS.length] }}
+                title={`${row.title} · ${Math.round(row.pct)}%`}
+              />
+            ))}
+          </div>
+          <ul className="inv-rev-panel__bd-list">
+            {byProject.map((row) => (
+              <li key={row.projectId} className="inv-rev-panel__bd-row">
+                <span
+                  className="inv-rev-panel__bd-dot"
+                  style={{ background: PROJECT_COLORS[row.colorIdx % PROJECT_COLORS.length] }}
+                  aria-hidden
+                />
+                <span className="inv-rev-panel__bd-title" title={row.title}>{row.title}</span>
+                <span className="inv-rev-panel__bd-pct">{Math.round(row.pct)}%</span>
+                <span className="inv-rev-panel__bd-amount">{Math.round(row.revenue).toLocaleString('fr-FR')}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Meilleure parcelle (single, when mono-project) or top 3 (when multi) */}
+      {topPlots.length > 0 && (
+        showProjectBreakdown ? (
+          <div className="inv-rev-panel__slim-plots">
+            <span className="inv-rev-panel__slim-label">Meilleures parcelles</span>
+            <ol className="inv-rev-panel__slim-plots-list">
+              {topPlots.map((p, i) => (
+                <li key={`${p.saleId}-${p.plotId}`} className="inv-rev-panel__slim-plot">
+                  <span className="inv-rev-panel__slim-plot-rank">{i + 1}</span>
+                  <div className="inv-rev-panel__slim-plot-body">
+                    <div className="inv-rev-panel__slim-plot-title">
+                      #{p.plotId} · {p.trees} arbres
+                      {p.area ? <small> · {Number(p.area).toLocaleString('fr-FR')} m²</small> : null}
+                    </div>
+                    <div className="inv-rev-panel__slim-plot-sub" title={p.projectTitle}>
+                      {p.projectTitle}
+                    </div>
+                  </div>
+                  <div className="inv-rev-panel__slim-plot-amt">
+                    <strong>{Math.round(Number(p.annualRevenue) || 0).toLocaleString('fr-FR')}</strong>
+                    <span>DT/an</span>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </div>
+        ) : mostProductivePlot ? (
+          <div className="inv-rev-panel__slim-single">
+            <div className="inv-rev-panel__slim-single-head">
+              <span className="inv-rev-panel__slim-label">Votre parcelle</span>
+              <span className="inv-rev-panel__slim-single-amt">
+                <strong>{Math.round(Number(mostProductivePlot.annualRevenue) || 0).toLocaleString('fr-FR')}</strong> DT/an
+              </span>
+            </div>
+            <div className="inv-rev-panel__slim-single-body">
+              <span className="inv-rev-panel__slim-single-badge">#{mostProductivePlot.plotId}</span>
+              <span>
+                <strong>{mostProductivePlot.trees}</strong> arbres
+                {mostProductivePlot.area ? ` · ${Number(mostProductivePlot.area).toLocaleString('fr-FR')} m²` : ''}
+              </span>
+              <span className="inv-rev-panel__slim-single-proj" title={mostProductivePlot.projectTitle}>
+                {mostProductivePlot.projectTitle}
+              </span>
+            </div>
+          </div>
+        ) : null
+      )}
+    </section>
   )
 }

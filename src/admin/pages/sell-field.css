@@ -889,6 +889,14 @@
 .sp-wizard__input--err { border-color: #dc2626 !important; background: #fef2f2 !important; }
 .sp-wizard__row { display: flex; gap: 6px; align-items: stretch; }
 .sp-wizard__row .sp-wizard__input { flex: 1; }
+/* Country-code picker for phone lookup — compact, monospace, matches input height. */
+.sp-wizard__cc {
+  width: auto; min-height: 40px; padding: 0 8px; border-radius: 8px;
+  border: 1.5px solid #e2e8f0; background: #f8fafc; color: #0f172a;
+  font-size: 13px; font-family: monospace; cursor: pointer;
+  outline: none; transition: border-color 0.15s, box-shadow 0.15s;
+}
+.sp-wizard__cc:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,0.08); }
 
 /* Help card */
 .sp-help-card {

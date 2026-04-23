@@ -1301,6 +1301,16 @@ begin
       'business', 'database'
     );
   end if;
+
+  -- Second pass: reverse-sale grants. Declared further down; safe to call
+  -- because Postgres resolves function references at execution time.
+  begin
+    v_inserted := v_inserted + public.compute_reverse_grant_commissions_for_sale(p_sale_id);
+  exception when undefined_function then
+    -- Function not yet migrated in this DB; main pass already committed.
+    null;
+  end;
+
   return v_inserted;
 end;
 $zit_auto_9$;
@@ -1324,6 +1334,484 @@ drop trigger if exists trg_sales_notary_commissions on public.sales;
 create trigger trg_sales_notary_commissions
   after update of notary_completed_at on public.sales
   for each row execute function public.trg_sales_notary_commissions();
+
+-- ============================================================================
+-- Reverse-sale commission grants
+--
+-- When a sale is notarized and the buyer sits in the seller's upline chain
+-- (a reverse sale), the seller earns a perpetual right to receive a flat L1
+-- commission on any future sale whose chain traces back to that buyer through
+-- a seller_relations edge created AFTER the grant date.
+-- ============================================================================
+
+-- Walks seller_relations upline from p_from_client_id looking for p_target.
+-- Returns true if target is reachable within 40 hops. Used to detect reverse
+-- sales: the buyer is an ancestor of the seller.
+create or replace function public.is_ancestor_via_seller_relations(
+  p_from_client_id uuid,
+  p_target_client_id uuid
+)
+returns boolean
+language plpgsql
+stable
+security definer
+set search_path = public
+as $zit_rg_anc$
+declare
+  v_walk uuid := p_from_client_id;
+  v_seen uuid[] := '{}';
+  v_parent uuid;
+  v_steps int := 0;
+begin
+  if p_from_client_id is null or p_target_client_id is null then return false; end if;
+  if p_from_client_id = p_target_client_id then return false; end if;
+  while v_walk is not null and v_steps < 40 loop
+    if v_walk = any(v_seen) then return false; end if;
+    v_seen := v_seen || v_walk;
+    select sr.parent_client_id into v_parent
+      from public.seller_relations sr
+     where sr.child_client_id = v_walk
+     limit 1;
+    if v_parent is null then return false; end if;
+    if v_parent = p_target_client_id then return true; end if;
+    v_walk := v_parent;
+    v_steps := v_steps + 1;
+  end loop;
+  return false;
+end;
+$zit_rg_anc$;
+
+-- Upsert a reverse-sale grant when a completed sale is a reverse sale.
+-- Idempotent: unique(beneficiary, source, trigger_sale_id).
+create or replace function public.create_reverse_grant_for_sale(p_sale_id uuid)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $zit_rg_create$
+declare
+  v_sale record;
+  v_grant_id uuid;
+  v_effective timestamptz;
+begin
+  select * into v_sale from public.sales where id = p_sale_id;
+  if not found then return null; end if;
+  if v_sale.notary_completed_at is null then return null; end if;
+  if v_sale.seller_client_id is null or v_sale.client_id is null then return null; end if;
+  if v_sale.seller_client_id = v_sale.client_id then return null; end if;
+
+  -- Reverse = buyer is ancestor of seller in seller_relations.
+  if not public.is_ancestor_via_seller_relations(v_sale.seller_client_id, v_sale.client_id) then
+    return null;
+  end if;
+
+  v_effective := coalesce(v_sale.notary_completed_at, now());
+
+  insert into public.commission_reverse_grants (
+    beneficiary_client_id, source_client_id, trigger_sale_id,
+    effective_from, status
+  ) values (
+    v_sale.seller_client_id, v_sale.client_id, p_sale_id,
+    v_effective, 'active'
+  )
+  on conflict (beneficiary_client_id, source_client_id, trigger_sale_id)
+  do nothing
+  returning id into v_grant_id;
+
+  if v_grant_id is not null then
+    insert into public.audit_logs (action, entity, entity_id, details, metadata, category, source)
+    values (
+      'reverse_grant_created', 'commission_reverse_grants', v_grant_id::text,
+      'Reverse-sale grant created from sale ' || coalesce(v_sale.code, p_sale_id::text),
+      jsonb_build_object(
+        'saleId', p_sale_id,
+        'beneficiaryClientId', v_sale.seller_client_id,
+        'sourceClientId', v_sale.client_id,
+        'effectiveFrom', v_effective
+      ),
+      'business', 'database'
+    );
+  end if;
+
+  return v_grant_id;
+end;
+$zit_rg_create$;
+
+create or replace function public.trg_sales_create_reverse_grant()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $zit_rg_trg$
+begin
+  if NEW.notary_completed_at is not null
+     and (OLD.notary_completed_at is null
+          or OLD.notary_completed_at is distinct from NEW.notary_completed_at) then
+    perform public.create_reverse_grant_for_sale(NEW.id);
+  end if;
+  return NEW;
+end;
+$zit_rg_trg$;
+
+drop trigger if exists trg_sales_create_reverse_grant on public.sales;
+create trigger trg_sales_create_reverse_grant
+  after update of notary_completed_at on public.sales
+  for each row execute function public.trg_sales_create_reverse_grant();
+
+-- When a trigger sale is deleted or moved to a non-completed status, the
+-- grant it created must no longer pay. ON DELETE CASCADE removes the row, so
+-- this handler only covers the status-change case.
+create or replace function public.trg_sales_supersede_reverse_grants()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $zit_rg_sup$
+begin
+  if TG_OP = 'UPDATE'
+     and OLD.notary_completed_at is not null
+     and NEW.notary_completed_at is null then
+    update public.commission_reverse_grants
+       set status = 'superseded', updated_at = now()
+     where trigger_sale_id = NEW.id
+       and status = 'active';
+  end if;
+  return NEW;
+end;
+$zit_rg_sup$;
+
+drop trigger if exists trg_sales_supersede_reverse_grants on public.sales;
+create trigger trg_sales_supersede_reverse_grants
+  after update of notary_completed_at on public.sales
+  for each row execute function public.trg_sales_supersede_reverse_grants();
+
+-- Second-pass commission computation: for a given sale, walk the chain built
+-- by compute_and_insert_commissions_for_sale and look up reverse-sale grants
+-- whose source_client_id sits on the chain and whose effective_from predates
+-- the seller_relations edge linking their downline child. Each qualifying
+-- grant awards the beneficiary a flat L1 commission. Cycle-guarded by
+-- skipping beneficiaries already present in the chain.
+create or replace function public.compute_reverse_grant_commissions_for_sale(p_sale_id uuid)
+returns int
+language plpgsql
+security definer
+set search_path = public
+as $zit_rg_compute$
+declare
+  v_sale record;
+  v_buyer uuid;
+  v_seller uuid;
+  v_has_real_seller boolean;
+  v_walk uuid;
+  v_parent uuid;
+  v_chain uuid[] := '{}';
+  v_steps int := 0;
+  v_i int;
+  v_ancestor uuid;
+  v_child uuid;
+  v_edge_at timestamptz;
+  v_rules jsonb;
+  v_l1_rule jsonb;
+  v_rule_type text;
+  v_rule_value numeric(14,4);
+  v_cap numeric(14,2);
+  v_base numeric(14,2);
+  v_amount numeric(14,2);
+  v_inserted int := 0;
+  v_grant record;
+begin
+  select * into v_sale from public.sales where id = p_sale_id;
+  if not found then return 0; end if;
+  if v_sale.notary_completed_at is null then return 0; end if;
+
+  v_buyer  := v_sale.client_id;
+  v_seller := v_sale.seller_client_id;
+  v_has_real_seller := v_seller is not null and v_seller <> v_buyer;
+  if not v_has_real_seller then return 0; end if;
+
+  -- Build v_chain = [seller, P1, P2, ...] using seller_relations only.
+  v_walk := v_seller;
+  while v_walk is not null and v_steps < 40 loop
+    if v_walk = any (v_chain) then exit; end if;
+    v_chain := v_chain || v_walk;
+    select sr.parent_client_id into v_parent
+      from public.seller_relations sr
+     where sr.child_client_id = v_walk
+     limit 1;
+    v_walk := v_parent;
+    v_parent := null;
+    v_steps := v_steps + 1;
+  end loop;
+
+  if coalesce(array_length(v_chain, 1), 0) < 2 then return 0; end if;
+
+  -- Resolve L1 rule from per-sale snapshot or project rules.
+  v_rules := coalesce(v_sale.commission_rule_snapshot -> 'levels', '[]'::jsonb);
+  if jsonb_array_length(v_rules) = 0 then
+    select jsonb_agg(jsonb_build_object(
+      'level', pcr.level,
+      'rule_type', pcr.rule_type,
+      'value', pcr.value,
+      'maxCapAmount', pcr.max_cap_amount
+    ) order by pcr.level)
+    into v_rules
+    from public.project_commission_rules pcr
+    where pcr.project_id = v_sale.project_id;
+    v_rules := coalesce(v_rules, '[]'::jsonb);
+  end if;
+  select elem into v_l1_rule
+    from jsonb_array_elements(v_rules) as elem
+   where (elem ->> 'level')::int = 1
+   limit 1;
+  if v_l1_rule is null then return 0; end if;
+
+  v_rule_type := coalesce(v_l1_rule ->> 'rule_type', v_l1_rule ->> 'ruleType', 'fixed');
+  v_rule_value := coalesce((v_l1_rule ->> 'value')::numeric, 0);
+  v_cap := nullif(v_l1_rule ->> 'maxCapAmount', '')::numeric;
+  v_base := coalesce(v_sale.agreed_price, 0);
+
+  if v_rule_type = 'percent' then
+    v_amount := round(v_base * v_rule_value / 100, 2);
+  else
+    v_amount := round(v_rule_value, 2);
+  end if;
+  if v_cap is not null then v_amount := least(v_amount, v_cap); end if;
+  if v_amount <= 0 then return 0; end if;
+
+  -- For each ancestor at position i >= 2, lookup edge (parent=ancestor,
+  -- child=v_chain[i-1]) and find active grants where source=ancestor and
+  -- effective_from <= edge.linked_at. Earliest grant per beneficiary wins.
+  for v_i in 2 .. coalesce(array_length(v_chain, 1), 0) loop
+    v_ancestor := v_chain[v_i];
+    v_child    := v_chain[v_i - 1];
+    if v_ancestor is null or v_child is null then continue; end if;
+
+    select sr.linked_at into v_edge_at
+      from public.seller_relations sr
+     where sr.parent_client_id = v_ancestor
+       and sr.child_client_id  = v_child
+     limit 1;
+    if v_edge_at is null then continue; end if;
+
+    for v_grant in
+      select g.*
+        from public.commission_reverse_grants g
+       where g.source_client_id = v_ancestor
+         and g.status = 'active'
+         and g.effective_from <= v_edge_at
+         and g.beneficiary_client_id <> all (v_chain)
+       order by g.effective_from asc
+    loop
+      -- Skip if a grant-tagged row already exists for this (sale, beneficiary).
+      if exists (
+        select 1
+          from public.commission_events ce
+         where ce.sale_id = p_sale_id
+           and ce.beneficiary_client_id = v_grant.beneficiary_client_id
+           and (ce.rule_snapshot -> 'meta' ->> 'grantId') = v_grant.id::text
+      ) then
+        continue;
+      end if;
+
+      insert into public.commission_events (
+        sale_id, beneficiary_client_id, level, rule_snapshot, amount, status, payable_at
+      ) values (
+        p_sale_id, v_grant.beneficiary_client_id, 1,
+        jsonb_build_object(
+          'source', 'reverse_sale_grant',
+          'rule', v_l1_rule,
+          'meta', jsonb_build_object(
+            'saleId', p_sale_id,
+            'saleProjectId', v_sale.project_id,
+            'buyerClientId', v_buyer,
+            'level', 1,
+            'beneficiaryClientId', v_grant.beneficiary_client_id,
+            'directSeller', v_seller::text,
+            'grantId', v_grant.id,
+            'grantSourceClientId', v_ancestor,
+            'grantEffectiveFrom', v_grant.effective_from,
+            'edgeLinkedAt', v_edge_at,
+            'chainPath', to_jsonb(v_chain[1:v_i]),
+            'computedAmount', v_amount,
+            'amountBase', v_base,
+            'computedAt', now()
+          )
+        ),
+        v_amount, 'payable', coalesce(v_sale.notary_completed_at, now())
+      );
+      v_inserted := v_inserted + 1;
+    end loop;
+  end loop;
+
+  if v_inserted > 0 then
+    insert into public.audit_logs (action, entity, entity_id, details, metadata, category, source)
+    values (
+      'reverse_grant_commissions_created', 'sale', p_sale_id::text,
+      'Reverse-grant pass created ' || v_inserted || ' commission line(s).',
+      jsonb_build_object('source', 'reverse_sale_grant', 'count', v_inserted),
+      'business', 'database'
+    );
+  end if;
+  return v_inserted;
+end;
+$zit_rg_compute$;
+
+-- Backfill: detect all past completed reverse sales and create grants (idempotent).
+create or replace function public.backfill_reverse_grants()
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $zit_rg_bf1$
+declare
+  v_sale record;
+  v_grants_created int := 0;
+  v_sales_scanned  int := 0;
+  v_grant_id uuid;
+begin
+  for v_sale in
+    select s.id
+      from public.sales s
+     where s.notary_completed_at is not null
+       and s.seller_client_id is not null
+       and s.client_id is not null
+       and s.seller_client_id <> s.client_id
+  loop
+    v_sales_scanned := v_sales_scanned + 1;
+    v_grant_id := public.create_reverse_grant_for_sale(v_sale.id);
+    if v_grant_id is not null then
+      v_grants_created := v_grants_created + 1;
+    end if;
+  end loop;
+  return jsonb_build_object(
+    'sales_scanned', v_sales_scanned,
+    'grants_created', v_grants_created,
+    'generated_at', to_jsonb(now())
+  );
+end;
+$zit_rg_bf1$;
+
+-- Backfill: for every active grant, find qualifying sales and insert any
+-- missing commission_events rows tagged with grantId.
+create or replace function public.backfill_reverse_grant_commissions()
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $zit_rg_bf2$
+declare
+  v_grant record;
+  v_sale_id uuid;
+  v_events_inserted int := 0;
+  v_grants_scanned int := 0;
+  v_sales_touched int := 0;
+  v_inserted_this int := 0;
+  v_sale_ids uuid[] := '{}';
+begin
+  for v_grant in
+    select g.*
+      from public.commission_reverse_grants g
+     where g.status = 'active'
+  loop
+    v_grants_scanned := v_grants_scanned + 1;
+
+    -- Candidate sales: any completed sale whose seller's chain traces through
+    -- the grant's source, with the source→child edge linked after the grant.
+    for v_sale_id in
+      select distinct s.id
+        from public.sales s
+        join public.seller_relations sr
+          on sr.parent_client_id = v_grant.source_client_id
+         and sr.linked_at >= v_grant.effective_from
+       where s.notary_completed_at is not null
+         and s.seller_client_id is not null
+         and (
+           s.seller_client_id = sr.child_client_id
+           or public.is_ancestor_via_seller_relations(s.seller_client_id, sr.child_client_id)
+         )
+    loop
+      v_inserted_this := public.compute_reverse_grant_commissions_for_sale(v_sale_id);
+      if v_inserted_this > 0 then
+        v_events_inserted := v_events_inserted + v_inserted_this;
+        if not (v_sale_id = any(v_sale_ids)) then
+          v_sale_ids := v_sale_ids || v_sale_id;
+          v_sales_touched := v_sales_touched + 1;
+        end if;
+      end if;
+    end loop;
+  end loop;
+
+  return jsonb_build_object(
+    'grants_scanned', v_grants_scanned,
+    'sales_touched',  v_sales_touched,
+    'events_inserted', v_events_inserted,
+    'generated_at', to_jsonb(now())
+  );
+end;
+$zit_rg_bf2$;
+
+-- Admin helper: revoke a grant and cancel any unpaid commission_events it
+-- produced. Paid events are left intact.
+create or replace function public.revoke_reverse_grant(
+  p_grant_id uuid,
+  p_reason   text default null
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $zit_rg_revoke$
+declare
+  v_grant record;
+  v_cancelled int := 0;
+  v_admin_id uuid;
+begin
+  if not public.is_active_staff() then
+    raise exception 'revoke_reverse_grant requires staff privileges';
+  end if;
+
+  select au.id into v_admin_id
+    from public.admin_users au
+   where lower(au.email) = lower(auth.email())
+   limit 1;
+
+  update public.commission_reverse_grants
+     set status = 'revoked',
+         revoked_at = now(),
+         revoked_by = v_admin_id,
+         revoke_reason = p_reason,
+         updated_at = now()
+   where id = p_grant_id
+     and status = 'active'
+   returning * into v_grant;
+  if v_grant.id is null then
+    return jsonb_build_object('ok', false, 'reason', 'grant_not_active_or_missing');
+  end if;
+
+  with upd as (
+    update public.commission_events ce
+       set status = 'cancelled', updated_at = now()
+     where (ce.rule_snapshot -> 'meta' ->> 'grantId') = p_grant_id::text
+       and ce.status in ('pending','payable')
+     returning ce.id
+  )
+  select count(*) into v_cancelled from upd;
+
+  insert into public.audit_logs (action, entity, entity_id, details, metadata, category, source)
+  values (
+    'reverse_grant_revoked', 'commission_reverse_grants', p_grant_id::text,
+    'Reverse-sale grant revoked; ' || v_cancelled || ' pending/payable event(s) cancelled.',
+    jsonb_build_object('reason', p_reason, 'cancelled_events', v_cancelled, 'admin_id', v_admin_id),
+    'business', 'database'
+  );
+
+  return jsonb_build_object(
+    'ok', true,
+    'grant_id', p_grant_id,
+    'cancelled_events', v_cancelled
+  );
+end;
+$zit_rg_revoke$;
 
 -- ============================================================================
 -- ambassador_wallets: transactional projection
@@ -2444,6 +2932,7 @@ declare
   v_orphans jsonb := '[]'::jsonb;
   v_mismatched jsonb := '[]'::jsonb;
   v_dup jsonb := '[]'::jsonb;
+  v_reverse jsonb := '[]'::jsonb;
 begin
   -- 1) Cycles in the seller_relations graph. A cycle is detected when the
   --    DFS path revisits its own starting node. Depth capped at 40.
@@ -2579,12 +3068,39 @@ begin
     raise notice 'detect_parrainage_anomalies duplicate_upline slice failed: %', sqlerrm;
   end;
 
+  -- 6) Reverse sales — completed sales where the buyer sits in the seller's
+  --    upline chain. DB-truthful (walks seller_relations) so the admin UI
+  --    stops relying on client-side derivation.
+  begin
+    select coalesce(jsonb_agg(jsonb_build_object(
+      'sale_id',   s.id,
+      'sale_code', s.code,
+      'seller',    s.seller_client_id,
+      'buyer',     s.client_id,
+      'notary_completed_at', s.notary_completed_at,
+      'grant_id',  g.id
+    )), '[]'::jsonb)
+      into v_reverse
+    from public.sales s
+    left join public.commission_reverse_grants g
+      on g.trigger_sale_id = s.id
+    where s.notary_completed_at is not null
+      and s.seller_client_id is not null
+      and s.client_id is not null
+      and s.seller_client_id <> s.client_id
+      and public.is_ancestor_via_seller_relations(s.seller_client_id, s.client_id);
+  exception when others then
+    v_reverse := '[]'::jsonb;
+    raise notice 'detect_parrainage_anomalies reverse_sales slice failed: %', sqlerrm;
+  end;
+
   return jsonb_build_object(
     'cycles',               v_cycles,
     'self_referrals',       v_self,
     'orphan_commissions',   v_orphans,
     'mismatched_l1',        v_mismatched,
     'duplicate_upline',     v_dup,
+    'reverse_sales',        v_reverse,
     'generated_at',         to_jsonb(now())
   );
 end;
@@ -2597,6 +3113,17 @@ exception when others then
   raise notice 'detect_parrainage_anomalies grant failed: %', sqlerrm;
 end;
 $zit_detect_grant$;
+
+do $zit_rg_grants$
+begin
+  grant execute on function public.backfill_reverse_grants() to authenticated;
+  grant execute on function public.backfill_reverse_grant_commissions() to authenticated;
+  grant execute on function public.revoke_reverse_grant(uuid, text) to authenticated;
+  grant execute on function public.is_ancestor_via_seller_relations(uuid, uuid) to authenticated;
+exception when others then
+  raise notice 'reverse-grant function grants failed: %', sqlerrm;
+end;
+$zit_rg_grants$;
 
 -- ============================================================================
 -- TASK 3 — Per-project effective commission rules view
@@ -2650,3 +3177,466 @@ exception when others then
   raise notice 'v_effective_commission_rules grant failed: %', sqlerrm;
 end;
 $zit_view_grant$;
+
+-- ============================================================================
+-- Folded from dev/phone_change_requests.sql — client-initiated phone change
+-- workflow. Table lives in 02_schema.sql; RLS lives in 04_rls.sql.
+-- ============================================================================
+create or replace function public.submit_phone_change_request(
+  p_new_phone text,
+  p_reason text default ''
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_client_id uuid := public.current_client_id();
+  v_client record;
+  v_new_phone text;
+  v_new_phone_norm text;
+  v_request_id uuid;
+  v_already uuid;
+  v_taken_by uuid;
+begin
+  if v_client_id is null then
+    raise exception 'NOT_AUTHENTICATED' using errcode = '42501';
+  end if;
+
+  v_new_phone := coalesce(trim(p_new_phone), '');
+  if length(v_new_phone) < 6 or length(v_new_phone) > 32 then
+    raise exception 'INVALID_PHONE' using errcode = '22023';
+  end if;
+
+  v_new_phone_norm := coalesce(public.normalize_phone_e164(v_new_phone), '');
+
+  perform pg_advisory_xact_lock(hashtext('phone_change:' || v_client_id::text));
+
+  select id, coalesce(email, '') as email, coalesce(full_name, '') as name,
+         coalesce(phone, '') as phone,
+         coalesce(phone_normalized::text, '') as phone_normalized
+    into v_client
+    from public.clients
+   where id = v_client_id;
+
+  if v_new_phone = coalesce(v_client.phone, '')
+     or (v_new_phone_norm <> '' and v_new_phone_norm = coalesce(v_client.phone_normalized, ''))
+  then
+    raise exception 'PHONE_UNCHANGED' using errcode = 'P0001';
+  end if;
+
+  -- Reject if the number is already claimed by any account — clients OR
+  -- admin/staff. Scans both tables and both raw + normalized columns so a
+  -- whitespace/format difference can't let two users share the same number.
+  select id into v_taken_by
+    from public.clients
+   where id <> v_client_id
+     and (
+       coalesce(phone, '') = v_new_phone
+       or (v_new_phone_norm <> '' and coalesce(phone_normalized::text, '') = v_new_phone_norm)
+     )
+   limit 1;
+  if v_taken_by is not null then
+    raise exception 'PHONE_TAKEN' using errcode = 'P0001';
+  end if;
+
+  if exists (
+    select 1 from public.admin_users
+    where coalesce(phone, '') = v_new_phone
+       or (v_new_phone_norm <> '' and coalesce(phone_normalized, '') = v_new_phone_norm)
+  ) then
+    raise exception 'PHONE_TAKEN' using errcode = 'P0001';
+  end if;
+
+  select id into v_already
+  from public.phone_change_requests
+  where client_id = v_client_id and status = 'pending'
+  limit 1;
+
+  if v_already is not null then
+    update public.phone_change_requests
+       set requested_phone = v_new_phone,
+           reason = coalesce(trim(p_reason), ''),
+           created_at = now()
+     where id = v_already;
+    return jsonb_build_object('ok', true, 'requestId', v_already, 'idempotent', true);
+  end if;
+
+  insert into public.phone_change_requests (
+    client_id, auth_user_id, user_email, user_name, current_phone,
+    requested_phone, reason, status
+  ) values (
+    v_client_id, auth.uid(), v_client.email, v_client.name,
+    v_client.phone, v_new_phone, coalesce(trim(p_reason), ''), 'pending'
+  ) returning id into v_request_id;
+
+  return jsonb_build_object('ok', true, 'requestId', v_request_id, 'idempotent', false);
+end;
+$$;
+
+revoke all on function public.submit_phone_change_request(text, text) from public;
+grant execute on function public.submit_phone_change_request(text, text) to authenticated;
+
+
+create or replace function public.my_phone_change_request()
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_client_id uuid := public.current_client_id();
+  v_row record;
+begin
+  if v_client_id is null then
+    return jsonb_build_object('ok', false, 'reason', 'NOT_AUTHENTICATED');
+  end if;
+  select id, status, requested_phone, current_phone, reason,
+         created_at, reviewed_at, reviewer_note
+    into v_row
+    from public.phone_change_requests
+   where client_id = v_client_id
+   order by case when status = 'pending' then 0 else 1 end, created_at desc
+   limit 1;
+  if not found then
+    return jsonb_build_object('ok', true, 'request', null);
+  end if;
+  return jsonb_build_object('ok', true, 'request', to_jsonb(v_row));
+end;
+$$;
+
+revoke all on function public.my_phone_change_request() from public;
+grant execute on function public.my_phone_change_request() to authenticated;
+
+
+create or replace function public.admin_search_phone_change_requests(
+  p_email_query text default null,
+  p_status text default null,
+  p_limit int default 50
+)
+returns setof jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_query text;
+  v_status text;
+begin
+  if not public.is_super_admin() then
+    raise exception 'NOT_SUPER_ADMIN' using errcode = '42501';
+  end if;
+  v_query := lower(coalesce(trim(p_email_query), ''));
+  v_status := coalesce(trim(p_status), '');
+  return query
+  select to_jsonb(t) || jsonb_build_object(
+           'client_email', c.email,
+           'client_name',  coalesce(c.full_name, ''),
+           'client_current_phone', c.phone
+         )
+  from public.phone_change_requests t
+  join public.clients c on c.id = t.client_id
+  where (v_query = '' or lower(coalesce(t.user_email, '')) like '%' || v_query || '%'
+                     or lower(coalesce(c.email,       '')) like '%' || v_query || '%')
+    and (v_status = '' or t.status = v_status)
+  order by
+    case when t.status = 'pending' then 0 else 1 end,
+    t.created_at desc
+  limit greatest(1, least(coalesce(p_limit, 50), 200));
+end;
+$$;
+
+revoke all on function public.admin_search_phone_change_requests(text, text, int) from public;
+grant execute on function public.admin_search_phone_change_requests(text, text, int) to authenticated;
+
+
+create or replace function public.admin_apply_phone_change(
+  p_request_id uuid,
+  p_approve boolean,
+  p_note text default ''
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_request public.phone_change_requests%rowtype;
+  v_reviewer_admin_id uuid;
+  v_old_phone text;
+begin
+  if not public.is_super_admin() then
+    raise exception 'NOT_SUPER_ADMIN' using errcode = '42501';
+  end if;
+
+  select * into v_request
+    from public.phone_change_requests
+   where id = p_request_id
+   for update;
+  if not found then
+    raise exception 'REQUEST_NOT_FOUND' using errcode = 'P0001';
+  end if;
+  if v_request.status <> 'pending' then
+    raise exception 'ALREADY_REVIEWED'
+      using errcode = 'P0001', hint = v_request.status;
+  end if;
+
+  select id into v_reviewer_admin_id
+    from public.admin_users
+   where (auth_user_id = auth.uid())
+      or (auth_user_id is null
+          and lower(trim(coalesce(email,''))) = lower(trim(coalesce(auth.email(),''))))
+   limit 1;
+
+  if p_approve then
+    select coalesce(phone, '') into v_old_phone
+      from public.clients
+     where id = v_request.client_id;
+
+    if exists (
+      select 1 from public.clients
+       where id <> v_request.client_id
+         and (
+           coalesce(phone, '') = v_request.requested_phone
+           or coalesce(phone_normalized::text, '') = coalesce(public.normalize_phone_e164(v_request.requested_phone), '__none__')
+         )
+    ) then
+      raise exception 'PHONE_TAKEN' using errcode = 'P0001';
+    end if;
+
+    if exists (
+      select 1 from public.admin_users
+       where coalesce(phone, '') = v_request.requested_phone
+          or coalesce(phone_normalized, '') = coalesce(public.normalize_phone_e164(v_request.requested_phone), '__none__')
+    ) then
+      raise exception 'PHONE_TAKEN' using errcode = 'P0001';
+    end if;
+
+    update public.clients
+       set phone = v_request.requested_phone,
+           updated_at = now()
+     where id = v_request.client_id;
+
+    update public.phone_change_requests
+       set status = 'approved',
+           reviewer_id = v_reviewer_admin_id,
+           reviewer_note = coalesce(trim(p_note), ''),
+           reviewed_at = now(),
+           applied_at = now()
+     where id = p_request_id;
+
+    insert into public.audit_logs (
+      actor_user_id, action, entity, entity_id, details, metadata, category, source
+    ) values (
+      v_reviewer_admin_id, 'phone_change_approved', 'client', v_request.client_id::text,
+      'Super admin a approuvé un changement de téléphone',
+      jsonb_build_object(
+        'request_id', p_request_id,
+        'client_id', v_request.client_id,
+        'old_phone', v_old_phone,
+        'new_phone', v_request.requested_phone
+      ),
+      'security', 'database'
+    );
+  else
+    update public.phone_change_requests
+       set status = 'rejected',
+           reviewer_id = v_reviewer_admin_id,
+           reviewer_note = coalesce(trim(p_note), ''),
+           reviewed_at = now()
+     where id = p_request_id;
+
+    insert into public.audit_logs (
+      actor_user_id, action, entity, entity_id, details, metadata, category, source
+    ) values (
+      v_reviewer_admin_id, 'phone_change_rejected', 'client', v_request.client_id::text,
+      'Super admin a rejeté un changement de téléphone',
+      jsonb_build_object(
+        'request_id', p_request_id,
+        'client_id', v_request.client_id,
+        'requested_phone', v_request.requested_phone,
+        'note', p_note
+      ),
+      'security', 'database'
+    );
+  end if;
+
+  return jsonb_build_object('ok', true, 'requestId', p_request_id, 'status', case when p_approve then 'approved' else 'rejected' end);
+end;
+$$;
+
+revoke all on function public.admin_apply_phone_change(uuid, boolean, text) from public;
+grant execute on function public.admin_apply_phone_change(uuid, boolean, text) to authenticated;
+
+
+-- ============================================================================
+-- Folded from dev/harvest_system.sql — distribution engine + preview.
+-- Tables live in 02_schema.sql; RLS/views/grants in 04_rls.sql.
+-- ============================================================================
+create or replace function public.distribute_harvest(p_harvest_id uuid)
+returns table (client_id uuid, owned_m2 numeric, amount_tnd numeric)
+language plpgsql
+security definer
+set search_path = public
+as $fn_distribute$
+declare
+  v_harvest        public.project_harvests%rowtype;
+  v_project_area   numeric(14, 2);
+  v_net            numeric(14, 2);
+  v_admin_id       uuid;
+  v_row            record;
+begin
+  if not public.is_active_staff() then
+    raise exception 'distribute_harvest: staff role required';
+  end if;
+
+  select * into v_harvest
+    from public.project_harvests
+    where id = p_harvest_id
+    for update;
+
+  if not found then
+    raise exception 'distribute_harvest: harvest % not found', p_harvest_id;
+  end if;
+
+  if v_harvest.status = 'distributed' then
+    return query
+      select hd.client_id, hd.owned_area_m2, hd.amount_tnd
+        from public.harvest_distributions hd
+        where hd.harvest_id = p_harvest_id;
+    return;
+  end if;
+
+  if v_harvest.status = 'cancelled' then
+    raise exception 'distribute_harvest: harvest % is cancelled', p_harvest_id;
+  end if;
+
+  v_net := greatest(coalesce(v_harvest.net_tnd, 0), 0);
+
+  select coalesce(sum(p.area_m2), 0) into v_project_area
+    from public.parcels p
+    where p.project_id = v_harvest.project_id;
+
+  if v_project_area <= 0 then
+    raise exception 'distribute_harvest: project % has zero total area', v_harvest.project_id;
+  end if;
+
+  select id into v_admin_id
+    from public.admin_users
+    where auth_user_id = auth.uid()
+    limit 1;
+
+  for v_row in
+    select s.client_id as cid,
+           sum(coalesce(p.area_m2, 0)) as owned_m2
+      from public.sales s
+      join public.parcels p
+        on p.id = any (case
+                         when array_length(s.parcel_ids, 1) > 0 then s.parcel_ids
+                         else array[s.parcel_id]
+                       end)
+      where s.project_id = v_harvest.project_id
+        and s.status = 'completed'
+        and s.notary_completed_at is not null
+        and s.notary_completed_at <= coalesce(
+              (v_harvest.harvest_date + interval '1 day')::timestamptz,
+              now())
+      group by s.client_id
+      having sum(coalesce(p.area_m2, 0)) > 0
+  loop
+    insert into public.harvest_distributions (
+      harvest_id, client_id,
+      owned_area_m2, project_area_m2, share_pct, amount_tnd,
+      credit_status, credited_at
+    ) values (
+      p_harvest_id, v_row.cid,
+      v_row.owned_m2, v_project_area,
+      round((v_row.owned_m2 / v_project_area) * 100, 6),
+      round(v_net * (v_row.owned_m2 / v_project_area), 2),
+      'credited', now()
+    )
+    on conflict (harvest_id, client_id) do nothing;
+
+    insert into public.ambassador_wallets (client_id, balance)
+      values (v_row.cid, round(v_net * (v_row.owned_m2 / v_project_area), 2))
+    on conflict (client_id) do update
+      set balance    = public.ambassador_wallets.balance
+                     + round(v_net * (v_row.owned_m2 / v_project_area), 2),
+          updated_at = now();
+  end loop;
+
+  update public.project_harvests
+     set status         = 'distributed',
+         distributed_at = now(),
+         distributed_by = v_admin_id,
+         updated_at     = now()
+     where id = p_harvest_id;
+
+  return query
+    select hd.client_id, hd.owned_area_m2, hd.amount_tnd
+      from public.harvest_distributions hd
+      where hd.harvest_id = p_harvest_id;
+end;
+$fn_distribute$;
+
+grant execute on function public.distribute_harvest(uuid) to authenticated;
+
+
+create or replace function public.preview_harvest_distribution(p_harvest_id uuid)
+returns table (
+  client_id       uuid,
+  client_name     text,
+  owned_area_m2   numeric,
+  share_pct       numeric,
+  amount_tnd      numeric
+)
+language plpgsql
+security definer
+set search_path = public
+as $fn_preview$
+declare
+  v_harvest      public.project_harvests%rowtype;
+  v_project_area numeric(14, 2);
+  v_net          numeric(14, 2);
+begin
+  if not public.is_active_staff() then
+    raise exception 'preview_harvest_distribution: staff role required';
+  end if;
+
+  select * into v_harvest from public.project_harvests where id = p_harvest_id;
+  if not found then return; end if;
+
+  v_net := greatest(coalesce(v_harvest.net_tnd, 0), 0);
+
+  select coalesce(sum(p.area_m2), 0) into v_project_area
+    from public.parcels p where p.project_id = v_harvest.project_id;
+
+  if v_project_area <= 0 then return; end if;
+
+  return query
+    select c.id,
+           c.name,
+           sum(coalesce(p.area_m2, 0))::numeric,
+           round((sum(coalesce(p.area_m2, 0)) / v_project_area) * 100, 6),
+           round(v_net * (sum(coalesce(p.area_m2, 0)) / v_project_area), 2)
+      from public.sales s
+      join public.clients c on c.id = s.client_id
+      join public.parcels p
+        on p.id = any (case
+                         when array_length(s.parcel_ids, 1) > 0 then s.parcel_ids
+                         else array[s.parcel_id]
+                       end)
+      where s.project_id = v_harvest.project_id
+        and s.status = 'completed'
+        and s.notary_completed_at is not null
+        and s.notary_completed_at <= coalesce(
+              (v_harvest.harvest_date + interval '1 day')::timestamptz,
+              now())
+      group by c.id, c.name
+      having sum(coalesce(p.area_m2, 0)) > 0
+      order by sum(coalesce(p.area_m2, 0)) desc;
+end;
+$fn_preview$;
+
+grant execute on function public.preview_harvest_distribution(uuid) to authenticated;

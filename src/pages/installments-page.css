@@ -1,1075 +1,945 @@
 /* ══════════════════════════════════════════════════════════════
-   installments-page.css — WHITE + BLUE client installments
-   Clean light theme matching admin pages. Mobile-first.
+   installments-page.css — clean light redesign
+   Mirrors the approved "Zitouna Echeances" mockup: cream canvas,
+   white cards, subtle hair borders, blue-accent CTAs, semantic
+   green/amber/red tones. Shared by /installments (full page) and
+   /dashboard tab "Mes échéances" (via .ip--embedded).
    ══════════════════════════════════════════════════════════════ */
 
 .ip {
-  --ip: #162917;
-  --ip-bg: #0b150c;
-  --ip-100: #1a331d;
-  --ip-200: rgba(42, 75, 44, 0.65);
-  --ip-300: rgba(42, 75, 44, 0.85);
-  --ip-400: #6b8a6d;
-  --ip-500: #8da68e;
-  --ip-600: #b8ccb9;
-  --ip-900: #e8f0e9;
-  --ip-blue: #a8cc50;
-  --ip-blue-light: #95c13d;
-  --ip-blue-50: rgba(168, 204, 80, 0.08);
-  --ip-blue-100: rgba(168, 204, 80, 0.15);
-  --ip-blue-700: #7ab020;
-  --ip-green: #34d399;
-  --ip-green-50: rgba(52, 211, 153, 0.1);
-  --ip-amber: #fbbf24;
-  --ip-amber-50: rgba(251, 191, 36, 0.1);
-  --ip-red: #f87171;
-  --ip-red-50: rgba(248, 113, 113, 0.1);
+  /* Tokens — kept as CSS vars so dashboard-embedded contexts can
+     tune a handful of values without forking the stylesheet. */
+  --ip-bg: #F5F5F2;
+  --ip-surface: #FFFFFF;
+  --ip-surface-soft: #FBFBF8;
+  --ip-ink: #0B1220;
+  --ip-ink-2: #1A2030;
+  --ip-muted: #6B7280;
+  --ip-faint: #9AA1AC;
+  --ip-hair: #ECECEC;
+  --ip-hair-2: #F1F1EE;
 
-  max-width: 480px;
+  --ip-blue: #1E5CFF;
+  --ip-blue-600: #1847D6;
+  --ip-blue-soft: #E8EFFF;
+  --ip-blue-softer: #F1F5FF;
+
+  --ip-green: #0FA968;
+  --ip-green-soft: #E6F7EE;
+  --ip-amber: #B7791F;
+  --ip-amber-soft: #FDF3D9;
+  --ip-red: #D7263D;
+  --ip-red-soft: #FCE8EC;
+
+  --ip-radius-lg: 20px;
+  --ip-radius-md: 14px;
+  --ip-radius-sm: 10px;
+  --ip-shadow-card: 0 1px 0 rgba(17, 24, 39, .03), 0 1px 2px rgba(17, 24, 39, .04);
+  --ip-shadow-lift: 0 10px 28px rgba(17, 24, 39, .08);
+
+  max-width: 1120px;
   margin: 0 auto;
-  padding: 0 14px 100px;
+  padding: 10px 10px 72px;
   background: var(--ip-bg);
-  color: var(--ip-900);
-  font-family: Georgia, 'Times New Roman', serif;
-  font-size: 12px;
-  line-height: 1.5;
-  letter-spacing: -0.01em;
+  color: var(--ip-ink);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  letter-spacing: -0.005em;
   -webkit-font-smoothing: antialiased;
   min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
-/* When embedded inside dashboard, remove standalone layout */
+@media (min-width: 900px) {
+  .ip { padding: 32px 28px 96px; gap: 24px; }
+}
+
+/* Embedded inside dashboard — remove standalone layout chrome */
 .ip--embedded {
-  max-width: none; padding: 0; margin: 0;
-  background: transparent; min-height: auto;
+  max-width: none;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  min-height: auto;
+  gap: 16px;
 }
 
-/* ── Back button (liste → détail échéances) ── */
+/* ── Back button ───────────────────────────────────────────── */
 .ip__back {
+  align-self: flex-start;
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  margin: 4px 0 16px;
-  padding: 10px 16px 10px 12px;
+  height: 40px;
+  padding: 0 14px 0 8px;
   font-family: inherit;
-  font-size: 14px;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-  color: #e8f0e9;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ip-ink);
   cursor: pointer;
   border-radius: 12px;
-  border: 1px solid rgba(168, 204, 80, 0.42);
-  background: linear-gradient(165deg, rgba(34, 66, 38, 0.55), rgba(11, 21, 12, 0.92));
-  box-shadow:
-    0 2px 10px rgba(0, 0, 0, 0.22),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  transition: border-color 0.18s, background 0.18s, box-shadow 0.18s, transform 0.12s;
+  border: 1px solid var(--ip-hair);
+  background: var(--ip-surface);
+  box-shadow: var(--ip-shadow-card);
+  transition: background-color .15s, border-color .15s, transform .1s;
 }
-
-.ip__back:hover {
-  color: #fff;
-  border-color: rgba(168, 204, 80, 0.75);
-  background: linear-gradient(165deg, rgba(52, 92, 56, 0.75), rgba(22, 41, 23, 0.98));
-  box-shadow:
-    0 4px 16px rgba(0, 0, 0, 0.28),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
-}
-
-.ip__back:active {
-  transform: translateY(1px);
-}
-
-.ip__back:focus-visible {
-  outline: 2px solid rgba(168, 204, 80, 0.85);
-  outline-offset: 2px;
-}
+.ip__back:hover { background: var(--ip-surface-soft); }
+.ip__back:active { transform: translateY(1px); }
+.ip__back:focus-visible { outline: 2px solid var(--ip-blue); outline-offset: 2px; }
 
 .ip__back-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   flex-shrink: 0;
-  border-radius: 10px;
-  font-size: 18px;
+  border-radius: 8px;
+  font-size: 16px;
   line-height: 1;
-  color: #c8e86c;
-  background: rgba(168, 204, 80, 0.16);
-  border: 1px solid rgba(168, 204, 80, 0.35);
+  color: var(--ip-blue);
+  background: var(--ip-blue-soft);
 }
 
-.ip__back:hover .ip__back-icon {
-  background: rgba(168, 204, 80, 0.28);
-  border-color: rgba(168, 204, 80, 0.55);
-  color: #e8ffc8;
-}
-
-.ip__back-label {
-  padding-right: 2px;
-}
-
-/* ── Hero ── */
+/* ── Hero ──────────────────────────────────────────────────── */
 .ip__hero {
-  margin-bottom: 16px;
-  padding: 18px 20px;
-  background: linear-gradient(160deg, rgba(22,41,23,0.92), rgba(13,26,15,0.96));
-  border: 1px solid rgba(42,75,44,0.85);
-  border-radius: 14px;
-  color: #e0ebe1;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.18);
-}
-
-.ip__hero-title {
-  margin: 0 0 4px;
-  font-size: 18px;
-  font-weight: 800;
-  color: #e0ebe1;
-  letter-spacing: -0.01em;
-}
-
-.ip__hero-sub {
-  margin: 0 0 14px;
-  font-size: 13px;
-  color: #8da68e;
+  background: var(--ip-surface);
+  border: 1px solid var(--ip-hair);
+  border-radius: var(--ip-radius-lg);
+  padding: 22px 24px;
+  box-shadow: var(--ip-shadow-card);
 }
 
 .ip__hero-intro {
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  margin-bottom: 14px;
+  margin-bottom: 18px;
 }
 
 .ip__hero-icon {
   flex-shrink: 0;
   width: 40px;
   height: 40px;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   font-size: 20px;
   line-height: 1;
   border-radius: 12px;
-  background: rgba(11, 21, 12, 0.65);
-  border: 1px solid rgba(42, 75, 44, 0.75);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  background: var(--ip-blue-soft);
+  color: var(--ip-blue);
 }
 
-.ip__hero-intro .ip__hero-title {
-  margin-bottom: 2px;
+.ip__hero-title {
+  margin: 0;
+  font-family: 'Inter Tight', 'Inter', sans-serif;
+  font-weight: 700;
+  font-size: 24px;
+  letter-spacing: -0.025em;
+  color: var(--ip-ink);
 }
 
-.ip__hero-intro .ip__hero-sub {
-  margin-bottom: 0;
+.ip__hero-sub {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--ip-muted);
 }
 
-/* Dashboard tab: tighter hero */
-.ip__hero--embedded {
-  margin-bottom: 12px;
-  padding: 14px 16px;
+.ip__hero--embedded { padding: 18px 20px; }
+.ip__hero--embedded .ip__hero-title { font-size: 20px; }
+
+@media (min-width: 900px) {
+  .ip__hero { padding: 26px 28px; }
+  .ip__hero-title { font-size: 28px; }
+  .ip__hero-sub { font-size: 14px; }
 }
 
-.ip__hero--embedded .ip__hero-intro {
-  margin-bottom: 12px;
-}
-
-.ip__hero--embedded .ip__hero-icon {
-  width: 36px;
-  height: 36px;
-  font-size: 18px;
-  border-radius: 10px;
-}
-
-/* Full installments page: same intro, default padding */
-.ip__hero--standalone .ip__hero-sub {
-  margin-bottom: 0;
-}
-
+/* KPI rail — 4 columns split by hair-line dividers */
 .ip__hero-kpi {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
+  border-top: 1px solid var(--ip-hair-2);
+  padding-top: 18px;
 }
 
 .ip__hero-kpi--strip .ip__kpi {
-  position: relative;
+  padding: 0 14px;
+  border-left: 1px solid var(--ip-hair-2);
+  min-width: 0;
 }
-
-.ip__hero-kpi--strip .ip__kpi + .ip__kpi::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 18%;
-  bottom: 18%;
-  width: 1px;
-  background: rgba(42, 75, 44, 0.55);
-  pointer-events: none;
+.ip__hero-kpi--strip .ip__kpi:first-child {
+  padding-left: 0;
+  border-left: 0;
 }
 
 .ip__kpi {
-  text-align: center;
-  padding: 12px 8px;
-  border-radius: 10px;
-  background: rgba(11,21,12,0.6);
-  border: 1px solid rgba(42,75,44,0.7);
+  text-align: left;
   min-width: 0;
 }
 
 .ip__kpi-value {
-  font-size: 24px;
-  font-weight: 800;
-  color: #a8cc50;
-  line-height: 1.1;
   display: block;
+  font-family: 'Inter Tight', 'Inter', sans-serif;
+  font-weight: 700;
+  font-size: 28px;
+  line-height: 1;
+  letter-spacing: -0.025em;
+  color: var(--ip-ink);
 }
 
 .ip__kpi-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: #8da68e;
   display: block;
-  margin-top: 4px;
+  margin-top: 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--ip-muted);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.08em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-@media (max-width: 480px) {
-  .ip__hero { padding: 14px; }
-  .ip__hero-title { font-size: 16px; }
-  .ip__hero-sub { font-size: 12px; margin-bottom: 10px; }
-  .ip__hero-intro { gap: 10px; margin-bottom: 12px; }
-  .ip__hero-icon { width: 34px; height: 34px; font-size: 17px; }
-  .ip__hero-kpi { gap: 6px; }
-  .ip__hero-kpi--strip .ip__kpi + .ip__kpi::before { display: none; }
-  .ip__kpi { padding: 8px 4px; }
-  .ip__kpi-value { font-size: 20px; }
-  .ip__kpi-label { font-size: 9px; }
+@media (min-width: 900px) { .ip__kpi-value { font-size: 32px; } }
+
+@media (max-width: 520px) {
+  .ip__back { height: 32px; font-size: 11.5px; padding: 0 12px 0 6px; }
+  .ip__back-icon { width: 22px; height: 22px; font-size: 13px; }
+  .ip__hero { padding: 12px 12px; border-radius: 12px; }
+  .ip__hero-intro { margin-bottom: 8px; gap: 8px; }
+  .ip__hero-icon { width: 26px; height: 26px; font-size: 13px; border-radius: 8px; }
+  .ip__hero-title { font-size: 15px; }
+  .ip__hero-sub { font-size: 11px; margin-top: 2px; }
+  .ip__hero-kpi {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 0;
+    padding-top: 10px;
+  }
+  .ip__hero-kpi--strip .ip__kpi {
+    padding: 0 8px;
+    border-left-color: var(--ip-hair);
+  }
+  .ip__hero-kpi--strip .ip__kpi:nth-child(3) {
+    padding-left: 0;
+    border-left: 0;
+  }
+  .ip__kpi-value { font-size: 16px; }
+  .ip__kpi-label { font-size: 9px; margin-top: 3px; letter-spacing: 0.05em; }
+  .ip__plan-card { padding: 10px 12px; border-radius: 12px; row-gap: 8px; }
+  .ip__plan-card__titles .ip__plan-title { font-size: 13px; }
+  .ip__plan-card__titles .ip__plan-ref { font-size: 10.5px; }
+  .ip__pill { font-size: 10px; padding: 3px 8px; }
+  .ip__plan-money { padding: 8px 0; }
+  .ip__plan-money__item { padding: 0 10px; }
+  .ip__plan-money__label { font-size: 9px; margin-bottom: 2px; }
+  .ip__plan-money__value { font-size: 14px; }
+  .ip__plan-progress-title { font-size: 11px; }
+  .ip__progress-label { font-size: 11.5px; }
+  .ip__plan-next { font-size: 11px; }
+  .ip__plan-next__kicker { font-size: 11px; }
+  .ip__plan-cta { font-size: 11.5px; }
+  .ip__detail-head { padding: 12px 12px; border-radius: 12px; }
+  .ip__detail-title { font-size: 15px; }
+  .ip__detail-ref { font-size: 11px; }
+  .ip__detail-hint { padding: 8px 10px; font-size: 11px; line-height: 1.45; border-radius: 10px; }
+  .ip__metric-grid { gap: 8px; }
+  .ip__metric { padding: 10px 12px; border-radius: 10px; gap: 3px; }
+  .ip__metric-kicker { font-size: 9px; }
+  .ip__preview-banner { padding: 8px 10px; font-size: 11px; border-radius: 10px; }
 }
 
-@media (min-width: 900px) {
-  .ip__hero { padding: 22px 24px; }
-  .ip__hero-title { font-size: 22px; }
-  .ip__hero-sub { font-size: 14px; }
-  .ip__kpi-value { font-size: 28px; }
-  .ip__kpi-label { font-size: 12px; }
-}
-
-/* ── Preview banner ── */
+/* ── Preview banner ────────────────────────────────────────── */
 .ip__preview-banner {
-  background: var(--ip-amber-50);
-  border: 1px solid rgba(251, 191, 36, 0.25);
-  border-radius: 8px;
-  padding: 10px 12px;
-  margin-bottom: 12px;
-  font-size: 11px;
-  color: var(--ip-600);
-}
-
-.ip__preview-banner strong {
+  background: var(--ip-amber-soft);
+  border: 1px solid rgba(183, 121, 31, 0.22);
+  border-radius: var(--ip-radius-md);
+  padding: 12px 14px;
+  font-size: 12.5px;
   color: var(--ip-amber);
 }
+.ip__preview-banner strong { color: var(--ip-amber); font-weight: 700; }
 
-/* ── Plan cards (list view) ── */
+/* ══════════════════════════════════════════════════════════════
+   PLAN CARDS (list)
+   Large, grid-based cards mirroring the mockup's "Projet" row.
+   Stacks vertically on narrow viewports.
+   ══════════════════════════════════════════════════════════════ */
 .ip__plan-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
 }
 
+/* ── Plan card — simple & balanced ─────────────────────────
+   One card, four clean rows separated by thin dividers.
+   No accent rail, no gradients, no animations.
+   Balance comes from equal columns + consistent whitespace. */
 .ip__plan-card {
-  background: linear-gradient(165deg, rgba(26, 51, 29, 0.98), rgba(22, 41, 23, 0.99));
-  border: 1px solid var(--ip-200);
-  border-left: 4px solid var(--ip-blue);
-  border-radius: 14px;
-  padding: 14px 14px 12px;
-  cursor: pointer;
   width: 100%;
-  text-align: left;
+  padding: 16px 18px;
+  background: var(--ip-surface);
+  border: 1px solid var(--ip-hair);
+  border-radius: var(--ip-radius-lg);
+  box-shadow: var(--ip-shadow-card);
   color: inherit;
   font: inherit;
-  transition: border-color 0.18s, box-shadow 0.18s, transform 0.12s;
-  box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.03) inset,
-    0 8px 24px rgba(0, 0, 0, 0.2);
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.ip__plan-card:hover {
-  border-color: rgba(168, 204, 80, 0.45);
-  border-left-color: var(--ip-blue-700);
-  box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.05) inset,
-    0 12px 28px rgba(0, 0, 0, 0.28);
-}
-
-.ip__plan-card:active {
-  transform: scale(0.992);
-}
-
-.ip__plan-card__header {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.ip__plan-card__titles {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-  min-width: 0;
-}
-
-.ip__plan-card__titles .ip__plan-title {
-  font-size: 15px;
-  font-weight: 800;
-  line-height: 1.25;
-  color: var(--ip-900);
-  letter-spacing: -0.02em;
-}
-
-.ip__plan-card__titles .ip__plan-ref {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--ip-500);
-  font-family: inherit;
-  background: none;
-  padding: 0;
-  border-radius: 0;
-}
-
-.ip__plan-title {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--ip-900);
-}
-
-.ip__plan-ref {
-  font-size: 9px;
-  color: var(--ip-400);
-  font-family: ui-monospace, monospace;
-  background: var(--ip-100);
-  padding: 1px 5px;
-  border-radius: 4px;
-}
-
-.ip__plan-pills {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.ip__pill {
-  font-size: 9px;
-  font-weight: 700;
-  padding: 2px 7px;
-  border-radius: 9999px;
-  white-space: nowrap;
-}
-
-.ip__pill--submitted {
-  background: var(--ip-blue-100);
-  color: var(--ip-blue-700);
-}
-
-.ip__pill--rejected {
-  background: var(--ip-red-50);
-  color: var(--ip-red);
-}
-
-.ip__pill--ok {
-  background: var(--ip-green-50);
-  color: var(--ip-green);
-}
-
-/* Money snapshot (Validé / Reste) */
-.ip__plan-money {
+  text-align: left;
+  cursor: pointer;
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "header   header"
+    "money    money"
+    "progress progress"
+    "next     cta";
+  row-gap: 14px;
+  column-gap: 12px;
+  transition: border-color .16s ease, box-shadow .16s ease;
 }
+.ip__plan-card:hover  { border-color: #D9DCE1; box-shadow: var(--ip-shadow-lift); }
+.ip__plan-card:focus-visible { outline: 2px solid var(--ip-blue); outline-offset: 2px; }
 
-.ip__plan-money__item {
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: rgba(11, 21, 12, 0.45);
-  border: 1px solid rgba(42, 75, 44, 0.65);
-}
-
-.ip__plan-money__item--ok {
-  border-color: rgba(52, 211, 153, 0.35);
-  background: rgba(52, 211, 153, 0.08);
-}
-
-.ip__plan-money__label {
-  display: block;
-  font-size: 9px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--ip-400);
-  margin-bottom: 4px;
-}
-
-.ip__plan-money__value {
-  display: block;
-  font-size: 15px;
-  font-weight: 800;
-  color: var(--ip-900);
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -0.02em;
-}
-
-.ip__plan-money__item--ok .ip__plan-money__value {
-  color: #6ee7b7;
-}
-
-/* Progress block */
-.ip__plan-progress-block {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.ip__plan-progress-head {
+/* ── Header: title block + single status pill ── */
+.ip__plan-card__header {
+  grid-area: header;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 12px;
+  min-width: 0;
+}
+.ip__plan-card__titles { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ip__plan-card__titles .ip__plan-title {
+  font-family: 'Inter Tight', 'Inter', sans-serif;
+  font-size: 16px; font-weight: 700; line-height: 1.25; letter-spacing: -0.015em;
+  color: var(--ip-ink);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ip__plan-card__titles .ip__plan-ref {
+  font-size: 12.5px; font-weight: 500; color: var(--ip-muted);
+  background: none; padding: 0; border-radius: 0; font-family: inherit;
 }
 
+.ip__plan-pills { display: flex; gap: 6px; flex-shrink: 0; }
+.ip__pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px; font-weight: 600; line-height: 1;
+  padding: 4px 10px; border-radius: 999px; white-space: nowrap;
+}
+.ip__pill::before {
+  content: ""; width: 6px; height: 6px; border-radius: 999px; background: currentColor;
+}
+.ip__pill--submitted { background: var(--ip-amber-soft); color: var(--ip-amber); }
+.ip__pill--rejected  { background: var(--ip-red-soft);   color: var(--ip-red); }
+.ip__pill--ok        { background: var(--ip-green-soft); color: var(--ip-green); }
+
+/* ── Money row: two equal columns separated by a thin divider ── */
+.ip__plan-money {
+  grid-area: money;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-top: 1px solid var(--ip-hair-2);
+  border-bottom: 1px solid var(--ip-hair-2);
+  padding: 12px 0;
+}
+.ip__plan-money__item {
+  padding: 0 14px;
+  background: none; border: 0; border-radius: 0;
+  min-width: 0;
+}
+.ip__plan-money__item + .ip__plan-money__item {
+  border-left: 1px solid var(--ip-hair-2);
+}
+.ip__plan-money__label {
+  display: block;
+  font-size: 10.5px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--ip-muted); margin-bottom: 4px;
+}
+.ip__plan-money__value {
+  display: block;
+  font-family: 'Inter Tight', 'Inter', sans-serif;
+  font-size: 19px; font-weight: 700; letter-spacing: -0.02em;
+  color: var(--ip-ink);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ip__plan-money__item--ok .ip__plan-money__value { color: var(--ip-green); }
+
+/* ── Progress row ── */
+.ip__plan-progress-block {
+  grid-area: progress;
+  display: flex; flex-direction: column; gap: 8px;
+  min-width: 0;
+  padding: 0; border: 0;
+}
+.ip__plan-progress-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+}
 .ip__plan-progress-title {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--ip-500);
+  font-size: 12.5px; color: var(--ip-muted); font-weight: 500;
+  text-transform: none; letter-spacing: 0;
 }
-
-/* Progress bar */
-.ip__progress {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 0;
-  width: 100%;
-}
-
+.ip__progress { display: flex; align-items: center; width: 100%; }
 .ip__progress-track {
   flex: 1;
   height: 6px;
-  background: var(--ip-100);
-  border-radius: 9999px;
+  background: var(--ip-hair-2);
+  border-radius: 999px;
   overflow: hidden;
 }
-
 .ip__progress-fill {
-  height: 100%;
-  border-radius: 9999px;
-  background: linear-gradient(90deg, var(--ip-blue), var(--ip-blue-700));
-  transition: width 0.3s;
+  height: 100%; border-radius: 999px;
+  background: var(--ip-blue);
+  transition: width .3s ease;
+}
+.ip__progress-label {
+  font-family: 'Inter Tight', 'Inter', sans-serif;
+  font-size: 13px; font-weight: 700; letter-spacing: -0.01em;
+  color: var(--ip-ink);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  background: none; padding: 0; border-radius: 0;
 }
 
-.ip__progress-label {
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--ip-500);
-  white-space: nowrap;
-}
+/* ── Footer: next action (left) + open link (right) ── */
+.ip__plan-next { grid-area: next; }
+.ip__plan-cta  { grid-area: cta; }
 
 .ip__plan-next {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: rgba(11, 21, 12, 0.35);
-  border: 1px solid rgba(42, 75, 44, 0.5);
+  display: flex; align-items: center; gap: 6px;
+  padding: 0; background: none; border: 0; border-radius: 0;
+  font-size: 12.5px; color: var(--ip-muted);
+  min-width: 0; justify-self: start; align-self: center;
 }
-
+.ip__plan-next::before { content: none; }
 .ip__plan-next__kicker {
-  font-size: 9px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--ip-400);
+  font-size: 12.5px; font-weight: 500; color: var(--ip-muted);
+  text-transform: none; letter-spacing: 0;
 }
-
+.ip__plan-next__kicker::after {
+  content: "·"; margin: 0 6px; color: var(--ip-muted);
+}
 .ip__plan-next__text {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--ip-600);
-  line-height: 1.35;
+  color: var(--ip-ink); font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-
-.ip__plan-next__text--done {
-  font-weight: 600;
-  color: var(--ip-green);
-}
+.ip__plan-next__text--done { color: var(--ip-green); font-weight: 600; }
 
 .ip__plan-cta {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, rgba(122, 176, 32, 0.18) 0%, rgba(168, 204, 80, 0.12) 100%);
-  border: 1px solid rgba(168, 204, 80, 0.35);
-  font-size: 12px;
-  font-weight: 700;
-  color: #c8e86c;
-  margin-top: 2px;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 0; background: none; color: var(--ip-blue);
+  border: 0; border-radius: 0;
+  height: auto;
+  font-weight: 600; font-size: 13px;
+  white-space: nowrap;
+  justify-self: end; align-self: center;
+  box-shadow: none;
+  transition: color .15s ease;
 }
-
+.ip__plan-card:hover .ip__plan-cta { color: var(--ip-blue-600); }
 .ip__plan-cta__arrow {
-  font-size: 14px;
-  opacity: 0.9;
-  transition: transform 0.15s;
+  font-size: 14px; line-height: 1;
+  transition: transform .2s ease;
+}
+.ip__plan-card:hover .ip__plan-cta__arrow { transform: translateX(2px); }
+
+@media (max-width: 480px) {
+  .ip__plan-money__item { padding: 0 8px; }
+  .ip__plan-money__value { font-size: 14px; }
 }
 
-.ip__plan-card:hover .ip__plan-cta__arrow {
-  transform: translateX(3px);
-}
-
-/* ── Detail view (single plan) ── */
+/* ══════════════════════════════════════════════════════════════
+   DETAIL HEAD (single plan, standalone page)
+   ══════════════════════════════════════════════════════════════ */
 .ip__detail-head {
-  background: var(--ip);
-  border: 1px solid var(--ip-200);
-  border-radius: 10px;
-  padding: 12px 14px;
-  margin-bottom: 12px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  background: var(--ip-surface);
+  border: 1px solid var(--ip-hair);
+  border-radius: var(--ip-radius-lg);
+  box-shadow: var(--ip-shadow-card);
+  padding: 20px 22px;
 }
 
 .ip__detail-title {
-  font-size: 13px;
-  font-weight: 800;
-  color: var(--ip-900);
-  margin: 0 0 2px;
+  font-family: 'Inter Tight', 'Inter', sans-serif;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--ip-ink);
+  margin: 0 0 4px;
 }
 
 .ip__detail-ref {
-  font-size: 10px;
-  color: var(--ip-400);
+  font-size: 12.5px;
+  color: var(--ip-muted);
 }
 
+/* Mode d'emploi callout */
 .ip__detail-hint {
-  background: var(--ip-blue-50);
-  border: 1px solid var(--ip-blue-100);
-  border-radius: 8px;
-  padding: 10px 12px;
-  margin-bottom: 12px;
-  font-size: 10.5px;
-  color: var(--ip-600);
-  line-height: 1.45;
+  background: var(--ip-blue-softer);
+  border: 1px solid #DEE8FF;
+  border-radius: var(--ip-radius-md);
+  padding: 12px 14px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: #253B7C;
+}
+.ip__detail-hint strong { color: #253B7C; font-weight: 700; }
+
+/* ══════════════════════════════════════════════════════════════
+   METRIC GRID (standalone detail)
+   ══════════════════════════════════════════════════════════════ */
+.ip__metric-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
 }
 
-.ip__detail-hint strong {
-  color: var(--ip-blue-700);
+@media (min-width: 760px) {
+  .ip__metric-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
 
-/* Payment rows */
-.ip__payments {
-  display: flex;
-  flex-direction: column;
+.ip__metric {
+  padding: 16px 18px;
+  border-radius: var(--ip-radius-md);
+  background: var(--ip-surface);
+  border: 1px solid var(--ip-hair);
+  box-shadow: var(--ip-shadow-card);
+  display: grid;
   gap: 6px;
 }
 
-/* Pay card — redesigned. Dark brand surface with a thin olive accent, no
-   blue tints anywhere. Clear visual hierarchy: month/due → amount/status
-   → hint → action. Hover lifts the card slightly so the list feels
-   interactive without being noisy. */
-.ip__pay-card {
-  position: relative;
-  background: linear-gradient(180deg, rgba(168, 204, 80, 0.05) 0%, rgba(0, 0, 0, 0.18) 100%);
-  border: 1px solid rgba(168, 204, 80, 0.16);
-  border-radius: 14px;
-  padding: 14px 16px;
-  transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
-  overflow: hidden;
-}
-.ip__pay-card::before {
-  content: "";
-  position: absolute;
-  left: 0; top: 12px; bottom: 12px;
-  width: 3px;
-  border-radius: 0 3px 3px 0;
-  background: linear-gradient(180deg, var(--ip-blue), var(--ip-blue-700));
-  opacity: 0.55;
-}
-.ip__pay-card:hover {
-  border-color: rgba(168, 204, 80, 0.35);
-  transform: translateY(-1px);
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
+.ip__metric-kicker {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ip-muted);
 }
 
+.ip__metric-value {
+  font-family: 'Inter Tight', 'Inter', sans-serif;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  color: var(--ip-ink);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ip__metric-hint {
+  font-size: 11.5px;
+  color: var(--ip-muted);
+  line-height: 1.35;
+}
+
+.ip__metric--validated .ip__metric-value { color: var(--ip-green); }
+.ip__metric--review    .ip__metric-value { color: var(--ip-amber); }
+.ip__metric--rejected  .ip__metric-value { color: var(--ip-faint); }
+.ip__metric--remaining .ip__metric-value { color: var(--ip-blue); }
+
+/* ══════════════════════════════════════════════════════════════
+   FACILITY ROWS (payments)
+   Clean vertical card. The dashboard-embedded modal reuses this
+   same block, so we keep the stacking simple — no grid tricks
+   that depend on viewport width.
+   ══════════════════════════════════════════════════════════════ */
+.ip__payments {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ip__pay-card {
+  position: relative;
+  background: var(--ip-surface);
+  border: 1px solid var(--ip-hair);
+  border-radius: var(--ip-radius-md);
+  box-shadow: var(--ip-shadow-card);
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: border-color .15s, box-shadow .15s;
+}
+.ip__pay-card:hover { border-color: #E0E2E7; box-shadow: var(--ip-shadow-lift); }
+
+.ip__pay-card--next {
+  border-color: rgba(30, 92, 255, 0.32);
+  box-shadow: 0 0 0 3px rgba(30, 92, 255, 0.08), var(--ip-shadow-card);
+}
+
+/* Top row: "Facilité N" kicker on the left, due date on the right */
 .ip__pay-top {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  margin-bottom: 8px;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .ip__pay-month {
-  font-size: 12px;
-  font-weight: 800;
-  color: var(--ip-blue);
-  text-transform: uppercase;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  font-family: 'Inter Tight', 'Inter', sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ip-muted);
   letter-spacing: 0.08em;
+  text-transform: uppercase;
+  line-height: 1;
+}
+.ip__pay-month strong {
+  font-family: 'Inter Tight', 'Inter', sans-serif;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--ip-ink);
+  letter-spacing: -0.02em;
+  text-transform: none;
 }
 
 .ip__pay-due {
-  font-size: 11px;
-  color: var(--ip-500);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  color: var(--ip-muted);
   font-weight: 500;
 }
 
+/* Mid row: amount on left, status chip on right */
 .ip__pay-mid {
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  align-items: baseline;
-  gap: 10px;
-  margin-bottom: 8px;
+  gap: 12px;
 }
 
 .ip__pay-amount {
-  font-size: 22px;
-  font-weight: 800;
-  color: var(--ip-900);
-  letter-spacing: -0.01em;
+  font-family: 'Inter Tight', 'Inter', sans-serif;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  color: var(--ip-ink);
   line-height: 1.1;
-}
-
-.ip__pay-amount small {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--ip-500);
-  margin-left: 2px;
-  letter-spacing: 0.04em;
-}
-
-/* Status badges */
-.ip__status {
-  font-size: 9px;
-  font-weight: 700;
-  padding: 3px 8px;
-  border-radius: 9999px;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-
-.ip__status--approved {
-  background: var(--ip-green-50);
-  color: var(--ip-green);
+.ip__pay-amount small {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ip-muted);
+  margin-left: 3px;
+  letter-spacing: 0;
 }
 
-.ip__status--submitted {
-  /* Was blue tint — swapped to amber so "En révision" pairs with the
-     accent set (green=ok, amber=pending, red=rejected) and the app has
-     no stray blue patches. */
-  background: var(--ip-amber-50);
-  color: var(--ip-amber);
+/* Status chip — dot + label, no pill background */
+.ip__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  white-space: nowrap;
 }
-
-.ip__status--rejected {
-  background: var(--ip-red-50);
-  color: var(--ip-red);
+.ip__status::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
 }
-
-.ip__status--pending {
-  background: var(--ip-amber-50);
-  color: var(--ip-amber);
-}
+.ip__status--approved  { color: var(--ip-green); }
+.ip__status--submitted { color: var(--ip-amber); }
+.ip__status--rejected  { color: var(--ip-red); }
+.ip__status--pending   { color: var(--ip-blue); }
 
 .ip__pay-hint {
-  font-size: 10px;
-  color: var(--ip-500);
-  margin-bottom: 4px;
+  font-size: 12.5px;
+  color: var(--ip-muted);
+  line-height: 1.4;
 }
 
+/* Rejected note — red callout */
 .ip__pay-reject {
-  font-size: 10px;
-  font-weight: 600;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 500;
   color: var(--ip-red);
-  background: var(--ip-red-50);
-  border-radius: 6px;
-  padding: 6px 8px;
-  margin-bottom: 6px;
+  background: var(--ip-red-soft);
+  border: 1px solid rgba(215, 38, 61, 0.18);
+  border-radius: 10px;
+  padding: 10px 12px;
 }
 
-/* Receipt display (last only) */
+/* Receipt strip */
 .ip__receipt {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: var(--ip-100);
-  margin-bottom: 6px;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--ip-surface-soft);
+  border: 1px solid var(--ip-hair-2);
+  border-radius: var(--ip-radius-md);
 }
 
 .ip__receipt-thumb {
-  width: 40px;
-  height: 40px;
-  border-radius: 6px;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
   object-fit: cover;
-  border: 1px solid var(--ip-200);
+  border: 1px solid var(--ip-hair);
   flex-shrink: 0;
 }
 
 .ip__receipt-file-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 6px;
-  background: rgba(168, 204, 80, 0.10);
-  border: 1px solid rgba(168, 204, 80, 0.28);
-  display: flex;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: var(--ip-blue-soft);
+  color: var(--ip-blue);
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
+  font-size: 20px;
   flex-shrink: 0;
 }
 
-.ip__receipt-info {
-  flex: 1;
-  min-width: 0;
-}
+.ip__receipt-info { flex: 1; min-width: 0; }
 
 .ip__receipt-name {
-  font-size: 10px;
+  font-size: 13.5px;
   font-weight: 600;
-  color: var(--ip-900);
+  color: var(--ip-ink);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .ip__receipt-date {
-  font-size: 9px;
-  color: var(--ip-400);
+  font-size: 12px;
+  color: var(--ip-muted);
+  margin-top: 2px;
 }
 
 .ip__receipt-link {
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--ip-blue);
-  text-decoration: none;
-  padding: 5px 10px;
-  border-radius: 999px;
-  background: rgba(168, 204, 80, 0.10);
-  border: 1px solid rgba(168, 204, 80, 0.28);
-  white-space: nowrap;
   flex-shrink: 0;
-  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 14px;
+  background: var(--ip-surface);
+  border: 1px solid var(--ip-hair);
+  border-radius: 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ip-ink);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background-color .15s, border-color .15s;
 }
+.ip__receipt-link:hover { background: var(--ip-surface-soft); border-color: #D9DCE1; }
 
-.ip__receipt-link:hover {
-  background: var(--ip-blue);
-  color: #0b1f0c;
-  border-color: var(--ip-blue);
-}
-
-/* Action button — olive-green gradient, matching the footer submit in
-   the upload modal. Replaces the old dark-blue/green mixed gradient so
-   the whole flow reads as one cohesive brand colour. */
+/* Primary action — full-width inside the card */
 .ip__pay-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   width: 100%;
-  padding: 12px 14px;
-  margin-top: 4px;
-  border: 1px solid rgba(168, 204, 80, 0.5);
+  padding: 0 16px;
+  height: 44px;
+  margin-top: 2px;
+  border: 0;
   border-radius: 12px;
-  font-size: 13px;
-  font-weight: 700;
+  background: var(--ip-blue);
+  color: #fff;
+  font-size: 13.5px;
+  font-weight: 600;
   cursor: pointer;
-  letter-spacing: 0.01em;
-  background: linear-gradient(135deg, var(--ip-blue) 0%, var(--ip-blue-700) 100%);
-  color: #0b1f0c;
-  box-shadow: 0 4px 14px rgba(168, 204, 80, 0.22);
-  transition: transform 0.15s, box-shadow 0.15s, filter 0.15s;
+  white-space: nowrap;
+  transition: background-color .15s, transform .1s;
 }
+.ip__pay-btn:hover { background: var(--ip-blue-600); }
+.ip__pay-btn:active { transform: translateY(1px); }
 
-.ip__pay-btn:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 8px 22px rgba(168, 204, 80, 0.35);
-  filter: brightness(1.05);
-}
-.ip__pay-btn:active { transform: translateY(0); }
-
-/* "Corriger le reçu" — amber variant for action-required state. */
 .ip__pay-btn--correct {
-  background: linear-gradient(135deg, var(--ip-amber) 0%, #d97706 100%);
-  border-color: rgba(251, 191, 36, 0.55);
-  box-shadow: 0 4px 14px rgba(251, 191, 36, 0.28);
-  color: #1b1100;
+  background: var(--ip-ink-2);
+  color: #fff;
 }
-.ip__pay-btn--correct:hover {
-  box-shadow: 0 8px 22px rgba(251, 191, 36, 0.40);
+.ip__pay-btn--correct:hover { background: var(--ip-ink); }
+
+@media (max-width: 520px) {
+  .ip__pay-card { padding: 10px 12px; border-radius: 12px; }
+  .ip__pay-amount { font-size: 16px; }
+  .ip__pay-btn { height: 38px; font-size: 12.5px; border-radius: 10px; }
+  .ip__empty { padding: 22px 14px; font-size: 12px; border-radius: 12px; }
+  .ip__empty strong { font-size: 13px; }
+  .ip__pager-btn { min-width: 28px; height: 28px; font-size: 11.5px; padding: 0 7px; }
+  .ip__pager-hint { font-size: 11px; }
 }
 
-/* Empty */
+/* Empty state */
 .ip__empty {
   text-align: center;
   padding: 48px 24px;
-  color: var(--ip-500);
-  background: linear-gradient(160deg, rgba(22,41,23,0.6), rgba(13,26,15,0.8));
-  border: 1px dashed rgba(168,204,80,0.22);
-  border-radius: 14px;
-  font-size: 13px;
+  color: var(--ip-muted);
+  background: var(--ip-surface);
+  border: 1px dashed var(--ip-hair);
+  border-radius: var(--ip-radius-lg);
+  font-size: 13.5px;
   line-height: 1.55;
 }
-
 .ip__empty strong {
   display: block;
-  color: var(--ip-900);
+  color: var(--ip-ink);
   font-size: 16px;
   font-weight: 700;
   margin-bottom: 6px;
 }
 
 @media (min-width: 900px) {
-  .ip__empty { padding: 64px 32px; font-size: 14px; }
+  .ip__empty { padding: 64px 32px; font-size: 14.5px; }
   .ip__empty strong { font-size: 18px; }
 }
 
 /* ══════════════════════════════════════════════════════════════
-   PLAN DETAIL — metric grid (replaces the off-theme blue/red/green
-   light-mode boxes). Dark cards with a left accent stripe that
-   encodes the semantic tone (validated/review/rejected/remaining).
-   ══════════════════════════════════════════════════════════════ */
-.ip__metric-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  margin-bottom: 14px;
-}
-
-.ip__metric {
-  position: relative;
-  padding: 12px 14px;
-  border-radius: 14px;
-  background: linear-gradient(180deg, rgba(168, 204, 80, 0.05) 0%, rgba(0, 0, 0, 0.18) 100%);
-  border: 1px solid rgba(168, 204, 80, 0.14);
-  display: grid;
-  gap: 4px;
-  overflow: hidden;
-}
-.ip__metric::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 10px;
-  bottom: 10px;
-  width: 3px;
-  border-radius: 999px;
-  background: var(--accent, var(--ip-blue));
-}
-
-.ip__metric--validated { --accent: var(--ip-green); }
-.ip__metric--review    { --accent: var(--ip-amber); }
-.ip__metric--rejected  { --accent: var(--ip-red); }
-.ip__metric--remaining { --accent: var(--ip-blue); }
-
-.ip__metric-kicker {
-  font-size: 10px;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--accent, var(--ip-500));
-}
-.ip__metric-value {
-  font-size: 17px;
-  font-weight: 800;
-  color: var(--ip-900);
-  letter-spacing: -0.01em;
-  line-height: 1.2;
-}
-.ip__metric-hint {
-  font-size: 11px;
-  color: var(--ip-500);
-  line-height: 1.3;
-}
-
-/* ══════════════════════════════════════════════════════════════
-   PAGER — 1 · 2 · 3 style pager for the payments list
+   PAGER — 1 · 2 · 3 dots
    ══════════════════════════════════════════════════════════════ */
 .ip__pager {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
-  margin-top: 14px;
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: rgba(168, 204, 80, 0.04);
-  border: 1px solid rgba(168, 204, 80, 0.14);
+  padding: 4px 2px;
 }
 .ip__pager-btn {
   min-width: 34px;
-  height: 32px;
+  height: 34px;
   padding: 0 10px;
-  border-radius: 8px;
-  background: rgba(168, 204, 80, 0.06);
-  border: 1px solid rgba(168, 204, 80, 0.18);
-  color: var(--ip-600);
+  border-radius: 10px;
+  background: var(--ip-surface);
+  border: 1px solid var(--ip-hair);
+  color: var(--ip-ink);
   font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: background-color 0.15s, color 0.15s, border-color 0.15s, transform 0.15s;
-}
-.ip__pager-btn:hover:not(:disabled) {
-  background: rgba(168, 204, 80, 0.12);
-  color: var(--ip-900);
-  border-color: rgba(168, 204, 80, 0.35);
-}
-.ip__pager-btn:active:not(:disabled) { transform: scale(0.96); }
-.ip__pager-btn:disabled { opacity: 0.35; cursor: not-allowed; }
-.ip__pager-btn--nav {
-  font-size: 18px;
-  padding: 0 8px;
   font-weight: 600;
-  line-height: 1;
+  cursor: pointer;
+  transition: background-color .15s, color .15s, border-color .15s, transform .12s;
 }
+.ip__pager-btn:hover:not(:disabled) { background: var(--ip-surface-soft); border-color: #D9DCE1; }
+.ip__pager-btn:active:not(:disabled) { transform: scale(0.96); }
+.ip__pager-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.ip__pager-btn--nav { color: var(--ip-muted); font-size: 16px; padding: 0 10px; }
 .ip__pager-btn--active {
-  background: linear-gradient(135deg, var(--ip-blue) 0%, var(--ip-blue-700) 100%);
-  color: #0b1f0c;
-  border-color: rgba(168, 204, 80, 0.55);
-  box-shadow: 0 4px 12px rgba(168, 204, 80, 0.24);
+  background: var(--ip-ink);
+  color: #fff;
+  border-color: var(--ip-ink);
 }
-.ip__pager-btn--active:hover { color: #0b1f0c; }
+.ip__pager-btn--active:hover { background: var(--ip-ink-2); color: #fff; }
 .ip__pager-hint {
   margin-left: auto;
-  font-size: 11px;
-  color: var(--ip-500);
+  font-size: 12.5px;
+  color: var(--ip-muted);
 }
 @media (max-width: 400px) {
-  .ip__pager-hint { flex-basis: 100%; text-align: center; margin-left: 0; margin-top: 4px; }
+  .ip__pager-hint { flex-basis: 100%; text-align: center; margin: 4px 0 0; }
 }
 
 /* ══════════════════════════════════════════════════════════════
    UPLOAD MODAL
+   Light theme, cream underlay, blue primary, white sheet.
    ══════════════════════════════════════════════════════════════ */
-
-/* Overlay: dark blurred backdrop anchored to the viewport. Inset safe-area
-   padding so the panel doesn't kiss the phone edges on iOS notches. */
-/* Receipt upload must stack above plan-detail overlay on dashboard */
-.ip__overlay--receipt {
-  z-index: 250;
-}
-
-/* Plan detail (Mes échéances) — wide sheet, scrolls internally */
-.ip__overlay--plan-detail {
-  z-index: 200;
-}
-
-.ip__modal--plan-detail {
-  max-width: min(540px, 100%);
-  width: 100%;
-  max-height: min(92dvh, 920px);
-}
-
-.ip__modal-body--plan-detail {
-  padding-top: 12px;
-  gap: 12px;
-}
-
-.ip__modal-header--plan-detail .ip__modal-title {
-  font-size: 16px;
-  line-height: 1.25;
-}
-
-.ip__detail-hint--modal {
-  margin: 0;
-  font-size: 12px;
-  line-height: 1.45;
-  color: var(--ip-500);
-}
-
-.ip-metrics--in-modal {
-  margin-top: 0;
-}
-
-.ip__pay-card--next {
-  position: relative;
-  box-shadow:
-    0 0 0 2px rgba(168, 204, 80, 0.5),
-    0 10px 28px rgba(0, 0, 0, 0.18);
-}
-
 .ip__overlay {
   position: fixed;
   inset: 0;
   z-index: 200;
-  background: rgba(6, 14, 8, 0.62);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  background: rgba(11, 18, 32, 0.45);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: max(20px, env(safe-area-inset-top)) 20px max(20px, env(safe-area-inset-bottom));
   animation: ip-overlay-in 200ms ease-out both;
 }
-@keyframes ip-overlay-in {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
+@keyframes ip-overlay-in { from { opacity: 0; } to { opacity: 1; } }
 
-/* Panel: dark card with a subtle Zitouna-green inner glow + hairline accent. */
+.ip__overlay--receipt { z-index: 250; }
+.ip__overlay--plan-detail { z-index: 200; }
+
 .ip__modal {
   width: 100%;
-  max-width: 440px;
-  background: linear-gradient(180deg, #1a331d 0%, #162917 100%);
-  border: 1px solid rgba(168, 204, 80, 0.18);
-  border-radius: 20px;
+  max-width: 460px;
+  background: var(--ip-surface);
+  border: 1px solid var(--ip-hair);
+  border-radius: 22px;
   box-shadow:
-    0 30px 80px rgba(0, 0, 0, 0.55),
-    0 0 0 1px rgba(0, 0, 0, 0.25),
-    0 0 60px rgba(168, 204, 80, 0.06) inset;
-  color: var(--ip-900);
+    0 24px 72px rgba(17, 24, 39, 0.22),
+    0 1px 0 rgba(17, 24, 39, 0.04);
+  color: var(--ip-ink);
   overflow: hidden;
   max-height: calc(100dvh - 40px);
   display: flex;
   flex-direction: column;
   animation: ip-popup 280ms cubic-bezier(0.16, 1, 0.3, 1) both;
-  transform-origin: center;
 }
 @keyframes ip-popup {
-  from { opacity: 0; transform: translateY(14px) scale(0.96); filter: blur(3px); }
-  to   { opacity: 1; transform: none; filter: blur(0); }
+  from { opacity: 0; transform: translateY(14px) scale(0.96); }
+  to   { opacity: 1; transform: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   .ip__overlay, .ip__modal { animation: none; }
 }
 
-/* Header: title + accent subtitle + pill close button. */
+.ip__modal--plan-detail {
+  max-width: min(560px, 100%);
+  max-height: min(92dvh, 920px);
+}
+
+.ip__modal-body--plan-detail { gap: 14px; padding-top: 14px; }
+.ip__modal-header--plan-detail .ip__modal-title { font-size: 18px; line-height: 1.25; }
+.ip__detail-hint--modal { margin: 0; }
+.ip-metrics--in-modal { margin-top: 0; }
+
+/* Header */
 .ip__modal-header {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  gap: 10px;
-  padding: 18px 20px 14px;
+  gap: 12px;
+  padding: 18px 22px 14px;
   flex-shrink: 0;
-  border-bottom: 1px solid rgba(168, 204, 80, 0.12);
-  background:
-    radial-gradient(120% 80% at 50% 0%, rgba(168, 204, 80, 0.10), transparent 60%);
+  border-bottom: 1px solid var(--ip-hair-2);
+  background: var(--ip-surface);
 }
 
 .ip__modal-title {
-  font-size: 17px;
+  font-family: 'Inter Tight', 'Inter', sans-serif;
+  font-size: 18px;
   font-weight: 700;
-  color: var(--ip-900);
+  color: var(--ip-ink);
+  letter-spacing: -0.015em;
   margin: 0;
-  letter-spacing: -0.01em;
 }
 
 .ip__modal-sub {
-  font-size: 12px;
-  color: var(--ip-500);
+  font-size: 12.5px;
+  color: var(--ip-muted);
   margin: 4px 0 0;
 }
 
@@ -1079,27 +949,24 @@
   justify-content: center;
   width: 32px;
   height: 32px;
-  border-radius: 999px;
-  background: rgba(168, 204, 80, 0.06);
-  border: 1px solid rgba(168, 204, 80, 0.18);
-  color: var(--ip-500);
-  font-size: 16px;
-  line-height: 1;
+  border-radius: 10px;
+  background: var(--ip-surface-soft);
+  border: 1px solid var(--ip-hair);
+  color: var(--ip-muted);
+  font-size: 14px;
   cursor: pointer;
-  transition: background-color 0.18s, color 0.18s, border-color 0.18s, transform 0.18s;
   flex-shrink: 0;
+  transition: background-color .15s, color .15s, border-color .15s, transform .15s;
 }
 .ip__modal-close:hover {
-  background: rgba(239, 68, 68, 0.10);
-  border-color: rgba(239, 68, 68, 0.30);
+  background: var(--ip-red-soft);
+  border-color: rgba(215, 38, 61, 0.25);
   color: var(--ip-red);
-  transform: rotate(90deg);
 }
 
-/* Body: vertical flow, generous spacing, scrolls when tall.
-   min-height: 0 is required so flex does not expand past the modal and hide the footer. */
+/* Body */
 .ip__modal-body {
-  padding: 18px 20px 8px;
+  padding: 18px 22px 8px;
   overflow-y: auto;
   flex: 1;
   min-height: 0;
@@ -1109,31 +976,18 @@
   gap: 16px;
 }
 
-/* Selected facility summary: prominent, card-like, olive accent. */
+/* Selected facility summary */
 .ip__modal-info {
-  background: linear-gradient(135deg, rgba(168, 204, 80, 0.12), rgba(168, 204, 80, 0.04));
-  border: 1px solid rgba(168, 204, 80, 0.24);
-  border-radius: 14px;
+  background: var(--ip-blue-softer);
+  border: 1px solid #DEE8FF;
+  border-radius: var(--ip-radius-md);
   padding: 14px 16px;
-  position: relative;
-  overflow: hidden;
+  color: #253B7C;
 }
-.ip__modal-info::before {
-  content: "";
-  position: absolute;
-  left: 0; top: 0; bottom: 0;
-  width: 3px;
-  background: linear-gradient(180deg, var(--ip-blue), var(--ip-blue-700));
-}
-
-.ip__modal-info--receipt {
-  display: grid;
-  gap: 4px;
-  text-align: left;
-}
+.ip__modal-info--receipt { display: grid; gap: 4px; }
 
 .ip__modal-info-kicker {
-  font-size: 10px;
+  font-size: 10.5px;
   font-weight: 700;
   color: var(--ip-blue);
   text-transform: uppercase;
@@ -1141,30 +995,29 @@
 }
 
 .ip__modal-info-main {
-  font-size: 18px;
+  font-family: 'Inter Tight', 'Inter', sans-serif;
+  font-size: 17px;
   font-weight: 700;
-  color: var(--ip-900);
-  letter-spacing: -0.01em;
+  color: var(--ip-ink);
+  letter-spacing: -0.015em;
   line-height: 1.25;
 }
 
 .ip__modal-info-meta {
-  font-size: 12px;
-  color: var(--ip-500);
+  font-size: 12.5px;
+  color: var(--ip-muted);
   margin-top: 2px;
 }
 
-/* Section label: small uppercase helper above each group. */
 .ip__upload-label {
   font-size: 11px;
-  font-weight: 700;
-  color: var(--ip-500);
+  font-weight: 600;
+  color: var(--ip-muted);
   text-transform: uppercase;
   letter-spacing: 0.08em;
   margin: 0 0 8px;
 }
 
-/* Upload buttons: two generous tappable tiles with icon + label. */
 .ip__upload-btns {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1177,75 +1030,62 @@
   justify-content: center;
   gap: 8px;
   padding: 18px 12px;
-  border: 1.5px dashed rgba(168, 204, 80, 0.28);
-  border-radius: 12px;
-  background: rgba(168, 204, 80, 0.04);
+  border: 1.5px dashed #D9DCE1;
+  border-radius: var(--ip-radius-md);
+  background: var(--ip-surface-soft);
   font-size: 13px;
   font-weight: 600;
-  color: var(--ip-600);
+  color: var(--ip-ink-2);
   cursor: pointer;
   text-align: center;
-  transition: background-color 0.18s, border-color 0.18s, color 0.18s, transform 0.18s;
+  transition: background-color .15s, border-color .15s, color .15s, transform .15s;
   user-select: none;
 }
-.ip__upload-btn:hover,
-.ip__upload-btn:focus-within {
+.ip__upload-btn:hover, .ip__upload-btn:focus-within {
   border-color: var(--ip-blue);
-  background: rgba(168, 204, 80, 0.10);
-  color: var(--ip-900);
+  background: var(--ip-blue-softer);
+  color: var(--ip-blue);
 }
 .ip__upload-btn:active { transform: scale(0.98); }
-
 .ip__upload-btn input { display: none; }
 
-/* File status pill: empty vs ready. */
 .ip__upload-status {
   padding: 12px 14px;
-  border-radius: 12px;
+  border-radius: var(--ip-radius-md);
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
-
 .ip__upload-status--ok {
-  background: rgba(52, 211, 153, 0.10);
+  background: var(--ip-green-soft);
   color: var(--ip-green);
-  border: 1px solid rgba(52, 211, 153, 0.28);
+  border: 1px solid rgba(15, 169, 104, 0.24);
 }
-
 .ip__upload-status--empty {
-  background: rgba(168, 204, 80, 0.04);
-  color: var(--ip-500);
-  border: 1px dashed rgba(168, 204, 80, 0.20);
-  font-size: 12px;
+  background: var(--ip-surface-soft);
+  color: var(--ip-muted);
+  border: 1px dashed var(--ip-hair);
+  font-size: 12.5px;
   text-align: center;
 }
-
 .ip__upload-status-title {
-  font-size: 10px;
+  font-size: 10.5px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  opacity: 0.85;
 }
-
 .ip__upload-status-name {
   font-size: 13px;
-  font-weight: 700;
-  color: var(--ip-900);
+  font-weight: 600;
+  color: var(--ip-ink);
   word-break: break-word;
 }
 
-/* Image preview: framed thumbnail, centered, no harsh edges. */
 .ip__upload-preview {
-  border-radius: 12px;
+  border-radius: var(--ip-radius-md);
   overflow: hidden;
-  border: 1px solid rgba(168, 204, 80, 0.18);
-  background:
-    linear-gradient(45deg, rgba(0,0,0,0.15) 25%, transparent 25%, transparent 75%, rgba(0,0,0,0.15) 75%),
-    linear-gradient(45deg, rgba(0,0,0,0.15) 25%, transparent 25%, transparent 75%, rgba(0,0,0,0.15) 75%) 8px 8px,
-    var(--ip-bg);
-  background-size: 16px 16px;
+  border: 1px solid var(--ip-hair);
+  background: var(--ip-surface-soft);
 }
 .ip__upload-preview img {
   width: 100%;
@@ -1255,213 +1095,165 @@
 }
 
 .ip__upload-size {
-  font-size: 11px;
-  color: var(--ip-500);
+  font-size: 11.5px;
+  color: var(--ip-muted);
   margin-top: -8px;
 }
 
 .ip__upload-error {
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 600;
   color: var(--ip-red);
-  background: rgba(248, 113, 113, 0.10);
-  border: 1px solid rgba(248, 113, 113, 0.28);
+  background: var(--ip-red-soft);
+  border: 1px solid rgba(215, 38, 61, 0.22);
   border-radius: 10px;
   padding: 10px 12px;
 }
 
-/* Note textarea: dark input with green focus ring. */
 .ip__upload-note {
   width: 100%;
   box-sizing: border-box;
   padding: 12px 14px;
-  border: 1px solid rgba(168, 204, 80, 0.18);
-  border-radius: 12px;
-  background: rgba(0, 0, 0, 0.20);
-  font-size: 13px;
-  color: var(--ip-900);
+  border: 1px solid var(--ip-hair);
+  border-radius: var(--ip-radius-md);
+  background: var(--ip-surface);
+  font-size: 13.5px;
+  color: var(--ip-ink);
   outline: none;
   resize: vertical;
-  min-height: 64px;
+  min-height: 72px;
   font-family: inherit;
-  transition: border-color 0.15s, box-shadow 0.15s, background-color 0.15s;
+  transition: border-color .15s, box-shadow .15s;
 }
 .ip__upload-note:focus {
   border-color: var(--ip-blue);
-  background: rgba(0, 0, 0, 0.25);
-  box-shadow: 0 0 0 3px rgba(168, 204, 80, 0.18);
+  box-shadow: 0 0 0 3px rgba(30, 92, 255, 0.14);
 }
-.ip__upload-note::placeholder { color: var(--ip-400); }
+.ip__upload-note::placeholder { color: var(--ip-faint); }
 
-/* Footer: pinned below scrollable body — always visible above home indicator / keyboard margin. */
+/* Footer */
 .ip__modal-footer {
   display: flex;
   gap: 10px;
   flex-shrink: 0;
-  padding: 14px 20px max(18px, env(safe-area-inset-bottom));
-  border-top: 1px solid rgba(168, 204, 80, 0.18);
-  background: linear-gradient(180deg, rgba(10, 18, 12, 0.92) 0%, rgba(8, 14, 9, 0.98) 100%);
-  box-shadow: 0 -12px 32px rgba(0, 0, 0, 0.45);
+  padding: 14px 22px max(18px, env(safe-area-inset-bottom));
+  border-top: 1px solid var(--ip-hair-2);
+  background: var(--ip-surface);
 }
 
 .ip__modal-cancel {
   flex: 1;
   min-width: 0;
-  padding: 14px 12px;
-  border-radius: 14px;
-  font-size: 13px;
+  height: 46px;
+  padding: 0 14px;
+  border-radius: 12px;
+  font-size: 13.5px;
   font-weight: 600;
   cursor: pointer;
-  background: rgba(168, 204, 80, 0.06);
-  border: 1px solid rgba(168, 204, 80, 0.22);
-  color: var(--ip-600);
-  transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+  background: var(--ip-surface);
+  border: 1px solid var(--ip-hair);
+  color: var(--ip-ink);
+  transition: background-color .15s, border-color .15s;
 }
-.ip__modal-cancel:hover {
-  background: rgba(168, 204, 80, 0.12);
-  color: var(--ip-900);
-}
+.ip__modal-cancel:hover { background: var(--ip-surface-soft); border-color: #D9DCE1; }
 
 .ip__modal-submit {
   flex: 2;
   min-width: 0;
-  padding: 14px 14px;
-  border-radius: 14px;
+  height: 46px;
+  padding: 0 16px;
+  border-radius: 12px;
   font-size: 14px;
-  font-weight: 800;
+  font-weight: 700;
   cursor: pointer;
-  border: none;
-  background: linear-gradient(135deg, #c4e063 0%, #84b21e 48%, #6a9a12 100%);
-  color: #0f1a08;
-  box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.22) inset,
-    0 8px 22px rgba(0, 0, 0, 0.35);
-  transition: transform 0.15s, box-shadow 0.15s, filter 0.15s;
-  letter-spacing: 0.02em;
+  border: 0;
+  background: var(--ip-blue);
+  color: #fff;
+  letter-spacing: 0.01em;
+  transition: background-color .15s, transform .1s;
 }
-.ip__modal-submit:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.28) inset,
-    0 12px 28px rgba(0, 0, 0, 0.4);
-  filter: brightness(1.04);
-}
-.ip__modal-submit:active:not(:disabled) { transform: translateY(0); }
+.ip__modal-submit:hover:not(:disabled) { background: var(--ip-blue-600); }
+.ip__modal-submit:active:not(:disabled) { transform: translateY(1px); }
 .ip__modal-submit:disabled {
   opacity: 1;
   cursor: not-allowed;
-  transform: none;
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--ip-500);
-  border: 1px dashed rgba(168, 204, 80, 0.28);
-  box-shadow: none;
-  filter: none;
-}
-.ip__modal-submit:disabled:hover {
-  filter: none;
-  transform: none;
+  background: var(--ip-hair-2);
+  color: var(--ip-faint);
 }
 
-/* Mobile: full-bleed modal, stacked upload buttons, larger touch targets. */
-@media (max-width: 480px) {
+/* Mobile modal — bottom sheet */
+@media (max-width: 520px) {
   .ip__overlay {
     padding: 12px 12px max(12px, env(safe-area-inset-bottom));
     align-items: flex-end;
   }
   .ip__modal {
     max-width: none;
-    border-radius: 20px 20px 16px 16px;
+    border-radius: 22px 22px 14px 14px;
     max-height: min(92dvh, calc(100dvh - 16px));
   }
-  .ip__modal-header { padding: 16px 16px 12px; }
-  .ip__modal-body { padding: 16px 16px 6px; gap: 14px; }
+  .ip__modal-header { padding: 16px 18px 12px; }
+  .ip__modal-body { padding: 16px 18px 6px; gap: 14px; }
   .ip__modal-footer {
     flex-direction: column;
     gap: 10px;
-    padding: 12px 16px max(20px, env(safe-area-inset-bottom));
+    padding: 12px 18px max(18px, env(safe-area-inset-bottom));
   }
-  .ip__modal-cancel,
-  .ip__modal-submit {
+  .ip__modal-cancel, .ip__modal-submit {
     flex: none;
     width: 100%;
-    padding: 16px 18px;
-    font-size: 15px;
+    height: 48px;
+    font-size: 14.5px;
   }
   .ip__upload-btns { grid-template-columns: 1fr; }
-  .ip__upload-btn { padding: 16px; }
-  .ip__modal-info-main { font-size: 17px; }
-}
-
-/* ── Responsive (non-hero rules — hero has its own breakpoints above) ── */
-@media (max-width: 400px) {
-  .ip { padding: 0 10px 90px; }
-  .ip__pay-card { padding: 10px; }
-}
-
-@media (min-width: 481px) {
-  .ip:not(.ip--embedded) { max-width: 520px; padding: 0 20px 100px; }
 }
 
 /* ══════════════════════════════════════════════════════════════
-   Échéances metric grid — dark-themed tiles for embedded detail
-   (used in /dashboard installment detail block)
+   Dashboard-embedded metric tiles — light restyle
+   (used in /dashboard installment detail modal)
    ══════════════════════════════════════════════════════════════ */
 .ip-metrics {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  gap: 10px;
 }
-.ip-metrics--embedded { margin-top: 12px; }
+.ip-metrics--embedded { margin-top: 10px; }
 
 .ip-metric {
   padding: 12px 14px;
-  border-radius: 12px;
-  background: rgba(22, 41, 23, 0.92);
-  border: 1px solid rgba(42, 75, 44, 0.85);
-  border-left-width: 3px;
-  border-left-style: solid;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.24);
+  border-radius: var(--ip-radius-md);
+  background: var(--ip-surface);
+  border: 1px solid var(--ip-hair);
+  box-shadow: var(--ip-shadow-card);
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
 }
+
 .ip-metric__label {
-  font-size: 9px;
-  font-weight: 800;
+  font-size: 10.5px;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: #8da68e;
+  letter-spacing: 0.08em;
+  color: var(--ip-muted);
 }
+
 .ip-metric__value {
-  font-size: 15px;
-  font-weight: 800;
-  color: #d7e5d8;
+  font-family: 'Inter Tight', 'Inter', sans-serif;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--ip-ink);
+  font-variant-numeric: tabular-nums;
 }
+
 .ip-metric__hint {
-  font-size: 10px;
-  color: #8da68e;
+  font-size: 11.5px;
+  color: var(--ip-muted);
+  line-height: 1.35;
 }
 
-.ip-metric--ok {
-  border-color: rgba(134, 239, 172, 0.30);
-  border-left-color: #86efac;
-}
-.ip-metric--ok .ip-metric__label { color: #86efac; }
-
-.ip-metric--review {
-  border-color: rgba(125, 211, 252, 0.30);
-  border-left-color: #7dd3fc;
-}
-.ip-metric--review .ip-metric__label { color: #7dd3fc; }
-
-.ip-metric--bad {
-  border-color: rgba(252, 165, 165, 0.30);
-  border-left-color: #fca5a5;
-}
-.ip-metric--bad .ip-metric__label { color: #fca5a5; }
-
-.ip-metric--neutral {
-  border-color: rgba(168, 204, 80, 0.28);
-  border-left-color: #a8cc50;
-}
-.ip-metric--neutral .ip-metric__label { color: #a8cc50; }
+.ip-metric--ok      .ip-metric__value { color: var(--ip-green); }
+.ip-metric--review  .ip-metric__value { color: var(--ip-amber); }
+.ip-metric--bad     .ip-metric__value { color: var(--ip-faint); }
+.ip-metric--neutral .ip-metric__value { color: var(--ip-blue); }

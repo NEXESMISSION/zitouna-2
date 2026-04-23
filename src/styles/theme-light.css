@@ -1,0 +1,3692 @@
+/* ══════════════════════════════════════════════════════════════════════
+   theme-light.css — Light-mode overrides for the public pages, auth
+   pages, and the customer dashboard.
+
+   The baseline (dark) design stays untouched: it lives in hundreds of
+   selectors across App.css, dashboard-page.css, etc. and keeps its
+   signature green olive palette. This file only activates when the user
+   flips the header toggle, at which point every selector below — all
+   scoped under html[data-theme="light"] — swaps the surface to a clean
+   white/blue canvas inspired by the admin design system (ZADM):
+
+       primary  #2563eb     bg        #f8fafc
+       primary-600 #1d4ed8  surface   #ffffff
+       accent   #0ea5e9     surface-2 #f1f5f9
+       text     #0f172a     border    #e2e8f0
+       dim      #475569     border-2  #cbd5e1
+       muted    #94a3b8
+
+   Covers:
+     - Top bar (shared shell across customer surfaces)
+     - Public pages: /browse, /project, /plot, visit success, landing
+     - Customer dashboard: /dashboard, /installments (.inv-* family)
+     - Auth pages: /login, /register, /forgot-password, /reset-password
+
+   Admin (/admin/*) keeps its own ZADM stylesheet and is not touched.
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* ── Shared light-palette tokens ──────────────────────────────────── */
+html[data-theme="light"],
+body[data-theme="light"] {
+  --zb-primary: #2563eb;
+  --zb-primary-600: #1d4ed8;
+  --zb-primary-700: #1e40af;
+  --zb-primary-50: #eff6ff;
+  --zb-primary-100: #dbeafe;
+  --zb-accent: #0ea5e9;
+
+  --zb-bg: #f8fafc;
+  --zb-bg-2: #f1f5f9;
+  --zb-surface: #ffffff;
+  --zb-surface-2: #f8fafc;
+  --zb-surface-3: #eef2f7;
+
+  --zb-border: #e2e8f0;
+  --zb-border-strong: #cbd5e1;
+
+  --zb-text: #0f172a;
+  --zb-text-dim: #475569;
+  --zb-text-muted: #94a3b8;
+
+  --zb-success: #059669;
+  --zb-success-50: #ecfdf5;
+  --zb-warn: #475569;
+  --zb-danger: #dc2626;
+
+  --zb-shadow-xs: 0 1px 2px rgba(15, 23, 42, 0.04);
+  --zb-shadow-sm: 0 2px 6px rgba(15, 23, 42, 0.06);
+  --zb-shadow-md: 0 10px 24px rgba(15, 23, 42, 0.08);
+  --zb-shadow-lg: 0 18px 40px rgba(15, 23, 42, 0.12);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   BASE CANVAS
+   ══════════════════════════════════════════════════════════════════ */
+html[data-theme="light"] body {
+  background: var(--zb-bg);
+  color: var(--zb-text);
+}
+
+html[data-theme="light"] .screen--app {
+  background:
+    radial-gradient(900px 520px at 8% -12%, rgba(37, 99, 235, 0.08), transparent 48%),
+    radial-gradient(760px 420px at 95% 115%, rgba(14, 165, 233, 0.08), transparent 46%),
+    linear-gradient(180deg, #f8fafc 0%, #f1f5f9 60%, #f8fafc 100%);
+  color: var(--zb-text);
+}
+
+html[data-theme="light"] .screen--login {
+  background:
+    radial-gradient(1200px 700px at 12% -14%, rgba(37, 99, 235, 0.14), transparent 50%),
+    radial-gradient(900px 620px at 102% 118%, rgba(14, 165, 233, 0.14), transparent 48%),
+    linear-gradient(180deg, #f8fafc 0%, #eef2f7 60%, #f8fafc 100%);
+}
+html[data-theme="light"] .screen--login::before { opacity: 0.25; }
+html[data-theme="light"] .screen--login::after { opacity: 0.12; mix-blend-mode: multiply; }
+
+/* Browse hero orbs reshaped to blue */
+html[data-theme="light"] .browse-bg-orb--1 {
+  background: radial-gradient(circle, rgba(37, 99, 235, 0.25) 0%, transparent 70%);
+}
+html[data-theme="light"] .browse-bg-orb--2 {
+  background: radial-gradient(circle, rgba(14, 165, 233, 0.22) 0%, transparent 70%);
+}
+html[data-theme="light"] .browse-bg-orb--3 {
+  background: radial-gradient(circle, rgba(99, 102, 241, 0.16) 0%, transparent 70%);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   TOP BAR
+   ══════════════════════════════════════════════════════════════════ */
+/* NOTE: `backdrop-filter` on .top-bar-wrap used to produce a frosted-glass
+   header, but ANY `filter`/`backdrop-filter` creates a new containing
+   block — which hijacks every `position: fixed` descendant. The
+   NotificationsMenu overlay (fixed, inset:0) then anchored to this thin
+   top-bar strip instead of the viewport, so the notifications panel
+   rendered squashed into the header band. Solid background + zero
+   filters restores proper modal placement. */
+html[data-theme="light"] .top-bar-wrap {
+  border-bottom: 1px solid var(--zb-border);
+  background: #ffffff;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+html[data-theme="light"] .company {
+  color: var(--zb-text);
+  font-weight: 700;
+}
+html[data-theme="light"] .company-subtitle {
+  color: var(--zb-text-muted);
+}
+
+html[data-theme="light"] .top-nav-link {
+  color: var(--zb-text-dim);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-weight: 500;
+}
+html[data-theme="light"] .top-nav-link:hover {
+  color: var(--zb-text);
+  background: var(--zb-primary-50);
+}
+html[data-theme="light"] .top-nav-link.active {
+  color: var(--zb-primary-700);
+  background: var(--zb-primary-50);
+  border-color: rgba(37, 99, 235, 0.35);
+}
+
+html[data-theme="light"] .icon-action {
+  border: 1px solid var(--zb-border);
+  background: #ffffff;
+  color: var(--zb-text-dim);
+  box-shadow: var(--zb-shadow-xs);
+}
+html[data-theme="light"] .icon-action:hover {
+  background: var(--zb-primary-50);
+  color: var(--zb-primary-700);
+  border-color: rgba(37, 99, 235, 0.45);
+  box-shadow: var(--zb-shadow-sm);
+}
+
+html[data-theme="light"] .top-admin-switch {
+  border-color: rgba(37, 99, 235, 0.4);
+  color: var(--zb-primary-700);
+  background: var(--zb-primary-50);
+}
+html[data-theme="light"] .top-admin-switch:hover {
+  background: var(--zb-primary-100);
+  color: var(--zb-primary-700);
+}
+
+html[data-theme="light"] .top-sell-switch {
+  border-color: rgba(5, 150, 105, 0.4);
+  color: var(--zb-success);
+  background: var(--zb-success-50);
+}
+html[data-theme="light"] .top-sell-switch:hover {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+html[data-theme="light"] .top-alert-btn.active {
+  color: #6d47e0;
+  border-color: rgba(109, 71, 224, 0.5);
+  background: #f5f3ff;
+}
+
+html[data-theme="light"] .top-alert-badge {
+  border-color: rgba(255, 200, 200, 0.7);
+  box-shadow: 0 4px 10px rgba(220, 38, 38, 0.28);
+}
+
+html[data-theme="light"] .top-theme-toggle--light {
+  border-color: rgba(37, 99, 235, 0.5);
+  color: var(--zb-primary-700);
+  background: var(--zb-primary-50);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   BROWSE PAGE
+   ══════════════════════════════════════════════════════════════════ */
+html[data-theme="light"] .browse-greeting-hello {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .browse-greeting-sub {
+  color: var(--zb-text-dim);
+}
+
+html[data-theme="light"] .browse-overview-map {
+  border: 1px solid var(--zb-border);
+  background: var(--zb-surface-3);
+  box-shadow: var(--zb-shadow-sm);
+}
+html[data-theme="light"] .browse-overview-map iframe {
+  filter: none;
+}
+html[data-theme="light"] .browse-map-pin {
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--zb-primary-700);
+  border: 1px solid rgba(37, 99, 235, 0.35);
+}
+html[data-theme="light"] .browse-map-pin:hover {
+  background: #ffffff;
+  border-color: rgba(37, 99, 235, 0.6);
+}
+
+html[data-theme="light"] .browse-search-bar {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  color: var(--zb-text-dim);
+  box-shadow: var(--zb-shadow-xs);
+}
+html[data-theme="light"] .browse-search-bar:focus-within {
+  border-color: rgba(37, 99, 235, 0.55);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
+}
+html[data-theme="light"] .search-input {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .search-input::placeholder {
+  color: var(--zb-text-muted);
+}
+
+/* Project cards (the most-seen grid on /browse) */
+html[data-theme="light"] .proj-card {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  box-shadow: var(--zb-shadow-sm);
+  color: var(--zb-text);
+}
+html[data-theme="light"] .proj-card:hover {
+  background: #ffffff;
+  border-color: rgba(37, 99, 235, 0.45);
+  box-shadow: var(--zb-shadow-md);
+}
+html[data-theme="light"] .proj-card-header {
+  border-bottom: 1px solid var(--zb-border);
+}
+html[data-theme="light"] .proj-card-title {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .proj-card-region {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .proj-card-map {
+  background: var(--zb-surface-3);
+}
+html[data-theme="light"] .proj-card-map-icon {
+  color: var(--zb-primary);
+  filter: drop-shadow(0 0 2px rgba(37, 99, 235, 0.28));
+}
+html[data-theme="light"] .proj-card-badge {
+  background: rgba(255, 255, 255, 0.95);
+  color: var(--zb-primary-700);
+  border: 1px solid rgba(37, 99, 235, 0.4);
+}
+html[data-theme="light"] .proj-stat-label {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .proj-card-body strong,
+html[data-theme="light"] .proj-card-stats strong {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .proj-card-cta {
+  background: var(--zb-primary);
+  color: #ffffff;
+  border-color: var(--zb-primary-600);
+}
+html[data-theme="light"] .proj-card-cta:hover {
+  background: var(--zb-primary-600);
+}
+html[data-theme="light"] .proj-card-cta--gold {
+  background: var(--zb-primary);
+  color: #ffffff;
+  border-color: var(--zb-primary-600);
+  font-weight: 600;
+}
+html[data-theme="light"] .proj-card-cta--gold:hover {
+  background: var(--zb-primary-600);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   PROJECT / PLOT detail (public)
+   ══════════════════════════════════════════════════════════════════ */
+html[data-theme="light"] .detail-nav .back-btn,
+html[data-theme="light"] .back-btn {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  color: var(--zb-text-dim);
+  box-shadow: var(--zb-shadow-xs);
+}
+html[data-theme="light"] .back-btn:hover {
+  background: var(--zb-primary-50);
+  color: var(--zb-primary-700);
+  border-color: rgba(37, 99, 235, 0.4);
+}
+html[data-theme="light"] .detail-breadcrumb {
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .detail-map-wrap {
+  background: transparent;
+}
+html[data-theme="light"] .detail-map-label {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .detail-map {
+  background: var(--zb-surface-3);
+  border: 1px solid var(--zb-border);
+  box-shadow: var(--zb-shadow-sm);
+}
+html[data-theme="light"] .detail-map iframe {
+  filter: none;
+}
+
+html[data-theme="light"] .plots-header {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .plots-title {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .plots-count {
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .plot-search-wrap {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  color: var(--zb-text-dim);
+  box-shadow: var(--zb-shadow-xs);
+}
+html[data-theme="light"] .plot-search-wrap:focus-within {
+  border-color: rgba(37, 99, 235, 0.55);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
+}
+html[data-theme="light"] .plot-search-input {
+  background: transparent;
+  color: var(--zb-text);
+}
+html[data-theme="light"] .plot-search-input::placeholder {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .plot-search-clear {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .plot-search-clear:hover {
+  color: var(--zb-text);
+}
+
+html[data-theme="light"] .plot-mini-card {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  box-shadow: var(--zb-shadow-sm);
+  color: var(--zb-text);
+}
+html[data-theme="light"] .plot-mini-card:hover {
+  border-color: rgba(37, 99, 235, 0.45);
+  box-shadow: var(--zb-shadow-md);
+}
+html[data-theme="light"] .plot-mini-card__head {
+  border-bottom: 1px solid var(--zb-border);
+  color: var(--zb-text);
+}
+html[data-theme="light"] .plot-mini-card__head-lbl {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .plot-mini-card__head-num {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .plot-mini-card__k {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .plot-mini-card__v,
+html[data-theme="light"] .plot-mini-card__trees {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .plot-mini-card__total {
+  border-top: 1px dashed var(--zb-border);
+}
+html[data-theme="light"] .plot-mini-card__total-lbl {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .plot-mini-card__total-num {
+  color: var(--zb-primary-700);
+  font-weight: 700;
+}
+html[data-theme="light"] .plot-mini-card__rev {
+  color: var(--zb-success);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   CUSTOMER DASHBOARD (.inv-*)
+   Full make-over so surfaces, text, CTAs all reflect the blue palette.
+   ══════════════════════════════════════════════════════════════════ */
+html[data-theme="light"] .inv-dash {
+  color: var(--zb-text);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+/* Header card */
+html[data-theme="light"] .inv-header {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  box-shadow: var(--zb-shadow-sm);
+}
+html[data-theme="light"] .inv-header__avatar {
+  border-color: var(--zb-border);
+}
+html[data-theme="light"] .inv-header__name {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .inv-header__subtitle {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .inv-header__profile-btn {
+  border: 1px solid rgba(37, 99, 235, 0.4);
+  background: var(--zb-primary-50);
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .inv-header__profile-btn:hover {
+  border-color: rgba(37, 99, 235, 0.6);
+  background: var(--zb-primary-100);
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .inv-header__icon-btn {
+  border: 1px solid var(--zb-border);
+  background: #ffffff;
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .inv-header__icon-btn:hover {
+  color: var(--zb-primary-700);
+  border-color: rgba(37, 99, 235, 0.45);
+}
+html[data-theme="light"] .inv-header__icon-btn--admin {
+  border: 1px solid rgba(37, 99, 235, 0.35);
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .inv-header__icon-btn--admin:hover {
+  border-color: rgba(37, 99, 235, 0.55);
+  color: var(--zb-primary);
+}
+html[data-theme="light"] .inv-header__cta {
+  background: var(--zb-primary);
+  color: #ffffff;
+}
+html[data-theme="light"] .inv-header__cta:hover {
+  background: var(--zb-primary-600);
+  filter: none;
+}
+html[data-theme="light"] .inv-header__seller-btn {
+  border: 1px solid rgba(37, 99, 235, 0.35);
+  background: transparent;
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .inv-header__seller-btn:hover {
+  background: var(--zb-primary-50);
+}
+html[data-theme="light"] .inv-header__seller-badge {
+  border: 1px solid rgba(37, 99, 235, 0.35);
+  background: var(--zb-primary-50);
+  color: var(--zb-primary-700);
+}
+
+/* Profile panel */
+html[data-theme="light"] .inv-profile {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  box-shadow: var(--zb-shadow-sm);
+}
+html[data-theme="light"] .inv-profile__title {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .inv-profile__close {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .inv-profile__close:hover {
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .inv-profile__label {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .inv-profile__input {
+  border: 1px solid var(--zb-border);
+  background: #ffffff;
+  color: var(--zb-text);
+}
+html[data-theme="light"] .inv-profile__input:focus {
+  border-color: var(--zb-primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
+}
+html[data-theme="light"] .inv-profile__input--locked {
+  color: var(--zb-text-muted);
+  background: var(--zb-surface-2);
+}
+html[data-theme="light"] .inv-profile__lock {
+  color: var(--zb-text-muted);
+  opacity: 0.7;
+}
+html[data-theme="light"] .inv-profile__msg {
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .inv-profile__save {
+  background: var(--zb-primary);
+  color: #ffffff;
+}
+html[data-theme="light"] .inv-profile__save:hover {
+  background: var(--zb-primary-600);
+}
+html[data-theme="light"] .inv-profile__phone-change {
+  border-top: 1px solid var(--zb-border);
+}
+html[data-theme="light"] .inv-profile__phone-change-title {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .inv-profile__phone-change-toggle {
+  background: var(--zb-primary-50);
+  border: 1px solid rgba(37, 99, 235, 0.35);
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .inv-profile__phone-change-form {
+  background: var(--zb-surface-2);
+  border: 1px solid var(--zb-border);
+}
+html[data-theme="light"] .inv-profile__phone-change-cancel {
+  background: transparent;
+  color: var(--zb-text-dim);
+  border: 1px solid var(--zb-border-strong);
+}
+html[data-theme="light"] .inv-profile__phone-change-submit {
+  background: var(--zb-primary);
+  color: #ffffff;
+}
+html[data-theme="light"] .inv-profile__phone-change-status--pending {
+  background: #f1f5f9;
+  border-color: #cbd5e1;
+  color: #475569;
+}
+html[data-theme="light"] .inv-profile__phone-change-status--approved {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+  color: #065f46;
+}
+html[data-theme="light"] .inv-profile__phone-change-status--rejected {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #991b1b;
+}
+
+/* Profile modal overlay — brighter backdrop for light mode so the card
+   reads against a slate veil instead of the dark olive default. */
+html[data-theme="light"] .inv-profile-overlay {
+  background: rgba(15, 23, 42, 0.42);
+}
+
+/* ── Phone-change idle card ─────────────────────────────────────── */
+html[data-theme="light"] .inv-profile__pc-card {
+  background: var(--zb-surface-2);
+  border: 1px solid var(--zb-border);
+  box-shadow: var(--zb-shadow-xs);
+}
+html[data-theme="light"] .inv-profile__pc-card-icon {
+  background: var(--zb-primary-50);
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .inv-profile__pc-card-title {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .inv-profile__pc-card-sub {
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .inv-profile__pc-card-cta {
+  background: var(--zb-primary);
+  color: #ffffff;
+  border: 1px solid var(--zb-primary);
+  box-shadow: var(--zb-shadow-xs);
+}
+html[data-theme="light"] .inv-profile__pc-card-cta:hover:not(:disabled) {
+  background: var(--zb-primary-600);
+  filter: none;
+}
+html[data-theme="light"] .inv-profile__pc-card-cta:disabled {
+  background: var(--zb-surface-3);
+  color: var(--zb-text-muted);
+  border-color: var(--zb-border);
+  opacity: 1;
+}
+
+/* ── Phone-change form step ─────────────────────────────────────── */
+html[data-theme="light"] .inv-profile__pc-back {
+  background: transparent;
+  border: 1px solid var(--zb-border-strong);
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .inv-profile__pc-back:hover {
+  background: var(--zb-surface-2);
+  color: var(--zb-text);
+}
+html[data-theme="light"] .inv-profile__pc-step-title {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .inv-profile__pc-current {
+  background: var(--zb-surface-2);
+  border: 1px dashed var(--zb-border-strong);
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .inv-profile__pc-current strong {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .inv-profile__pc-preview {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .inv-profile__pc-preview strong {
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .inv-profile__msg--err {
+  color: var(--zb-danger);
+}
+
+/* ── Phone-change success step ──────────────────────────────────── */
+html[data-theme="light"] .inv-profile__pc-success-check {
+  background: var(--zb-success-50);
+  color: var(--zb-success);
+  border: 2px solid #a7f3d0;
+}
+html[data-theme="light"] .inv-profile__pc-success-title {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .inv-profile__pc-success-desc {
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .inv-profile__pc-success-summary {
+  background: var(--zb-surface-2);
+  border: 1px solid var(--zb-border);
+}
+html[data-theme="light"] .inv-profile__pc-success-summary span {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .inv-profile__pc-success-summary strong {
+  color: var(--zb-text);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   DASHBOARD — remaining light-mode fixes
+   Classes in dashboard-page.css that set hardcoded dark olive colors
+   still bled through when the container was white. This block patches
+   the offenders top-down: diagnostic table, wallet loading, forecast
+   details, ledger meta, payout modal, footer hover.
+   ══════════════════════════════════════════════════════════════════ */
+
+/* ---- Diagnostic inspector (collapsible in wallet fold) ---------- */
+html[data-theme="light"] .inv-diagnostic {
+  color: var(--zb-text-dim);
+  opacity: 1;
+}
+html[data-theme="light"] .inv-diagnostic__body {
+  background: var(--zb-surface-2);
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .inv-diagnostic__hint { color: var(--zb-text-dim); }
+html[data-theme="light"] .inv-diagnostic__mono { color: var(--zb-text); }
+html[data-theme="light"] .inv-diagnostic__head-row {
+  color: var(--zb-text-muted);
+  opacity: 1;
+}
+html[data-theme="light"] .inv-diagnostic__th,
+html[data-theme="light"] .inv-diagnostic__td {
+  color: var(--zb-text-dim);
+  border-bottom: 1px dashed var(--zb-border);
+}
+html[data-theme="light"] .inv-diagnostic__td--mono { color: var(--zb-text); }
+
+/* ---- Wallet hero & stats (background overridden but inner text
+         stayed olive-on-white) ------------------------------------ */
+html[data-theme="light"] .inv-wallet__hero {
+  background: var(--zb-surface-2);
+  border: 1px solid var(--zb-border);
+}
+html[data-theme="light"] .inv-wallet__hero-amount { color: var(--zb-primary-700); }
+html[data-theme="light"] .inv-wallet__hero-currency { color: var(--zb-text-muted); }
+html[data-theme="light"] .inv-wallet__stat {
+  background: var(--zb-surface-2);
+  border: 1px solid var(--zb-border);
+}
+
+/* ---- Wallet loading strip --------------------------------------- */
+html[data-theme="light"] .inv-wallet__spinner {
+  border-color: rgba(37, 99, 235, 0.18);
+  border-top-color: var(--zb-primary);
+}
+html[data-theme="light"] .inv-wallet__loading-title { color: var(--zb-text-dim); }
+html[data-theme="light"] .inv-wallet__loading-dots .inv-wallet__dot { background: var(--zb-primary); }
+html[data-theme="light"] .inv-wallet__loading-wrap {
+  background: var(--zb-surface-2);
+  border: 1px solid var(--zb-border);
+  border-radius: 10px;
+}
+html[data-theme="light"] .inv-wallet__loading-shimmer::before {
+  background: linear-gradient(90deg, transparent, rgba(37, 99, 235, 0.35), transparent);
+}
+
+/* ---- Wallet pill / export / fold summary ------------------------ */
+html[data-theme="light"] .inv-wallet__pill {
+  background: var(--zb-primary-50);
+  border: 1px solid var(--zb-primary-100);
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .inv-wallet__fold-summary { color: var(--zb-primary-700); }
+html[data-theme="light"] .inv-wallet__fold[open] .inv-wallet__fold-summary {
+  border-bottom: 1px solid var(--zb-border);
+}
+
+/* ---- Wallet alerts (keep semantic intent, swap palette) --------- */
+html[data-theme="light"] .inv-wallet__alert--error {
+  background: #fef2f2; border-color: #fecaca; color: #991b1b;
+}
+html[data-theme="light"] .inv-wallet__alert--warn {
+  background: #f1f5f9; border-color: #cbd5e1; color: #475569;
+}
+html[data-theme="light"] .inv-wallet__alert--verify {
+  background: var(--zb-primary-50); border-color: var(--zb-primary-100); color: var(--zb-primary-700);
+}
+
+/* ---- Forecast widget -------------------------------------------- */
+html[data-theme="light"] .inv-forecast {
+  background: var(--zb-surface-2);
+  border: 1px solid var(--zb-border);
+  color: var(--zb-text);
+}
+html[data-theme="light"] .inv-forecast__kicker { color: var(--zb-primary-700); }
+html[data-theme="light"] .inv-forecast__title { color: var(--zb-text); }
+html[data-theme="light"] .inv-forecast__lead { color: var(--zb-text-dim); }
+html[data-theme="light"] .inv-forecast__lead strong { color: var(--zb-text); }
+html[data-theme="light"] .inv-forecast__cell {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+}
+html[data-theme="light"] .inv-forecast__lbl { color: var(--zb-text-muted); }
+html[data-theme="light"] .inv-forecast__val { color: var(--zb-text); }
+html[data-theme="light"] .inv-forecast__legend { color: var(--zb-text-muted); }
+html[data-theme="light"] .inv-forecast__total { color: var(--zb-primary-700) !important; }
+
+/* ---- Ledger card surface & meta --------------------------------- */
+html[data-theme="light"] .inv-ledger__row {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  box-shadow: var(--zb-shadow-xs);
+}
+html[data-theme="light"] .inv-ledger__amount small { color: var(--zb-text-muted); }
+html[data-theme="light"] .inv-ledger__section-title {
+  color: var(--zb-text-muted);
+  border-bottom: 1px solid var(--zb-border);
+}
+html[data-theme="light"] .inv-ledger__story { color: var(--zb-text); }
+html[data-theme="light"] .inv-ledger__story strong { color: var(--zb-text); }
+
+/* ---- Payout confirmation modal ---------------------------------- */
+html[data-theme="light"] .inv-payout__modal {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  color: var(--zb-text);
+  box-shadow: var(--zb-shadow-lg);
+}
+html[data-theme="light"] .inv-payout__head {
+  border-bottom: 1px solid var(--zb-border);
+}
+html[data-theme="light"] .inv-payout__title { color: var(--zb-text); }
+html[data-theme="light"] .inv-payout__sub { color: var(--zb-text-dim); }
+html[data-theme="light"] .inv-payout__amount {
+  background: var(--zb-primary-50);
+  border: 1px solid var(--zb-primary-100);
+}
+html[data-theme="light"] .inv-payout__amount-lbl { color: var(--zb-primary-700); }
+html[data-theme="light"] .inv-payout__amount-val { color: var(--zb-text); }
+html[data-theme="light"] .inv-payout__amount-val small { color: var(--zb-primary-700); }
+html[data-theme="light"] .inv-payout__notes { color: var(--zb-text-dim); }
+html[data-theme="light"] .inv-payout__notes li {
+  background: var(--zb-surface-2);
+  border-left: 3px solid var(--zb-primary);
+}
+html[data-theme="light"] .inv-payout__notes strong { color: var(--zb-text); }
+html[data-theme="light"] .inv-payout__err {
+  background: #fef2f2; border-color: #fecaca; color: #991b1b;
+}
+html[data-theme="light"] .inv-payout__btn--secondary {
+  background: transparent;
+  border: 1px solid var(--zb-border-strong);
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .inv-payout__btn--secondary:hover {
+  border-color: var(--zb-text-dim);
+  color: var(--zb-text);
+  background: var(--zb-surface-2);
+}
+html[data-theme="light"] .inv-payout__btn--primary {
+  background: var(--zb-primary);
+  color: #ffffff;
+}
+html[data-theme="light"] .inv-payout__btn--primary:hover {
+  background: var(--zb-primary-600);
+  filter: none;
+}
+
+/* ---- Footer + export button hover ------------------------------- */
+html[data-theme="light"] .inv-footer {
+  border-top: 1px solid var(--zb-border);
+}
+html[data-theme="light"] .inv-footer__btn {
+  background: transparent;
+  border: 1px solid var(--zb-border-strong);
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .inv-footer__btn:hover {
+  border-color: var(--zb-danger);
+  color: var(--zb-danger);
+}
+html[data-theme="light"] .inv-wallet__export:hover {
+  background: var(--zb-primary-100);
+  border-color: var(--zb-primary);
+  color: var(--zb-primary-700);
+}
+
+/* Tabs — segmented control */
+html[data-theme="light"] .inv-tabs {
+  background: var(--zb-surface-2);
+  border: 1px solid var(--zb-border);
+}
+html[data-theme="light"] .inv-tab {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .inv-tab:hover {
+  color: var(--zb-text);
+  background: rgba(37, 99, 235, 0.06);
+}
+html[data-theme="light"] .inv-tab--active {
+  background: #ffffff;
+  border-color: rgba(37, 99, 235, 0.35);
+  color: var(--zb-primary-700);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+/* KPI strip */
+html[data-theme="light"] .inv-kpi {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  box-shadow: var(--zb-shadow-xs);
+}
+html[data-theme="light"] .inv-kpi__value {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .inv-kpi__value--green {
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .inv-kpi__value--blue {
+  color: var(--zb-accent);
+}
+html[data-theme="light"] .inv-kpi__label {
+  color: var(--zb-text-muted);
+}
+
+/* Section title */
+html[data-theme="light"] .inv-section-title {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .inv-section-title::before {
+  background: linear-gradient(180deg, var(--zb-primary), var(--zb-primary-600));
+}
+
+/* Parcel cards */
+html[data-theme="light"] .inv-parcel-card {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  box-shadow: var(--zb-shadow-xs);
+}
+html[data-theme="light"] .inv-parcel-card:hover {
+  border-color: rgba(37, 99, 235, 0.45);
+  box-shadow: var(--zb-shadow-md);
+}
+html[data-theme="light"] .inv-parcel-card__map {
+  background: var(--zb-surface-3);
+}
+html[data-theme="light"] .inv-parcel-card__id {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .inv-parcel-card__project,
+html[data-theme="light"] .inv-parcel-card__loc {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .inv-parcel-card__stat-label {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .inv-parcel-card__stat-value {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .inv-green {
+  color: var(--zb-primary-700) !important;
+}
+html[data-theme="light"] .inv-link-btn {
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .inv-link-btn:hover {
+  color: var(--zb-primary);
+  text-decoration: underline;
+}
+
+/* Empty & progress */
+html[data-theme="light"] .inv-empty {
+  border: 1px dashed var(--zb-border-strong);
+  color: var(--zb-text-muted);
+  background: var(--zb-surface-2);
+}
+html[data-theme="light"] .inv-empty strong {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .inv-empty__btn {
+  background: var(--zb-primary);
+  color: #ffffff;
+}
+html[data-theme="light"] .inv-progress-notice {
+  background: var(--zb-primary-50);
+  border: 1px solid rgba(37, 99, 235, 0.28);
+  color: var(--zb-primary-700);
+}
+
+/* Wallet (parrainage) */
+html[data-theme="light"] .inv-wallet {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  box-shadow: var(--zb-shadow-sm);
+}
+html[data-theme="light"] .inv-wallet__title {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .inv-wallet__lead,
+html[data-theme="light"] .inv-wallet__lead--muted {
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .inv-wallet__pill {
+  background: var(--zb-primary-50);
+  border: 1px solid rgba(37, 99, 235, 0.28);
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .inv-wallet__loading-wrap {
+  background: var(--zb-surface-2);
+  border: 1px solid var(--zb-border);
+  box-shadow: none;
+}
+html[data-theme="light"] .inv-wallet__loading-title {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .inv-wallet__spinner {
+  border-color: rgba(37, 99, 235, 0.18);
+  border-top-color: var(--zb-primary);
+  border-right-color: rgba(37, 99, 235, 0.55);
+}
+html[data-theme="light"] .inv-wallet__dot {
+  background: var(--zb-primary);
+}
+html[data-theme="light"] .inv-wallet__loading-shimmer {
+  background: rgba(37, 99, 235, 0.12);
+}
+html[data-theme="light"] .inv-wallet__loading-shimmer::before {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(37, 99, 235, 0.55) 50%,
+    transparent 100%
+  );
+}
+html[data-theme="light"] .inv-wallet__panel {
+  background: var(--zb-surface-2);
+  border: 1px solid var(--zb-border);
+}
+html[data-theme="light"] .inv-wallet__hero {
+  background: var(--zb-primary-50);
+  border: 1px solid rgba(37, 99, 235, 0.28);
+}
+html[data-theme="light"] .inv-wallet__hero-label {
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .inv-wallet__hero-amount {
+  color: var(--zb-primary-700);
+  letter-spacing: -0.02em;
+}
+html[data-theme="light"] .inv-wallet__hero-currency {
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .inv-wallet__hero-meta {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .inv-wallet__stat {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+}
+html[data-theme="light"] .inv-wallet__stat-lbl {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .inv-wallet__stat-val {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .inv-wallet__stat-sub {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .inv-wallet__fold {
+  background: var(--zb-surface-2);
+  border: 1px solid var(--zb-border);
+}
+html[data-theme="light"] .inv-wallet__fold-summary {
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .inv-wallet__fold[open] .inv-wallet__fold-summary {
+  border-bottom: 1px solid var(--zb-border);
+}
+html[data-theme="light"] .inv-wallet__alert--error {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+}
+html[data-theme="light"] .inv-wallet__alert--warn {
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  color: #475569;
+}
+html[data-theme="light"] .inv-wallet__alert--verify {
+  background: var(--zb-primary-50);
+  border: 1px solid rgba(37, 99, 235, 0.28);
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .inv-wallet__btn {
+  background: var(--zb-primary);
+  color: #ffffff;
+}
+html[data-theme="light"] .inv-wallet__btn:hover {
+  background: var(--zb-primary-600);
+  filter: none;
+}
+html[data-theme="light"] .inv-wallet__actions-note {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .inv-wallet__export {
+  background: var(--zb-primary-50);
+  border: 1px solid rgba(37, 99, 235, 0.4);
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .inv-wallet__export:hover {
+  background: var(--zb-primary-100);
+  border-color: rgba(37, 99, 235, 0.6);
+  color: var(--zb-primary-700);
+}
+
+/* Footer */
+html[data-theme="light"] .inv-footer {
+  border-top: 1px solid var(--zb-border);
+}
+html[data-theme="light"] .inv-footer__btn {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .inv-footer__btn:hover {
+  border-color: rgba(220, 38, 38, 0.4);
+  color: var(--zb-danger);
+  background: #fef2f2;
+}
+
+/* Ledger rows */
+html[data-theme="light"] .inv-ledger__title {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .inv-ledger__count,
+html[data-theme="light"] .inv-ledger__hint,
+html[data-theme="light"] .inv-ledger__lbl,
+html[data-theme="light"] .inv-ledger__section-title,
+html[data-theme="light"] .inv-ledger__meta--dim {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .inv-ledger__section-title {
+  border-bottom: 1px solid var(--zb-border);
+}
+html[data-theme="light"] .inv-ledger__empty {
+  padding: 16px;
+  background: var(--zb-surface-2);
+  border: 1px dashed var(--zb-border-strong);
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .inv-ledger__row {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  box-shadow: var(--zb-shadow-xs);
+}
+html[data-theme="light"] .inv-ledger__lvl {
+  background: var(--zb-surface-3);
+  color: var(--zb-text-dim);
+  border: 1px solid var(--zb-border);
+}
+html[data-theme="light"] .inv-ledger__lvl--l1 {
+  background: var(--zb-primary-50);
+  color: var(--zb-primary-700);
+  border-color: rgba(37, 99, 235, 0.35);
+}
+html[data-theme="light"] .inv-ledger__lvl--l2 {
+  background: #e0f2fe;
+  color: #0369a1;
+  border-color: rgba(14, 165, 233, 0.35);
+}
+html[data-theme="light"] .inv-ledger__lvl--l3 {
+  background: #ede9fe;
+  color: #5b21b6;
+  border-color: rgba(139, 92, 246, 0.35);
+}
+html[data-theme="light"] .inv-ledger__lvl--l4 {
+  background: var(--zb-surface-3);
+  color: var(--zb-text-dim);
+  border-color: var(--zb-border-strong);
+}
+html[data-theme="light"] .inv-ledger__amount,
+html[data-theme="light"] .inv-ledger__meta,
+html[data-theme="light"] .inv-ledger__val,
+html[data-theme="light"] .inv-ledger__story,
+html[data-theme="light"] .inv-ledger__story strong {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .inv-ledger__amount small {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .inv-ledger__status--good {
+  background: var(--zb-success-50);
+  color: #065f46;
+}
+html[data-theme="light"] .inv-ledger__status--info {
+  background: #f0f9ff;
+  color: #0369a1;
+}
+html[data-theme="light"] .inv-ledger__status--warn {
+  background: #f1f5f9;
+  color: #475569;
+}
+html[data-theme="light"] .inv-ledger__status--bad {
+  background: #fef2f2;
+  color: #991b1b;
+}
+html[data-theme="light"] .inv-ledger__amount--neg {
+  color: var(--zb-danger);
+}
+
+/* Payout modal */
+html[data-theme="light"] .inv-payout__overlay {
+  background: rgba(15, 23, 42, 0.45);
+}
+html[data-theme="light"] .inv-payout__modal {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  color: var(--zb-text);
+  box-shadow: var(--zb-shadow-lg);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+html[data-theme="light"] .inv-payout__head {
+  border-bottom: 1px solid var(--zb-border);
+}
+html[data-theme="light"] .inv-payout__title {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .inv-payout__sub {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .inv-payout__amount {
+  background: var(--zb-primary-50);
+  border: 1px solid rgba(37, 99, 235, 0.28);
+}
+html[data-theme="light"] .inv-payout__amount-lbl {
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .inv-payout__amount-val {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .inv-payout__amount-val small {
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .inv-payout__notes {
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .inv-payout__notes li {
+  background: var(--zb-surface-2);
+  border-left: 3px solid var(--zb-primary);
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .inv-payout__notes strong {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .inv-payout__err {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+}
+html[data-theme="light"] .inv-payout__btn--secondary {
+  background: transparent;
+  border: 1px solid var(--zb-border-strong);
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .inv-payout__btn--secondary:hover {
+  border-color: var(--zb-text-dim);
+  color: var(--zb-text);
+}
+html[data-theme="light"] .inv-payout__btn--primary {
+  background: var(--zb-primary);
+  color: #ffffff;
+}
+html[data-theme="light"] .inv-payout__btn--primary:hover {
+  background: var(--zb-primary-600);
+  filter: none;
+}
+
+/* Forecast widget */
+html[data-theme="light"] .inv-forecast {
+  background: var(--zb-primary-50);
+  border: 1px solid rgba(37, 99, 235, 0.28);
+  color: var(--zb-text);
+}
+html[data-theme="light"] .inv-forecast__kicker,
+html[data-theme="light"] .inv-forecast__total {
+  color: var(--zb-primary-700) !important;
+}
+html[data-theme="light"] .inv-forecast__title {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .inv-forecast__lead,
+html[data-theme="light"] .inv-forecast__lead strong {
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .inv-forecast__cell {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+}
+html[data-theme="light"] .inv-forecast__lbl {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .inv-forecast__val {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .inv-forecast__legend {
+  color: var(--zb-text-muted);
+}
+
+/* Diagnostic block */
+html[data-theme="light"] .inv-diagnostic__body {
+  background: var(--zb-surface-2);
+  border: 1px solid var(--zb-border);
+  color: var(--zb-text-dim);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   EMPTY STATE (shared across public pages)
+   ══════════════════════════════════════════════════════════════════ */
+html[data-theme="light"] .empty-state {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  color: var(--zb-text);
+  box-shadow: var(--zb-shadow-sm);
+}
+html[data-theme="light"] .empty-state__title {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .empty-state__hint {
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .empty-state__btn--primary {
+  background: var(--zb-primary);
+  color: #ffffff;
+  border-color: var(--zb-primary-600);
+}
+html[data-theme="light"] .empty-state__btn--primary:hover {
+  background: var(--zb-primary-600);
+}
+html[data-theme="light"] .empty-state__btn--ghost {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .empty-state__btn--ghost:hover {
+  background: var(--zb-primary-50);
+  color: var(--zb-primary-700);
+  border-color: rgba(37, 99, 235, 0.4);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   AUTH PAGES (login / register / forgot / reset)
+   ══════════════════════════════════════════════════════════════════ */
+html[data-theme="light"] .login-content {
+  color: var(--zb-text);
+  border: 1px solid var(--zb-border);
+  background: #ffffff;
+  box-shadow: var(--zb-shadow-lg);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+html[data-theme="light"] .login-title {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .login-brand {
+  color: var(--zb-text);
+}
+
+html[data-theme="light"] .login-field label {
+  color: var(--zb-text-dim);
+}
+
+html[data-theme="light"] .login-input {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+}
+html[data-theme="light"] .login-input:focus-within {
+  border-color: var(--zb-primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.16);
+}
+html[data-theme="light"] .login-input input {
+  color: var(--zb-text);
+  background: transparent;
+}
+html[data-theme="light"] .login-input input::placeholder,
+html[data-theme="light"] .login-field--password .login-input input::placeholder {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .login-input input:-webkit-autofill,
+html[data-theme="light"] .login-input input:-webkit-autofill:hover,
+html[data-theme="light"] .login-input input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--zb-text);
+  box-shadow: 0 0 0 1000px #ffffff inset;
+}
+
+html[data-theme="light"] .login-eye {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .login-eye:hover {
+  color: var(--zb-text);
+}
+
+html[data-theme="light"] .login-divider span {
+  color: var(--zb-text-muted);
+  background: #ffffff;
+}
+html[data-theme="light"] .login-divider::before,
+html[data-theme="light"] .login-divider::after {
+  background: var(--zb-border);
+}
+
+html[data-theme="light"] .login-social-btn {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  color: var(--zb-text);
+}
+html[data-theme="light"] .login-social-btn:hover {
+  background: var(--zb-surface-2);
+  border-color: var(--zb-border-strong);
+}
+
+html[data-theme="light"] .login-submit {
+  background: var(--zb-primary);
+  color: #ffffff;
+  border: none;
+  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.22);
+}
+html[data-theme="light"] .login-submit:hover {
+  background: var(--zb-primary-600);
+}
+
+html[data-theme="light"] .forgot-password,
+html[data-theme="light"] .login-signup a {
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .forgot-password:hover,
+html[data-theme="light"] .login-signup a:hover {
+  color: var(--zb-primary);
+  text-decoration: underline;
+}
+html[data-theme="light"] .login-signup {
+  color: var(--zb-text-dim);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   SHARED UTILITIES  (headings, CTAs, green helpers)
+   ══════════════════════════════════════════════════════════════════ */
+html[data-theme="light"] .page-title {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .page-subtitle {
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .section-heading {
+  color: var(--zb-text-muted);
+}
+
+/* Base solid-green CTA and its "gold" variant used across public pages */
+html[data-theme="light"] .cta-primary {
+  background: var(--zb-primary);
+  color: #ffffff;
+  box-shadow: 0 6px 18px rgba(37, 99, 235, 0.22);
+}
+html[data-theme="light"] .cta-primary:hover {
+  background: var(--zb-primary-600);
+  filter: none;
+}
+html[data-theme="light"] .cta-primary--gold {
+  background: var(--zb-primary);
+  color: #ffffff;
+  box-shadow: 0 6px 18px rgba(37, 99, 235, 0.22);
+}
+html[data-theme="light"] .cta-primary--gold:hover {
+  background: var(--zb-primary-600);
+  filter: none;
+}
+
+/* Utility green-text class used inline for emphasis — becomes primary in light */
+html[data-theme="light"] .green-text {
+  color: var(--zb-primary-700) !important;
+}
+
+/* Shared empty-state (used outside dashboard) */
+html[data-theme="light"] .empty-state {
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .empty-state__icon {
+  background: var(--zb-primary-50);
+  border: 1px solid rgba(37, 99, 235, 0.35);
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .empty-state__hint {
+  color: var(--zb-text-dim);
+}
+
+/* Inline promo badge — plain primary */
+html[data-theme="light"] .inline-badge {
+  background: var(--zb-primary);
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.22);
+}
+
+/* Floating bottom CTA on project page */
+html[data-theme="light"] .proj-gold-cta {
+  background: var(--zb-primary);
+  color: #ffffff;
+  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.25);
+}
+html[data-theme="light"] .proj-gold-cta:hover {
+  background: var(--zb-primary-600);
+  filter: none;
+}
+html[data-theme="light"] .proj-gold-cta--active {
+  background: var(--zb-primary-700);
+  box-shadow: 0 12px 30px rgba(37, 99, 235, 0.35);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   MOBILE MENU (hamburger drawer under top bar)
+   ══════════════════════════════════════════════════════════════════ */
+html[data-theme="light"] .mobile-menu {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  box-shadow: var(--zb-shadow-md);
+}
+html[data-theme="light"] .mobile-menu-link {
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .mobile-menu-link svg {
+  color: rgba(37, 99, 235, 0.7);
+}
+html[data-theme="light"] .mobile-menu-link:hover {
+  background: var(--zb-primary-50);
+  color: var(--zb-text);
+}
+html[data-theme="light"] .mobile-menu-link:hover svg {
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .mobile-menu-link.active {
+  background: var(--zb-primary-50);
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .mobile-menu-link.active svg {
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .mobile-menu-logout {
+  color: var(--zb-danger);
+  border-top: 1px solid var(--zb-border);
+}
+html[data-theme="light"] .mobile-menu-logout:hover {
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+/* Portfolio-nav button outside dashboard (customer profile icon) */
+html[data-theme="light"] .portfolio-nav-btn--profile {
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .portfolio-nav-btn--profile:hover {
+  color: var(--zb-primary);
+  border-color: rgba(37, 99, 235, 0.45);
+  background: var(--zb-primary-50);
+}
+html[data-theme="light"] .portfolio-nav-btn--home:hover {
+  color: var(--zb-primary);
+  border-color: rgba(37, 99, 235, 0.45);
+  background: var(--zb-primary-50);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   PROJECT PAGE  (.project-page-skin scope — higher specificity needed)
+   ══════════════════════════════════════════════════════════════════ */
+html[data-theme="light"] .project-page-skin .detail-nav {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  box-shadow: var(--zb-shadow-xs);
+}
+html[data-theme="light"] .project-page-skin .back-btn {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .project-page-skin .back-btn:hover {
+  background: var(--zb-primary-50);
+  border-color: rgba(37, 99, 235, 0.4);
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .project-page-skin .detail-breadcrumb {
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .project-page-skin .detail-map-wrap {
+  border-color: var(--zb-border);
+  background: var(--zb-surface-3);
+  box-shadow: var(--zb-shadow-sm);
+}
+html[data-theme="light"] .project-page-skin .detail-map-label {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(37, 99, 235, 0.4);
+  color: var(--zb-text);
+}
+html[data-theme="light"] .project-page-skin .detail-map-label svg {
+  color: var(--zb-primary);
+}
+
+/* Proj hero stats bar (area/trees/plots numbers) */
+html[data-theme="light"] .proj-hero-stats {
+  border: 1px solid var(--zb-border);
+  background: #ffffff;
+  box-shadow: var(--zb-shadow-xs);
+}
+html[data-theme="light"] .proj-hero-stat {
+  background: transparent;
+  border-right: 1px solid var(--zb-border);
+  color: var(--zb-text);
+}
+html[data-theme="light"] .proj-hero-stat span {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .proj-hero-stat label {
+  color: var(--zb-text-muted);
+}
+
+/* Plot-mini card (used on project page grid of parcels) */
+html[data-theme="light"] .plot-mini-card {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  box-shadow: var(--zb-shadow-sm);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+html[data-theme="light"] .plot-mini-card:hover {
+  background: #ffffff;
+  border-color: rgba(37, 99, 235, 0.45);
+  box-shadow: var(--zb-shadow-md);
+}
+html[data-theme="light"] .plot-mini-card--selected {
+  background: var(--zb-primary-50);
+  border-color: rgba(37, 99, 235, 0.55);
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.28), var(--zb-shadow-sm);
+}
+html[data-theme="light"] .plot-mini-card__head {
+  border-bottom: 1px solid var(--zb-border);
+}
+html[data-theme="light"] .plot-mini-card__head-lbl {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .plot-mini-card__head-num {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .plot-mini-card__k {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .plot-mini-card__v {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .plot-mini-card__trees {
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .plot-mini-card__total {
+  background: var(--zb-surface-2);
+  border: 1px solid var(--zb-border);
+}
+html[data-theme="light"] .plot-mini-card__total-lbl {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .plot-mini-card__total-num {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .plot-mini-card__rev {
+  color: var(--zb-success);
+}
+html[data-theme="light"] .plot-mini-card__btn--more {
+  background: var(--zb-primary);
+  border: 1px solid var(--zb-primary-600);
+  color: #ffffff;
+  text-shadow: none;
+  box-shadow: 0 4px 10px rgba(37, 99, 235, 0.2);
+}
+html[data-theme="light"] .plot-mini-card__btn--more:hover {
+  background: var(--zb-primary-600);
+  filter: none;
+}
+html[data-theme="light"] .plot-mini-card__btn--pick {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  color: var(--zb-text-dim);
+  box-shadow: var(--zb-shadow-xs);
+}
+html[data-theme="light"] .plot-mini-card__btn--pick:hover {
+  background: var(--zb-primary-50);
+  border-color: rgba(37, 99, 235, 0.4);
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .plot-mini-card__btn--pick-on {
+  background: linear-gradient(135deg, var(--zb-primary), var(--zb-primary-600));
+  border-color: var(--zb-primary-700);
+  color: #ffffff;
+}
+
+/* Project-page fixed action buttons at bottom */
+html[data-theme="light"] .project-page-btn--gold {
+  background: var(--zb-primary);
+  color: #ffffff;
+  text-shadow: none;
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.22);
+}
+html[data-theme="light"] .project-page-btn--gold:hover {
+  background: var(--zb-primary-600);
+  filter: none;
+}
+html[data-theme="light"] .project-page-btn--outline {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  color: var(--zb-text-dim);
+  box-shadow: var(--zb-shadow-xs);
+}
+html[data-theme="light"] .project-page-btn--outline:hover {
+  background: var(--zb-primary-50);
+  color: var(--zb-primary-700);
+  border-color: rgba(37, 99, 235, 0.4);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   PLOT PAGE  (.plot-page-skin scope)
+   ══════════════════════════════════════════════════════════════════ */
+html[data-theme="light"] .plot-page-skin .detail-nav,
+html[data-theme="light"] .plot-page-skin .back-btn {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .plot-page-skin .back-btn:hover {
+  background: var(--zb-primary-50);
+  border-color: rgba(37, 99, 235, 0.4);
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .plot-page-skin .detail-breadcrumb {
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .plot-page-skin .detail-map-wrap {
+  border-color: var(--zb-border);
+  background: var(--zb-surface-3);
+  box-shadow: var(--zb-shadow-sm);
+}
+html[data-theme="light"] .plot-page-skin .detail-map-label {
+  background: rgba(255, 255, 255, 0.92);
+  border-color: rgba(37, 99, 235, 0.4);
+  color: var(--zb-text);
+}
+html[data-theme="light"] .plot-page-skin .detail-map-label svg {
+  color: var(--zb-primary);
+}
+html[data-theme="light"] .plot-page-skin .health-section-title {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .plot-page-skin .health-card {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  box-shadow: var(--zb-shadow-xs);
+  color: var(--zb-text);
+}
+html[data-theme="light"] .plot-page-skin .health-card-label {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .plot-page-skin .health-pct-overlay,
+html[data-theme="light"] .plot-page-skin .health-co2-value {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .plot-page-skin .health-bar-item,
+html[data-theme="light"] .plot-page-skin .health-bar-header {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .plot-page-skin .health-bar-track {
+  background: var(--zb-surface-3);
+}
+html[data-theme="light"] .plot-page-skin .health-next-action {
+  background: var(--zb-surface-2);
+  border: 1px solid var(--zb-border);
+}
+html[data-theme="light"] .plot-page-skin .health-next-label {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .plot-page-skin .health-next-value {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .plot-page-skin .page-title {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .plot-page-skin .page-subtitle {
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .plot-page-skin .proj-hero-stats {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+}
+html[data-theme="light"] .plot-page-skin .proj-hero-stat {
+  background: transparent;
+  border-right: 1px solid var(--zb-border);
+}
+html[data-theme="light"] .plot-page-skin .proj-hero-stat span {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .plot-page-skin .proj-hero-stat label {
+  color: var(--zb-text-muted);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   VISIT SUCCESS page
+   ══════════════════════════════════════════════════════════════════ */
+html[data-theme="light"] .visit-success-card {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  box-shadow: var(--zb-shadow-lg);
+}
+html[data-theme="light"] .visit-success-card h1 {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .visit-success-card p {
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .visit-success-icon {
+  color: var(--zb-primary);
+}
+html[data-theme="light"] .visit-success-btn {
+  background: var(--zb-primary);
+  color: #ffffff;
+}
+html[data-theme="light"] .visit-success-btn:hover {
+  background: var(--zb-primary-600);
+}
+
+/* Empty-portfolio card used on dashboard when onboarding */
+html[data-theme="light"] .inv-empty-portfolio {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  box-shadow: var(--zb-shadow-sm);
+  color: var(--zb-text);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   LOGIN / REGISTER extras (brand, titles, phone fields)
+   ══════════════════════════════════════════════════════════════════ */
+html[data-theme="light"] .login-title {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .login-brand {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .login-divider span {
+  color: var(--zb-text-muted);
+  background: #ffffff;
+}
+html[data-theme="light"] .login-divider::before,
+html[data-theme="light"] .login-divider::after {
+  background: var(--zb-border);
+}
+html[data-theme="light"] .login-field label {
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .login-input input {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .login-input input:-webkit-autofill,
+html[data-theme="light"] .login-input input:-webkit-autofill:hover,
+html[data-theme="light"] .login-input input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--zb-text);
+  -webkit-box-shadow: 0 0 0 1000px #ffffff inset;
+  box-shadow: 0 0 0 1000px #ffffff inset;
+}
+html[data-theme="light"] .login-input:focus-within {
+  background: #ffffff;
+  border-color: var(--zb-primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.16);
+}
+html[data-theme="light"] .login-signup {
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .login-signup a {
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .login-signup a:hover {
+  color: var(--zb-primary);
+}
+
+/* Register phone row */
+html[data-theme="light"] .reg-phone-prefix {
+  background: var(--zb-surface-2);
+  border: 1px solid var(--zb-border);
+  color: var(--zb-text);
+}
+html[data-theme="light"] .reg-phone-sep {
+  color: var(--zb-text-muted);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   BASE CONTENT WRAPPER (.dashboard-page wraps public + dashboard
+   content; it sets a global default text color which we need to flip
+   otherwise every descendant inherits beige on white)
+   ══════════════════════════════════════════════════════════════════ */
+html[data-theme="light"] .dashboard-page {
+  color: var(--zb-text);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+html[data-theme="light"] .browse-page-bg > .dashboard-page {
+  color: var(--zb-text);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   INSTALLMENTS PAGE (.ip) — rebind its own CSS tokens to the blue
+   palette. Because every .ip__* descendant references var(--ip-*),
+   overriding the tokens on the root cascades through the whole page
+   without needing to rewrite each sub-class.
+   ══════════════════════════════════════════════════════════════════ */
+html[data-theme="light"] .ip {
+  --ip: #ffffff;
+  --ip-bg: var(--zb-bg);
+  --ip-100: var(--zb-surface-2);
+  --ip-200: var(--zb-border);
+  --ip-300: var(--zb-border-strong);
+  --ip-400: var(--zb-text-muted);
+  --ip-500: var(--zb-text-muted);
+  --ip-600: var(--zb-text-dim);
+  --ip-900: var(--zb-text);
+  --ip-blue: var(--zb-primary);
+  --ip-blue-light: var(--zb-accent);
+  --ip-blue-50: rgba(37, 99, 235, 0.08);
+  --ip-blue-100: rgba(37, 99, 235, 0.14);
+  --ip-blue-700: var(--zb-primary-600);
+
+  background: transparent;
+  color: var(--zb-text);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+/* A few .ip__* elements set explicit hex colors that bypass the tokens. */
+html[data-theme="light"] .ip__back {
+  color: var(--zb-text-dim);
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  box-shadow: var(--zb-shadow-xs);
+}
+html[data-theme="light"] .ip__back:hover {
+  color: var(--zb-primary-700);
+  background: var(--zb-primary-50);
+  border-color: rgba(37, 99, 235, 0.4);
+  box-shadow: var(--zb-shadow-sm);
+}
+html[data-theme="light"] .ip__back-icon,
+html[data-theme="light"] .ip__back:hover .ip__back-icon {
+  color: var(--zb-primary-700);
+  background: var(--zb-primary-50);
+}
+html[data-theme="light"] .ip__hero {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  box-shadow: var(--zb-shadow-sm);
+  color: var(--zb-text);
+}
+html[data-theme="light"] .ip__hero-title {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .ip__hero-sub {
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .ip__hero-icon {
+  background: var(--zb-primary-50);
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .ip__kpi-value {
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .ip__kpi-label {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .ip__plan-card {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  border-left: 4px solid var(--zb-primary);
+  box-shadow: var(--zb-shadow-xs);
+  color: var(--zb-text);
+}
+html[data-theme="light"] .ip__plan-card:hover {
+  border-color: rgba(37, 99, 235, 0.4);
+  border-left-color: var(--zb-primary-700);
+  box-shadow: var(--zb-shadow-md);
+}
+
+/* "Validé" / "Reste" money boxes — base CSS uses hardcoded
+   rgba(11,21,12,.45) on rgba(42,75,44,.65) olive, which becomes an
+   ugly grey-green blotch with an olive border on white. */
+html[data-theme="light"] .ip__plan-money__item {
+  background: var(--zb-surface-2);
+  border: 1px solid var(--zb-border);
+}
+html[data-theme="light"] .ip__plan-money__item--ok {
+  background: var(--zb-success-50, #d1fae5);
+  border-color: rgba(5, 150, 105, 0.3);
+}
+
+/* "Ouvrir le détail →" CTA bar — the baseline has an olive gradient
+   + olive border + pale-olive text (#c8e86c) which is nearly
+   invisible on white. Swap to the primary-blue soft-fill style. */
+html[data-theme="light"] .ip__plan-cta {
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.14) 0%, rgba(37, 99, 235, 0.06) 100%);
+  border: 1px solid rgba(37, 99, 235, 0.28);
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .ip__plan-cta__arrow {
+  color: var(--zb-primary-700);
+  opacity: 1;
+}
+html[data-theme="light"] .ip__plan-card:hover .ip__plan-cta {
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.2) 0%, rgba(37, 99, 235, 0.1) 100%);
+  border-color: rgba(37, 99, 235, 0.4);
+}
+
+/* Progress block labels still referencing --ip tokens resolve fine
+   via the token rebind, but the "Facilités confirmées" title sits on
+   white and benefits from a slightly stronger tone. */
+html[data-theme="light"] .ip__plan-progress-title {
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .ip__progress-label {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .ip__plan-title,
+html[data-theme="light"] .ip__plan-card__titles .ip__plan-title {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .ip__plan-ref,
+html[data-theme="light"] .ip__plan-card__titles .ip__plan-ref {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .ip__plan-money__label {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .ip__plan-money__value {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .ip__plan-money__item--ok .ip__plan-money__value {
+  color: var(--zb-success);
+}
+html[data-theme="light"] .ip__progress-track {
+  background: var(--zb-surface-3);
+}
+html[data-theme="light"] .ip__progress-fill {
+  background: linear-gradient(90deg, var(--zb-primary), var(--zb-primary-600));
+}
+html[data-theme="light"] .ip__plan-next {
+  background: var(--zb-surface-2);
+  border: 1px solid var(--zb-border);
+}
+html[data-theme="light"] .ip__plan-next__kicker {
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .ip__plan-next__text {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .ip__plan-next__text--done {
+  color: var(--zb-success);
+}
+html[data-theme="light"] .ip__pill {
+  background: var(--zb-surface-2);
+  color: var(--zb-text-dim);
+  border: 1px solid var(--zb-border);
+}
+html[data-theme="light"] .ip__pill--ok {
+  background: var(--zb-success-50);
+  color: #065f46;
+  border-color: rgba(5, 150, 105, 0.3);
+}
+html[data-theme="light"] .ip__pill--submitted {
+  background: #f1f5f9;
+  color: #475569;
+  border-color: rgba(217, 119, 6, 0.3);
+}
+html[data-theme="light"] .ip__pill--rejected {
+  background: #fef2f2;
+  color: #991b1b;
+  border-color: rgba(220, 38, 38, 0.3);
+}
+html[data-theme="light"] .ip__preview-banner {
+  background: var(--zb-primary-50);
+  border: 1px solid rgba(37, 99, 235, 0.28);
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .ip__pager-btn--active,
+html[data-theme="light"] .ip__pager-btn--active:hover {
+  background: var(--zb-primary);
+  color: #ffffff;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   INSTALLMENT DETAIL VIEW (.ip__detail-*, .ip__pay-card, .ip__status,
+   .ip__receipt, .ip__pay-btn, .ip__metric, .ip__pager) — the base
+   uses hard-coded olive gradients and raw semantic hexes (#34d399,
+   #fbbf24, #f87171) that look washed-out on a white canvas. Remap
+   the semantic tokens + override every olive-tinted surface so the
+   whole detail view reads as a proper light UI.
+   ══════════════════════════════════════════════════════════════════ */
+html[data-theme="light"] .ip {
+  /* Stronger semantic tokens for light backgrounds (the base values
+     target dark mode and lose contrast on white). The "amber" slot
+     is swapped for a cool slate so the light UI stays gold-free. */
+  --ip-green: #059669;
+  --ip-green-50: #d1fae5;
+  --ip-amber: #475569;
+  --ip-amber-50: #f1f5f9;
+  --ip-red: #b91c1c;
+  --ip-red-50: #fee2e2;
+}
+
+/* ---- Detail header + help hint ---------------------------------- */
+html[data-theme="light"] .ip__detail-head {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  box-shadow: var(--zb-shadow-xs);
+  color: var(--zb-text);
+}
+html[data-theme="light"] .ip__detail-title { color: var(--zb-text); }
+html[data-theme="light"] .ip__detail-ref   { color: var(--zb-text-muted); }
+html[data-theme="light"] .ip__detail-hint {
+  background: var(--zb-primary-50);
+  border: 1px solid rgba(37, 99, 235, 0.20);
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .ip__detail-hint strong { color: var(--zb-primary-700); }
+
+/* ---- Metric grid (4 tiles: Validé / En révision / À corriger / Reste) */
+html[data-theme="light"] .ip__metric {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  box-shadow: var(--zb-shadow-xs);
+  color: var(--zb-text);
+}
+html[data-theme="light"] .ip__metric::before { opacity: 1; }
+html[data-theme="light"] .ip__metric--validated { --accent: #059669; }
+html[data-theme="light"] .ip__metric--review    { --accent: #475569; }
+html[data-theme="light"] .ip__metric--rejected  { --accent: #b91c1c; }
+html[data-theme="light"] .ip__metric--remaining { --accent: var(--zb-primary); }
+html[data-theme="light"] .ip__metric-kicker { color: var(--accent, var(--zb-text-muted)); }
+html[data-theme="light"] .ip__metric-value  { color: var(--zb-text); }
+html[data-theme="light"] .ip__metric-hint   { color: var(--zb-text-muted); }
+
+/* ---- Payment rows (.ip__pay-card) ------------------------------- */
+html[data-theme="light"] .ip__pay-card {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  box-shadow: var(--zb-shadow-xs);
+  color: var(--zb-text);
+}
+html[data-theme="light"] .ip__pay-card::before {
+  background: linear-gradient(180deg, var(--zb-primary), var(--zb-primary-600));
+  opacity: 1;
+}
+html[data-theme="light"] .ip__pay-card:hover {
+  border-color: rgba(37, 99, 235, 0.35);
+  box-shadow: var(--zb-shadow-sm);
+}
+html[data-theme="light"] .ip__pay-card--next {
+  border-color: rgba(37, 99, 235, 0.45);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.08), var(--zb-shadow-sm);
+}
+html[data-theme="light"] .ip__pay-month {
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .ip__pay-due   { color: var(--zb-text-muted); }
+html[data-theme="light"] .ip__pay-amount { color: var(--zb-text); }
+html[data-theme="light"] .ip__pay-amount small { color: var(--zb-text-muted); }
+html[data-theme="light"] .ip__pay-hint  { color: var(--zb-text-muted); }
+html[data-theme="light"] .ip__pay-reject {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+/* ---- Status pills (En révision, Validé, Rejeté, En attente) ---- */
+html[data-theme="light"] .ip__status--approved {
+  background: #d1fae5;
+  color: #065f46;
+  border: 1px solid rgba(5, 150, 105, 0.25);
+}
+html[data-theme="light"] .ip__status--submitted {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid rgba(180, 83, 9, 0.25);
+}
+html[data-theme="light"] .ip__status--pending {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid rgba(180, 83, 9, 0.25);
+}
+html[data-theme="light"] .ip__status--rejected {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 1px solid rgba(185, 28, 28, 0.25);
+}
+
+/* ---- Receipt row (image/file + name/date + "Voir" link) -------- */
+html[data-theme="light"] .ip__receipt {
+  background: var(--zb-surface-2);
+  border: 1px solid var(--zb-border);
+}
+html[data-theme="light"] .ip__receipt-thumb { border-color: var(--zb-border); }
+html[data-theme="light"] .ip__receipt-file-icon {
+  background: var(--zb-primary-50);
+  border: 1px solid rgba(37, 99, 235, 0.20);
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .ip__receipt-name { color: var(--zb-text); }
+html[data-theme="light"] .ip__receipt-date { color: var(--zb-text-muted); }
+html[data-theme="light"] .ip__receipt-link {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .ip__receipt-link:hover {
+  background: var(--zb-primary);
+  border-color: var(--zb-primary);
+  color: #ffffff;
+}
+
+/* ---- Action buttons (Envoyer / Corriger) ----------------------- */
+html[data-theme="light"] .ip__pay-btn {
+  background: linear-gradient(135deg, var(--zb-primary) 0%, var(--zb-primary-600) 100%);
+  border: 1px solid rgba(37, 99, 235, 0.45);
+  color: #ffffff;
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.22);
+}
+html[data-theme="light"] .ip__pay-btn:hover {
+  box-shadow: 0 8px 22px rgba(37, 99, 235, 0.32);
+  filter: brightness(1.04);
+}
+html[data-theme="light"] .ip__pay-btn--correct {
+  background: linear-gradient(135deg, #64748b 0%, #475569 100%);
+  border-color: rgba(71, 85, 105, 0.45);
+  color: #ffffff;
+  box-shadow: 0 4px 14px rgba(71, 85, 105, 0.25);
+}
+html[data-theme="light"] .ip__pay-btn--correct:hover {
+  box-shadow: 0 8px 22px rgba(71, 85, 105, 0.32);
+}
+
+/* ---- Pager ------------------------------------------------------ */
+html[data-theme="light"] .ip__pager {
+  background: var(--zb-surface-2);
+  border: 1px solid var(--zb-border);
+}
+html[data-theme="light"] .ip__pager-btn {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .ip__pager-btn:hover:not(:disabled) {
+  background: var(--zb-primary-50);
+  color: var(--zb-primary-700);
+  border-color: rgba(37, 99, 235, 0.35);
+}
+html[data-theme="light"] .ip__pager-btn:disabled { opacity: 0.4; }
+html[data-theme="light"] .ip__pager-hint { color: var(--zb-text-muted); }
+
+/* ---- Empty state ----------------------------------------------- */
+html[data-theme="light"] .ip__empty {
+  background: #ffffff;
+  border: 1px dashed var(--zb-border-strong);
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .ip__empty strong { color: var(--zb-text); }
+
+/* Metric cards (summary strip) */
+html[data-theme="light"] .ip-metric {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  box-shadow: var(--zb-shadow-xs);
+  color: var(--zb-text);
+}
+html[data-theme="light"] .ip-metric__label {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .ip-metric__value {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .ip-metric--ok .ip-metric__label {
+  color: var(--zb-success);
+}
+html[data-theme="light"] .ip-metric--review .ip-metric__label {
+  color: var(--zb-accent);
+}
+html[data-theme="light"] .ip-metric--bad .ip-metric__label {
+  color: var(--zb-danger);
+}
+html[data-theme="light"] .ip-metric--neutral .ip-metric__label {
+  color: var(--zb-primary-700);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   NOTIFICATIONS menu — full panel override
+   ══════════════════════════════════════════════════════════════════ */
+html[data-theme="light"] .notif-list {
+  background: transparent;
+}
+html[data-theme="light"] .notif-card {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .notif-card:hover {
+  background: var(--zb-primary-50);
+}
+html[data-theme="light"] .notif-card-main {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .notif-empty {
+  color: var(--zb-text-muted);
+}
+
+/* Bell icon idle state — defaults to a beige `#d7e5d8` that is invisible
+   on the translucent-white top bar. Force the same dim-blue used by the
+   other top-bar icons. */
+html[data-theme="light"] .notif-menu__bell {
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .notif-menu__bell:hover,
+html[data-theme="light"] .notif-menu__bell:focus-visible {
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .notif-menu__bell:focus-visible {
+  background: var(--zb-primary-50, rgba(37, 99, 235, 0.08));
+  border-radius: 8px;
+}
+
+/* Unread dot on the bell — default is olive `#a8cc50` with a green halo,
+   obviously off-brand on the blue light surface. */
+html[data-theme="light"] .notif-menu__badge {
+  background: var(--zb-primary);
+  box-shadow:
+    0 0 0 2px #ffffff,
+    0 0 6px rgba(37, 99, 235, 0.5);
+}
+
+html[data-theme="light"] .notif-menu__overlay {
+  background: rgba(15, 23, 42, 0.35);
+}
+html[data-theme="light"] .notif-menu__panel {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  color: var(--zb-text);
+  box-shadow:
+    0 30px 80px rgba(15, 23, 42, 0.18),
+    0 0 0 1px rgba(15, 23, 42, 0.04);
+}
+html[data-theme="light"] .notif-menu__head {
+  border-bottom: 1px solid var(--zb-border);
+  color: var(--zb-text);
+}
+html[data-theme="light"] .notif-menu__close {
+  background: var(--zb-surface-2);
+  border: 1px solid var(--zb-border);
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .notif-menu__close:hover {
+  background: #fef2f2;
+  color: var(--zb-danger);
+  border-color: rgba(220, 38, 38, 0.4);
+}
+html[data-theme="light"] .notif-menu__link {
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .notif-menu__link:hover {
+  background: var(--zb-primary-50);
+  color: var(--zb-primary);
+}
+html[data-theme="light"] .notif-menu__empty {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .notif-menu__row {
+  border-bottom: 1px solid var(--zb-border);
+}
+html[data-theme="light"] .notif-menu__row:hover {
+  background: var(--zb-primary-50);
+}
+html[data-theme="light"] .notif-menu__row--unread {
+  background: var(--zb-primary-50);
+  border-left: 3px solid var(--zb-primary);
+}
+html[data-theme="light"] .notif-menu__tabs {
+  border-bottom: 1px solid var(--zb-border);
+}
+html[data-theme="light"] .notif-menu__tab {
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .notif-menu__tab:hover {
+  color: var(--zb-text);
+  background: var(--zb-primary-50);
+}
+html[data-theme="light"] .notif-menu__tab--active {
+  background: var(--zb-primary-50);
+  color: var(--zb-primary-700);
+  border-color: rgba(37, 99, 235, 0.35);
+}
+html[data-theme="light"] .notif-menu__tab-dot {
+  background: var(--zb-primary);
+}
+html[data-theme="light"] .notif-menu__tab--active .notif-menu__tab-dot {
+  background: var(--zb-primary-600);
+}
+html[data-theme="light"] .notif-menu__title {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .notif-menu__body {
+  color: var(--zb-text-dim);
+  opacity: 1;
+}
+html[data-theme="light"] .notif-menu__time {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .notif-menu__archive {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .notif-menu__rowbtn:focus-visible {
+  background: var(--zb-primary-50);
+}
+html[data-theme="light"] .notif-menu__rowbtn {
+  color: var(--zb-text);
+}
+
+/* Per-category dot (::before pseudo) — default includes olive greens
+   (#a8cc50 for commissions, #8da68e for system/info) that clash on a
+   white panel. Override the custom property at the row level so each
+   row inherits the right value; severity accents (warning/danger/
+   success) keep their semantic colours. */
+html[data-theme="light"] .notif-menu__row--commission { --notif-dot: var(--zb-primary); }
+html[data-theme="light"] .notif-menu__row--system,
+html[data-theme="light"] .notif-menu__row--info { --notif-dot: var(--zb-text-muted); }
+html[data-theme="light"] .notif-menu__row--unread {
+  background: var(--zb-primary-50);
+  border-left: 3px solid var(--zb-primary);
+}
+
+/* Head title / actions — force dark text for readability. */
+html[data-theme="light"] .notif-menu__head-title { color: var(--zb-text); }
+
+/* Archive × button — olive default, swap to muted neutral with a
+   danger-red hover (matching dark mode semantics). */
+html[data-theme="light"] .notif-menu__archive:hover {
+  color: var(--zb-danger);
+  background: #fef2f2;
+}
+
+/* Toaster container — the base positions it at `top: 12px`, which on
+   light / admin sits directly on top of the page top bar (the bell icon
+   is right there, so the toast collided with the very UI that spawned
+   it). Push it below the top-bar height so it reads as a separate
+   surface. Desktop: 68px clears the .top-bar / admin shell header.
+   Mobile: 56px (shorter chrome) plus safe-area inset. */
+html[data-theme="light"] .notif-toaster,
+html[data-theme="admin"] .notif-toaster {
+  top: calc(env(safe-area-inset-top, 0px) + 68px);
+}
+@media (max-width: 599px) {
+  html[data-theme="light"] .notif-toaster,
+  html[data-theme="admin"] .notif-toaster {
+    top: calc(env(safe-area-inset-top, 0px) + 56px);
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   REALTIME ALERT TOASTS  (.notif-toast, .notif-toaster)
+   ──────────────────────────────────────────────────────────────────
+   Top-right floating alerts that announce high-severity notifications
+   in real time. Default is dark-green on translucent black with an
+   olive border — jarring over the white light canvas (and equally
+   bad on the admin white canvas, which carries data-theme="admin",
+   not "light"). Rebind to a white surface + blue-tinted outline for
+   BOTH light + admin themes, and keep the severity left-border
+   colours for semantic clarity.
+
+   IMPORTANT: /admin pages are tagged data-theme="admin" by
+   public/theme-init.js, not "light". Without the admin selector the
+   toast would render in its dark default over the white admin UI,
+   which is the user-visible "alert popup broken in light mode" bug.
+   ══════════════════════════════════════════════════════════════════ */
+html[data-theme="light"] .notif-toast,
+html[data-theme="admin"] .notif-toast {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  color: #0f172a;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow:
+    0 12px 28px rgba(15, 23, 42, 0.14),
+    0 0 0 1px rgba(15, 23, 42, 0.04);
+}
+/* Severity left-borders — keep semantic colours but swap olive "info"
+   for a neutral blue so the default case reads as the app primary. */
+html[data-theme="light"] .notif-toast--info,
+html[data-theme="admin"] .notif-toast--info    { border-left: 4px solid #2563eb; }
+html[data-theme="light"] .notif-toast--success,
+html[data-theme="admin"] .notif-toast--success { border-left: 4px solid #059669; }
+html[data-theme="light"] .notif-toast--warning,
+html[data-theme="admin"] .notif-toast--warning { border-left: 4px solid #d97706; }
+html[data-theme="light"] .notif-toast--danger,
+html[data-theme="admin"] .notif-toast--danger  { border-left: 4px solid #dc2626; }
+
+html[data-theme="light"] .notif-toast__title,
+html[data-theme="admin"] .notif-toast__title { color: #0f172a; }
+html[data-theme="light"] .notif-toast__msg,
+html[data-theme="admin"] .notif-toast__msg {
+  color: #475569;
+  opacity: 1;
+}
+/* __body is a <button> — reset default browser styling for disabled +
+   hover states so the toast doesn't flash a grey "buttonface" fill when
+   no link is attached (disabled={!to} in NotificationToaster.jsx). */
+html[data-theme="light"] .notif-toast__body,
+html[data-theme="admin"] .notif-toast__body {
+  background: transparent;
+  color: inherit;
+}
+html[data-theme="light"] .notif-toast__body:disabled,
+html[data-theme="admin"] .notif-toast__body:disabled {
+  color: inherit;
+  opacity: 1;
+}
+html[data-theme="light"] .notif-toast__close,
+html[data-theme="admin"] .notif-toast__close {
+  color: #94a3b8;
+  background: transparent;
+}
+html[data-theme="light"] .notif-toast__close:hover,
+html[data-theme="admin"] .notif-toast__close:hover {
+  color: #dc2626;
+  background: #fef2f2;
+}
+
+/* Mobile — the base rule bumps the shadow to `rgba(0,0,0,0.55)`, which
+   punches a grey hole through the white sheet on a light canvas. Use
+   a neutral slate-tinted shadow that matches the desktop light look. */
+@media (max-width: 599px) {
+  html[data-theme="light"] .notif-toast,
+  html[data-theme="admin"] .notif-toast {
+    box-shadow:
+      0 14px 34px rgba(15, 23, 42, 0.18),
+      0 0 0 1px rgba(15, 23, 42, 0.04);
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   GENERIC SCROLLBAR (light)
+   ══════════════════════════════════════════════════════════════════ */
+html[data-theme="light"] ::-webkit-scrollbar-track {
+  background: transparent;
+}
+html[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background: var(--zb-border-strong);
+  border-radius: 8px;
+}
+html[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+  background: var(--zb-text-muted);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   INSTALLMENTS POPUPS  (.ip__overlay, .ip__modal + subclasses)
+   ──────────────────────────────────────────────────────────────────
+   Two popups: "Soumettre votre reçu" (upload receipt) and the plan
+   detail sheet. Both use hardcoded dark-green gradients that bypass
+   the .ip root token rebinding, so they need explicit overrides.
+   ══════════════════════════════════════════════════════════════════ */
+html[data-theme="light"] .ip__overlay {
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+html[data-theme="light"] .ip__modal {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  box-shadow: var(--zb-shadow-lg);
+  color: var(--zb-text);
+}
+
+/* Header */
+html[data-theme="light"] .ip__modal-header {
+  border-bottom: 1px solid var(--zb-border);
+}
+html[data-theme="light"] .ip__modal-title { color: var(--zb-text); }
+html[data-theme="light"] .ip__modal-sub { color: var(--zb-text-muted); }
+html[data-theme="light"] .ip__modal-close {
+  background: var(--zb-surface-2);
+  border: 1px solid var(--zb-border);
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .ip__modal-close:hover {
+  background: #fef2f2;
+  border-color: rgba(220, 38, 38, 0.4);
+  color: var(--zb-danger);
+}
+
+/* Selected-installment info card — olive gradient → blue wash */
+html[data-theme="light"] .ip__modal-info {
+  background: var(--zb-primary-50);
+  border: 1px solid rgba(37, 99, 235, 0.28);
+}
+html[data-theme="light"] .ip__modal-info::before {
+  background: linear-gradient(180deg, var(--zb-primary), var(--zb-primary-700));
+}
+html[data-theme="light"] .ip__modal-info-kicker { color: var(--zb-primary-700); }
+html[data-theme="light"] .ip__modal-info-main { color: var(--zb-text); }
+html[data-theme="light"] .ip__modal-info-meta { color: var(--zb-text-dim); }
+
+/* Section labels / hints inside the modal body */
+html[data-theme="light"] .ip__section-label,
+html[data-theme="light"] .ip__modal-section-label {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .ip__detail-hint { color: var(--zb-text-dim); }
+html[data-theme="light"] .ip__detail-hint--modal {
+  background: var(--zb-surface);
+  border: 1px solid var(--zb-border);
+  color: var(--zb-text-dim);
+}
+
+/* File upload buttons in the receipt form */
+html[data-theme="light"] .ip__upload-btn,
+html[data-theme="light"] .ip__upload-camera,
+html[data-theme="light"] .ip__upload-gallery {
+  background: var(--zb-surface);
+  border: 1px solid var(--zb-border);
+  color: var(--zb-text);
+}
+html[data-theme="light"] .ip__upload-btn:hover,
+html[data-theme="light"] .ip__upload-camera:hover,
+html[data-theme="light"] .ip__upload-gallery:hover {
+  background: var(--zb-primary-50);
+  border-color: rgba(37, 99, 235, 0.4);
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .ip__upload-preview {
+  background: var(--zb-surface);
+  border: 1px solid var(--zb-border);
+  color: var(--zb-text);
+}
+html[data-theme="light"] .ip__upload-remove {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: var(--zb-danger);
+}
+html[data-theme="light"] .ip__upload-remove:hover {
+  background: #fee2e2;
+}
+
+/* Footer / action buttons */
+html[data-theme="light"] .ip__modal-footer {
+  background: var(--zb-surface);
+  border-top: 1px solid var(--zb-border);
+}
+html[data-theme="light"] .ip__modal-cancel {
+  background: transparent;
+  border: 1px solid var(--zb-border-strong);
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .ip__modal-cancel:hover {
+  background: var(--zb-surface-2);
+  color: var(--zb-text);
+}
+html[data-theme="light"] .ip__modal-submit {
+  background: var(--zb-primary);
+  color: #ffffff;
+  border: 1px solid var(--zb-primary-600);
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.2);
+}
+html[data-theme="light"] .ip__modal-submit:hover:not(:disabled) {
+  background: var(--zb-primary-600);
+  filter: none;
+  box-shadow: 0 6px 18px rgba(37, 99, 235, 0.3);
+}
+html[data-theme="light"] .ip__modal-submit:disabled {
+  background: var(--zb-surface-2);
+  border: 1px dashed var(--zb-border-strong);
+  color: var(--zb-text-muted);
+  box-shadow: none;
+}
+
+/* Plan-detail body cells (reuses .ip__plan-* tokens already rebound). */
+html[data-theme="light"] .ip__modal-body {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .ip__modal-body--plan-detail .ip-metrics--in-modal {
+  background: var(--zb-surface);
+  border: 1px solid var(--zb-border);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   COMMISSION ORG TREE  (.mrt, src/components/my-referral-tree.css)
+   ──────────────────────────────────────────────────────────────────
+   Dashboard card that summarises the referral tree + the fullscreen
+   graph modal. Default palette is dark-green over black; rebind the
+   whole surface to white/blue with a neutral "me" tile.
+   ══════════════════════════════════════════════════════════════════ */
+html[data-theme="light"] .mrt {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  color: var(--zb-text);
+  box-shadow: var(--zb-shadow-sm);
+}
+html[data-theme="light"] .mrt--clickable:hover {
+  background: var(--zb-surface);
+  border-color: var(--zb-primary-300, rgba(37, 99, 235, 0.35));
+}
+html[data-theme="light"] .mrt--clickable:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.55);
+}
+html[data-theme="light"] .mrt__title { color: var(--zb-text); }
+html[data-theme="light"] .mrt__chev {
+  background: var(--zb-primary-50, rgba(37, 99, 235, 0.1));
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .mrt__stat {
+  background: var(--zb-surface);
+  border: 1px solid var(--zb-border);
+}
+html[data-theme="light"] .mrt__stat--good {
+  background: rgba(37, 99, 235, 0.08);
+  border-color: rgba(37, 99, 235, 0.28);
+}
+html[data-theme="light"] .mrt__stat-num { color: var(--zb-text); }
+html[data-theme="light"] .mrt__stat--good .mrt__stat-num { color: var(--zb-primary-700); }
+html[data-theme="light"] .mrt__stat-lbl { color: var(--zb-text-muted); }
+
+html[data-theme="light"] .mrt-me {
+  background: linear-gradient(
+    135deg,
+    rgba(37, 99, 235, 0.1) 0%,
+    rgba(14, 165, 233, 0.12) 100%
+  );
+  border: 1px solid rgba(37, 99, 235, 0.35);
+}
+html[data-theme="light"] .mrt-me__avatar {
+  background: var(--zb-primary);
+  color: #ffffff;
+}
+html[data-theme="light"] .mrt-me__name { color: var(--zb-text); }
+html[data-theme="light"] .mrt-me__meta { color: var(--zb-text-dim); }
+html[data-theme="light"] .mrt-me__tag {
+  background: rgba(37, 99, 235, 0.15);
+  border-color: rgba(37, 99, 235, 0.4);
+  color: var(--zb-primary-700);
+}
+
+html[data-theme="light"] .mrt__cta {
+  background: rgba(37, 99, 235, 0.08);
+  border: 1px dashed rgba(37, 99, 235, 0.4);
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .mrt--clickable:hover .mrt__cta {
+  background: rgba(37, 99, 235, 0.16);
+  border-style: solid;
+}
+
+html[data-theme="light"] .mrt__empty { color: var(--zb-text-dim); }
+html[data-theme="light"] .mrt__empty-title { color: var(--zb-text); }
+
+html[data-theme="light"] .mrt-card {
+  background: var(--zb-surface);
+  border: 1px solid var(--zb-border);
+  color: var(--zb-text);
+}
+html[data-theme="light"] .mrt-card--sk { background: var(--zb-surface-2); }
+
+/* Fullscreen graph modal */
+html[data-theme="light"] .mrt-modal {
+  background: rgba(15, 23, 42, 0.48);
+}
+html[data-theme="light"] .mrt-modal__panel {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  box-shadow: 0 30px 80px rgba(15, 23, 42, 0.22);
+}
+html[data-theme="light"] .mrt-modal__head {
+  border-bottom: 1px solid var(--zb-border);
+  background: linear-gradient(
+    180deg,
+    rgba(37, 99, 235, 0.06) 0%,
+    transparent 100%
+  );
+}
+html[data-theme="light"] .mrt-modal__title { color: var(--zb-text); }
+html[data-theme="light"] .mrt-modal__subtitle { color: var(--zb-text-dim); }
+html[data-theme="light"] .mrt-modal__close {
+  background: var(--zb-surface);
+  border: 1px solid var(--zb-border);
+  color: var(--zb-text);
+}
+html[data-theme="light"] .mrt-modal__close:hover {
+  background: rgba(37, 99, 235, 0.1);
+  border-color: rgba(37, 99, 235, 0.4);
+  color: var(--zb-primary-700);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   PLOT PAGE DETAILS  (health bars, details card, plantation)
+   ══════════════════════════════════════════════════════════════════ */
+
+/* Plot detail rows — base (unskinned) */
+html[data-theme="light"] .plot-detail-row {
+  border-bottom-color: var(--zb-border);
+}
+html[data-theme="light"] .plot-detail-row--header {
+  background: var(--zb-surface);
+}
+html[data-theme="light"] .plot-detail-row--total {
+  background: rgba(37, 99, 235, 0.08);
+}
+html[data-theme="light"] .plot-detail-id,
+html[data-theme="light"] .plot-detail-value {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .plot-detail-project,
+html[data-theme="light"] .plot-detail-label {
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .plot-detail-value--accent { color: var(--zb-primary-700); }
+
+/* Same again inside the `.plot-page-skin` scope (overrides the
+   olive `.plot-page-skin .plot-detail-*` rules in App.css). */
+html[data-theme="light"] .plot-page-skin .plot-detail-row { border-bottom-color: var(--zb-border); }
+html[data-theme="light"] .plot-page-skin .plot-detail-row--header { background: var(--zb-surface); }
+html[data-theme="light"] .plot-page-skin .plot-detail-row--total { background: rgba(37, 99, 235, 0.08); }
+html[data-theme="light"] .plot-page-skin .plot-detail-id,
+html[data-theme="light"] .plot-page-skin .plot-detail-value { color: var(--zb-text); }
+html[data-theme="light"] .plot-page-skin .plot-detail-project,
+html[data-theme="light"] .plot-page-skin .plot-detail-label { color: var(--zb-text-dim); }
+html[data-theme="light"] .plot-page-skin .plot-detail-value--accent { color: var(--zb-primary-700); }
+html[data-theme="light"] .plot-page-skin .plot-inline-badge {
+  background: var(--zb-primary);
+  color: #ffffff;
+  box-shadow: 0 4px 10px rgba(37, 99, 235, 0.25);
+}
+
+/* Health bars */
+html[data-theme="light"] .health-bar-item {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  box-shadow: var(--zb-shadow-sm);
+}
+html[data-theme="light"] .plot-page-skin .health-bar-item {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+}
+html[data-theme="light"] .health-bar-header,
+html[data-theme="light"] .plot-page-skin .health-bar-header { color: var(--zb-text-dim); }
+html[data-theme="light"] .health-bar-track,
+html[data-theme="light"] .plot-page-skin .health-bar-track {
+  background: var(--zb-surface-2);
+}
+html[data-theme="light"] .health-bar-pct { color: var(--zb-text); }
+html[data-theme="light"] .health-bar-info { color: var(--zb-text-muted); }
+
+/* Next-action card — swap the olive tint for a blue wash */
+html[data-theme="light"] .health-next-action,
+html[data-theme="light"] .plot-page-skin .health-next-action {
+  background: rgba(37, 99, 235, 0.08);
+  border: 1px solid rgba(37, 99, 235, 0.22);
+}
+html[data-theme="light"] .health-next-label,
+html[data-theme="light"] .plot-page-skin .health-next-label { color: var(--zb-primary-700); }
+html[data-theme="light"] .health-next-value,
+html[data-theme="light"] .plot-page-skin .health-next-value { color: var(--zb-text); }
+
+/* Plantation / tree composition card */
+html[data-theme="light"] .plantation-section,
+html[data-theme="light"] .plot-page-skin .plantation-section {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  box-shadow: var(--zb-shadow-sm);
+}
+html[data-theme="light"] .plantation-section-title,
+html[data-theme="light"] .plot-page-skin .plantation-section-title {
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .plantation-card,
+html[data-theme="light"] .plot-page-skin .plantation-card {
+  background: var(--zb-surface);
+  border: 1px solid var(--zb-border);
+}
+html[data-theme="light"] .plantation-year,
+html[data-theme="light"] .plot-page-skin .plantation-year,
+html[data-theme="light"] .plantation-trees strong,
+html[data-theme="light"] .plot-page-skin .plantation-trees strong {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .plantation-trees span,
+html[data-theme="light"] .plot-page-skin .plantation-trees span {
+  color: var(--zb-text-dim);
+}
+html[data-theme="light"] .plantation-revenue span {
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .plantation-revenue em,
+html[data-theme="light"] .plot-page-skin .plantation-revenue em {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .plantation-revenue--zero {
+  color: var(--zb-text-muted) !important;
+}
+html[data-theme="light"] .plantation-total,
+html[data-theme="light"] .plot-page-skin .plantation-total {
+  border-top-color: var(--zb-border);
+  color: var(--zb-text);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   INV-FORECAST SVG BARS  (inline fill="#a8cc50"/#7ab020 on <rect>)
+   ──────────────────────────────────────────────────────────────────
+   Inline SVG attributes beat CSS `fill` — but a child rect still
+   inherits via `fill: currentColor` fallback if we set it explicitly
+   here. Using the attribute-equality selector catches the inline
+   fills and replaces them.
+   ══════════════════════════════════════════════════════════════════ */
+html[data-theme="light"] .inv-forecast__bars rect[fill="#a8cc50"] {
+  fill: var(--zb-accent);
+}
+html[data-theme="light"] .inv-forecast__bars rect[fill="#7ab020"] {
+  fill: var(--zb-primary);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   SKELETON LOADERS (src/styles/skeletons.css)
+   ──────────────────────────────────────────────────────────────────
+   The default skeleton palette is olive-tinted for the dark public
+   pages (rgba(22,41,23,0.55) on .sk-card, olive glint on the
+   shimmer). On the white light canvas those dark-green cards and
+   olive shimmer glints look like a broken theme. Rebind everything
+   to the neutral slate the admin shell uses so loading states blend
+   with the blue light palette.
+   ══════════════════════════════════════════════════════════════════ */
+
+/* Base shimmer tokens — slate on white instead of olive-on-dark. */
+html[data-theme="light"] {
+  --sk-base-light: rgba(148, 163, 184, 0.2);
+  --sk-glint-light: rgba(255, 255, 255, 0.8);
+  --sk-base-dark: rgba(148, 163, 184, 0.2);
+  --sk-glint-dark: rgba(255, 255, 255, 0.8);
+  --sk-base-hero: rgba(37, 99, 235, 0.1);
+  --sk-glint-hero: rgba(37, 99, 235, 0.22);
+}
+
+/* Override the `[data-theme="dark"]` shimmer rules that skeletons.css
+   applies — our theme toggle can swap off "dark" at runtime, but the
+   page might still have cached rules targeting it. Force slate. */
+html[data-theme="light"] .sk,
+html[data-theme="light"] .sk-line,
+html[data-theme="light"] .sk-num,
+html[data-theme="light"] .sk-box,
+html[data-theme="light"] .sk-avatar,
+html[data-theme="light"] .sk-button,
+html[data-theme="light"] .sk-map,
+html[data-theme="light"] .sk-thumb {
+  background: rgba(148, 163, 184, 0.2);
+}
+html[data-theme="light"] .sk::before,
+html[data-theme="light"] .sk-line::before,
+html[data-theme="light"] .sk-num::before,
+html[data-theme="light"] .sk-box::before,
+html[data-theme="light"] .sk-avatar::before,
+html[data-theme="light"] .sk-button::before,
+html[data-theme="light"] .sk-map::before,
+html[data-theme="light"] .sk-thumb::before {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.8) 50%,
+    transparent 100%
+  );
+}
+
+/* Card / hero / section / KPI composite surfaces — white with a blue
+   border instead of the dark-green public card. */
+html[data-theme="light"] .sk-card,
+html[data-theme="light"] .sk-card--light,
+html[data-theme="light"] .sk-detail__hero,
+html[data-theme="light"] .sk-kpi,
+html[data-theme="light"] .sk-kpi--dark {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  box-shadow: var(--zb-shadow-sm);
+}
+html[data-theme="light"] .sk-detail__section {
+  background: var(--zb-surface);
+  border: 1px solid var(--zb-border);
+}
+html[data-theme="light"] .sk-tree__dot {
+  background: rgba(37, 99, 235, 0.35);
+}
+html[data-theme="light"] .sk-table__row {
+  border-color: var(--zb-border);
+  background: #ffffff;
+}
+
+/* ── Route-level chunk progress bar (Suspense fallback) ──────────
+   Default is a green (#16a34a) slide — replace with primary blue so
+   the loader that shows on every route change / hard refresh is on
+   brand. */
+html[data-theme="light"] .app-loader--chunk {
+  background: rgba(37, 99, 235, 0.1);
+}
+html[data-theme="light"] .app-loader--chunk__bar {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--zb-primary) 50%,
+    transparent 100%
+  );
+}
+
+/* Auth-hydration full-page loader (the brand-centered screen shown
+   while AuthContext bootstraps) */
+html[data-theme="light"] .app-loader--route {
+  background: var(--zb-bg);
+  color: var(--zb-text-dim);
+}
+
+/* Chunk-page skeleton wrapper — the page-shaped placeholder under
+   the progress bar. Its hero card defaults to an olive tint. */
+html[data-theme="light"] .app-loader--page__hero {
+  background: #ffffff;
+  border: 1px solid var(--zb-border);
+  box-shadow: var(--zb-shadow-sm);
+}
+
+/* Admin-shell slate overrides in skeletons.css use !important, so
+   no override needed for /admin — they already render correctly on
+   the white admin canvas. */
+
+/* Legacy .pub-sk / .inv-sk / .sp-sk keyframes in App.css and
+   dashboard-page.css still animate an olive glint. Re-tint the
+   shimmer element itself — the containers we already restyled. */
+html[data-theme="light"] [class*="pub-sk"],
+html[data-theme="light"] [class*="inv-sk"],
+html[data-theme="light"] [class*="sp-sk"] {
+  background-color: rgba(148, 163, 184, 0.18) !important;
+  background-image: linear-gradient(
+    90deg,
+    rgba(148, 163, 184, 0.18) 0%,
+    rgba(255, 255, 255, 0.8) 50%,
+    rgba(148, 163, 184, 0.18) 100%
+  ) !important;
+  color: var(--zb-text-muted) !important;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   PULL-TO-REFRESH
+   ──────────────────────────────────────────────────────────────────
+   The PTR bubble is already white + blue commit state (see
+   src/components/pull-to-refresh.css), but on the white light canvas
+   we want the idle bubble to carry a slightly tinted shadow so it
+   reads against white without looking like a speck.
+   ══════════════════════════════════════════════════════════════════ */
+html[data-theme="light"] .ptr-bubble {
+  background: #ffffff;
+  color: var(--zb-primary-700);
+  box-shadow:
+    0 6px 18px rgba(37, 99, 235, 0.18),
+    0 0 0 1px rgba(37, 99, 235, 0.12);
+}
+html[data-theme="light"] .ptr-bubble--ready {
+  background: var(--zb-primary);
+  color: #ffffff;
+  box-shadow:
+    0 10px 24px rgba(37, 99, 235, 0.4),
+    0 0 0 1px rgba(37, 99, 235, 0.3);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   THEME-SWAP TRANSITIONS
+   ══════════════════════════════════════════════════════════════════ */
+html[data-theme="light"] body,
+html[data-theme="light"] .screen--app,
+html[data-theme="light"] .screen--login,
+html[data-theme="light"] .top-bar-wrap,
+html[data-theme="light"] .icon-action,
+html[data-theme="light"] .top-nav-link,
+html[data-theme="light"] .proj-card,
+html[data-theme="light"] .login-content,
+html[data-theme="light"] .inv-header,
+html[data-theme="light"] .inv-wallet,
+html[data-theme="light"] .inv-kpi,
+html[data-theme="light"] .inv-parcel-card,
+html[data-theme="light"] .plot-mini-card {
+  transition:
+    background-color 220ms ease,
+    color 220ms ease,
+    border-color 220ms ease,
+    box-shadow 220ms ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme="light"] body,
+  html[data-theme="light"] .screen--app,
+  html[data-theme="light"] .screen--login,
+  html[data-theme="light"] .top-bar-wrap,
+  html[data-theme="light"] .icon-action,
+  html[data-theme="light"] .top-nav-link,
+  html[data-theme="light"] .proj-card,
+  html[data-theme="light"] .login-content,
+  html[data-theme="light"] .inv-header,
+  html[data-theme="light"] .inv-wallet,
+  html[data-theme="light"] .inv-kpi,
+  html[data-theme="light"] .inv-parcel-card,
+  html[data-theme="light"] .plot-mini-card {
+    transition: none;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   MANDAT / VISIT-REQUEST PAGE (.mandat-page)
+   The baseline design assumes a dark olive canvas:
+     - Greeting text is tan (#d1cabe)   → invisible on light bg
+     - Back button defaults to white text → invisible on light bg
+     - Card has a near-black drop shadow → too heavy on light bg
+     - Team-note + actions footer are painted dark green (#1d2915)
+       while the rest of the card is white → jarring two-tone look
+   Light-mode rebinds these to the blue/white token palette so the
+   page reads as one coherent surface.
+   ══════════════════════════════════════════════════════════════════ */
+html[data-theme="light"] .mandat-greeting {
+  color: var(--zb-text);
+}
+
+html[data-theme="light"] .mandat-page .detail-nav .back-btn {
+  background: var(--zb-surface);
+  border: 1px solid var(--zb-border);
+  color: var(--zb-text);
+  box-shadow: var(--zb-shadow-xs);
+}
+html[data-theme="light"] .mandat-page .detail-nav .back-btn:hover {
+  background: var(--zb-surface-2);
+  color: var(--zb-primary);
+  border-color: var(--zb-border-strong);
+}
+
+html[data-theme="light"] .mandat-card {
+  border: 1px solid var(--zb-border);
+  box-shadow: var(--zb-shadow-md);
+}
+
+/* Section dividers were tuned for dark ambient; soften them for light. */
+html[data-theme="light"] .mandat-section {
+  border-bottom-color: var(--zb-border);
+}
+
+/* Footer blocks (team note + actions). The baseline uses the dark
+   olive palette (bg #1d2915, tan text) — swap to a light surface. */
+html[data-theme="light"] .mandat-team-note {
+  background: var(--zb-surface-2);
+  color: var(--zb-text-dim);
+  border-top-color: var(--zb-border);
+}
+html[data-theme="light"] .mandat-team-note-title {
+  color: var(--zb-text);
+}
+
+html[data-theme="light"] .mandat-actions {
+  background: var(--zb-surface-2);
+  border-top-color: var(--zb-border);
+}
+
+/* Secondary "outline" button — dark-green fill + gold border reads
+   as a mistake next to the light card. Keep it outlined on white. */
+html[data-theme="light"] .mandat-btn--outline {
+  background: var(--zb-surface);
+  border: 2px solid var(--zb-primary);
+  color: var(--zb-primary);
+}
+html[data-theme="light"] .mandat-btn--outline:hover {
+  background: var(--zb-primary-50);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   COMMISSION TREE — FULLSCREEN GRAPH  (.mrg*)
+   ──────────────────────────────────────────────────────────────────
+   The pan/zoom referral tree (`MyReferralTreeGraph`) is a completely
+   standalone dark surface: olive tinted viewport, glass-dark node
+   cards, olive edges, olive tags. Rebuild it on white with the blue
+   palette so it matches the rest of the light app.
+   ══════════════════════════════════════════════════════════════════ */
+html[data-theme="light"] .mrg {
+  background: var(--zb-bg);
+}
+
+/* Toolbar + stats pills ------------------------------------------- */
+html[data-theme="light"] .mrg-toolbar {
+  background: var(--zb-surface);
+  border-color: var(--zb-border);
+}
+html[data-theme="light"] .mrg-stats__item {
+  background: var(--zb-primary-50);
+  border-color: rgba(37, 99, 235, 0.22);
+  color: var(--zb-text);
+}
+html[data-theme="light"] .mrg-stats__item span {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .mrg-stats__item--good {
+  background: rgba(34, 197, 94, 0.14);
+  border-color: rgba(34, 197, 94, 0.35);
+  color: #166534;
+}
+
+html[data-theme="light"] .mrg-toolbar__input {
+  background: var(--zb-surface);
+  border-color: var(--zb-border);
+  color: var(--zb-text);
+}
+html[data-theme="light"] .mrg-toolbar__input::placeholder {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .mrg-toolbar__input:focus {
+  border-color: var(--zb-primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18);
+}
+html[data-theme="light"] .mrg-toolbar__match {
+  background: var(--zb-primary-50);
+  color: var(--zb-primary-700);
+}
+
+html[data-theme="light"] .mrg-toolbar__zoom {
+  background: var(--zb-surface);
+  border-color: var(--zb-border);
+}
+html[data-theme="light"] .mrg-toolbar__btn {
+  color: var(--zb-text);
+}
+html[data-theme="light"] .mrg-toolbar__btn:hover {
+  background: var(--zb-primary-50);
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .mrg-toolbar__pct {
+  color: var(--zb-text-dim);
+}
+
+/* Viewport + canvas grid ------------------------------------------ */
+html[data-theme="light"] .mrg-viewport {
+  background:
+    radial-gradient(circle at 1px 1px, rgba(37, 99, 235, 0.14) 1px, transparent 1.5px) 0 0 / 24px 24px,
+    linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
+  border-color: var(--zb-border);
+}
+
+/* Edges ---------------------------------------------------------- */
+html[data-theme="light"] .mrg-edge {
+  stroke: rgba(37, 99, 235, 0.35);
+}
+html[data-theme="light"] .mrg-edge--sel {
+  stroke: var(--zb-primary);
+}
+
+/* Node cards ----------------------------------------------------- */
+html[data-theme="light"] .mrg-card {
+  background: #ffffff;
+  border-color: var(--zb-border);
+  color: var(--zb-text);
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+}
+html[data-theme="light"] .mrg-card:hover {
+  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.16);
+}
+html[data-theme="light"] .mrg-card--sel {
+  border-color: var(--zb-primary);
+  box-shadow:
+    0 0 0 3px rgba(37, 99, 235, 0.18),
+    0 10px 24px rgba(37, 99, 235, 0.18);
+}
+html[data-theme="light"] .mrg-card--hl {
+  outline-color: rgba(245, 158, 11, 0.7);
+}
+html[data-theme="light"] .mrg-card--root {
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.14) 0%, rgba(37, 99, 235, 0.06) 100%);
+  border-color: var(--zb-primary);
+}
+html[data-theme="light"] .mrg-card--d1 { border-color: rgba(37, 99, 235, 0.45); }
+html[data-theme="light"] .mrg-card--d2 { border-color: rgba(245, 158, 11, 0.45); }
+html[data-theme="light"] .mrg-card--d3 { border-color: rgba(234, 88, 12, 0.45); }
+html[data-theme="light"] .mrg-card--d4 { border-color: rgba(139, 92, 246, 0.45); }
+html[data-theme="light"] .mrg-card--d5 { border-color: rgba(148, 163, 184, 0.55); }
+
+/* Root "VOUS" tag — keep semantic blue on light */
+html[data-theme="light"] .mrg-card__tag {
+  background: var(--zb-primary);
+  color: #ffffff;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.25);
+}
+html[data-theme="light"] .mrg-card__avatar {
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.18) 0%, rgba(37, 99, 235, 0.32) 100%);
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .mrg-card__meta {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .mrg-card__foot {
+  border-top-color: var(--zb-border);
+}
+html[data-theme="light"] .mrg-card__foot span {
+  color: var(--zb-text-muted);
+}
+
+/* Matches overlay ------------------------------------------------ */
+html[data-theme="light"] .mrg-matches__btn {
+  background: var(--zb-primary-50);
+  border-color: rgba(37, 99, 235, 0.28);
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .mrg-matches__btn:hover {
+  background: rgba(37, 99, 235, 0.14);
+}
+
+/* Detail panel (selected node) ----------------------------------- */
+html[data-theme="light"] .mrg-detail {
+  background: #ffffff;
+  border-color: var(--zb-border);
+  color: var(--zb-text);
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.18);
+}
+html[data-theme="light"] .mrg-detail__avatar {
+  background: linear-gradient(135deg, var(--zb-primary) 0%, var(--zb-primary-700) 100%);
+  color: #ffffff;
+}
+html[data-theme="light"] .mrg-detail__sub {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .mrg-detail__close {
+  background: var(--zb-primary-50);
+  border-color: rgba(37, 99, 235, 0.22);
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .mrg-detail__close:hover {
+  background: rgba(37, 99, 235, 0.16);
+}
+html[data-theme="light"] .mrg-detail__rows > div {
+  border-bottom-color: var(--zb-border);
+}
+html[data-theme="light"] .mrg-detail__rows dt {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .mrg-detail__rows dd {
+  color: var(--zb-text);
+}
+
+/* "Glissez pour déplacer" hint bar ------------------------------- */
+html[data-theme="light"] .mrg-hint {
+  background: rgba(255, 255, 255, 0.85);
+  border-color: var(--zb-border);
+  color: var(--zb-text-muted);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   UPDATE BANNER  (.version-banner)
+   ──────────────────────────────────────────────────────────────────
+   "Nouvelle version disponible" pinned bar. Baseline is a dark-green
+   gradient with olive button — swap to a primary-blue surface on
+   light mode so the banner stops screaming at the user.
+   ══════════════════════════════════════════════════════════════════ */
+html[data-theme="light"] .version-banner {
+  background: linear-gradient(90deg, var(--zb-primary) 0%, var(--zb-primary-700) 100%);
+  color: #ffffff;
+  border-bottom-color: rgba(37, 99, 235, 0.35);
+  box-shadow: 0 2px 10px rgba(37, 99, 235, 0.2);
+}
+html[data-theme="light"] .version-banner__btn {
+  background: #ffffff;
+  color: var(--zb-primary-700);
+  font-weight: 700;
+}
+html[data-theme="light"] .version-banner__btn:hover {
+  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.18);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   INSTALLMENTS — HERO KPI TILES  (.ip__kpi)
+   ──────────────────────────────────────────────────────────────────
+   The 4-up KPI strip above the plans list hardcodes a dark olive
+   surface + vertical separator. Variables only cover text colour.
+   ══════════════════════════════════════════════════════════════════ */
+html[data-theme="light"] .ip__kpi {
+  background: var(--zb-surface);
+  border-color: var(--zb-border);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+html[data-theme="light"] .ip__hero-kpi--strip .ip__kpi + .ip__kpi::before {
+  background: var(--zb-border);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   PLOT DETAILS — CARD SHELL  (.plot-page-skin .plot-details-card)
+   ──────────────────────────────────────────────────────────────────
+   The wrapper around the plot info rows is a dark frosted panel
+   baked into App.css. The inner rows are already light-mode aware;
+   the shell was missed.
+   ══════════════════════════════════════════════════════════════════ */
+html[data-theme="light"] .plot-page-skin .plot-details-card {
+  background: var(--zb-surface);
+  border: 1px solid var(--zb-border);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
+}
+html[data-theme="light"] .plot-page-skin .plot-detail-row {
+  border-bottom-color: var(--zb-border);
+}
+html[data-theme="light"] .plot-page-skin .plot-inline-badge {
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.25);
+}
+/* Plantation tile leftovers (revenue + total) */
+html[data-theme="light"] .plot-page-skin .plantation-revenue em,
+html[data-theme="light"] .plot-page-skin .plantation-total {
+  color: var(--zb-text-muted);
+}
+html[data-theme="light"] .plot-page-skin .plantation-total {
+  border-top-color: var(--zb-border);
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   ProfileRevenuePanel — light-mode palette. Swaps the dashboard's dark
+   olive / green scheme for the admin blue family so "Mes revenus" stays
+   on-brand in light mode.
+   ══════════════════════════════════════════════════════════════════════ */
+html[data-theme="light"] .inv-rev-panel {
+  border: 1px solid rgba(37, 99, 235, 0.22);
+  background:
+    radial-gradient(120% 80% at 0% 0%, rgba(37, 99, 235, 0.10), transparent 60%),
+    radial-gradient(120% 80% at 100% 100%, rgba(37, 99, 235, 0.06), transparent 55%),
+    linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  color: var(--zb-text);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.6) inset, 0 10px 28px rgba(15, 23, 42, 0.08);
+}
+html[data-theme="light"] .inv-rev-panel__glow {
+  background: radial-gradient(ellipse at 25% 10%, rgba(37, 99, 235, 0.18), transparent 45%);
+  opacity: 0.55;
+}
+html[data-theme="light"] .inv-rev-panel__kicker {
+  background: rgba(37, 99, 235, 0.1);
+  border-color: rgba(37, 99, 235, 0.3);
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .inv-rev-panel__title { color: var(--zb-text); }
+html[data-theme="light"] .inv-rev-panel__section-label { color: var(--zb-text-muted); }
+
+html[data-theme="light"] .inv-rev-panel__hero {
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.08) 0%, rgba(248, 250, 252, 0.75) 70%);
+  border-color: var(--zb-border);
+}
+html[data-theme="light"] .inv-rev-panel__ring {
+  filter: drop-shadow(0 2px 6px rgba(37, 99, 235, 0.22));
+}
+/* Ring gradient — remap the olive stops to the blue palette */
+html[data-theme="light"] #inv-rev-ring-grad stop:nth-child(1) { stop-color: #2563eb; }
+html[data-theme="light"] #inv-rev-ring-grad stop:nth-child(2) { stop-color: #1e40af; }
+html[data-theme="light"] .inv-rev-panel__ring-num { color: var(--zb-text); }
+html[data-theme="light"] .inv-rev-panel__ring-lbl { color: var(--zb-text-muted); }
+html[data-theme="light"] .inv-rev-panel__hero-amount {
+  color: var(--zb-primary);
+  text-shadow: none;
+}
+html[data-theme="light"] .inv-rev-panel__hero-unit { color: var(--zb-text-muted); }
+html[data-theme="light"] .inv-rev-panel__hero-sub { color: var(--zb-text-dim); }
+html[data-theme="light"] .inv-rev-panel__hero-sub strong { color: var(--zb-text); }
+html[data-theme="light"] .inv-rev-panel__hero-dot { color: var(--zb-border); }
+html[data-theme="light"] .inv-rev-panel__payback {
+  background: rgba(37, 99, 235, 0.1);
+  border-color: rgba(37, 99, 235, 0.28);
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .inv-rev-panel__payback strong { color: var(--zb-text); }
+
+html[data-theme="light"] .inv-rev-panel__cumul {
+  background: var(--zb-surface-2);
+  border-color: var(--zb-border);
+}
+html[data-theme="light"] .inv-rev-panel__horizon-btns {
+  background: rgba(15, 23, 42, 0.04);
+  border-color: var(--zb-border);
+}
+html[data-theme="light"] .inv-rev-panel__horizon-btn { color: var(--zb-text-muted); }
+html[data-theme="light"] .inv-rev-panel__horizon-btn:hover:not(.inv-rev-panel__horizon-btn--active) {
+  color: var(--zb-text);
+  background: rgba(37, 99, 235, 0.08);
+}
+html[data-theme="light"] .inv-rev-panel__horizon-btn--active {
+  background: linear-gradient(180deg, #2563eb, #1e40af);
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.35);
+}
+html[data-theme="light"] .inv-rev-panel__cumul-bar {
+  background: rgba(15, 23, 42, 0.06);
+}
+html[data-theme="light"] .inv-rev-panel__cumul-fill {
+  background: linear-gradient(90deg, #1e40af 0%, #2563eb 55%, #60a5fa 100%);
+  box-shadow: 0 0 14px rgba(37, 99, 235, 0.45);
+}
+html[data-theme="light"] .inv-rev-panel__cumul-value { color: var(--zb-text-muted); }
+html[data-theme="light"] .inv-rev-panel__cumul-value strong { color: var(--zb-text); }
+
+html[data-theme="light"] .inv-rev-panel__stack {
+  background: rgba(15, 23, 42, 0.06);
+  border-color: var(--zb-border);
+}
+html[data-theme="light"] .inv-rev-panel__stack-seg + .inv-rev-panel__stack-seg {
+  border-left-color: rgba(255, 255, 255, 0.55);
+}
+html[data-theme="light"] .inv-rev-panel__bd-title { color: var(--zb-text); }
+html[data-theme="light"] .inv-rev-panel__bd-pct { color: var(--zb-text-muted); }
+html[data-theme="light"] .inv-rev-panel__bd-amount { color: var(--zb-primary-700); }
+html[data-theme="light"] .inv-rev-panel__bd-amount::after { color: var(--zb-text-muted); }
+
+html[data-theme="light"] .inv-rev-panel__top-row {
+  background: var(--zb-surface-2);
+  border-color: var(--zb-border);
+}
+html[data-theme="light"] .inv-rev-panel__top-row:hover {
+  border-color: rgba(37, 99, 235, 0.45);
+}
+html[data-theme="light"] .inv-rev-panel__top-title { color: var(--zb-text); }
+html[data-theme="light"] .inv-rev-panel__top-sub { color: var(--zb-text-muted); }
+html[data-theme="light"] .inv-rev-panel__top-amount strong { color: var(--zb-primary-700); }
+html[data-theme="light"] .inv-rev-panel__top-amount span { color: var(--zb-text-muted); }
+
+/* Medals — keep the rank hierarchy but drop the gold/bronze warmth so
+   the panel stays fully on the cool brand palette (blue / silver / slate). */
+html[data-theme="light"] .inv-rev-panel__rank {
+  background: linear-gradient(180deg, #2563eb, #1e40af);
+  color: #ffffff;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.18);
+}
+html[data-theme="light"] .inv-rev-panel__rank--1 { background: linear-gradient(180deg, #3b82f6, #1d4ed8); color: #ffffff; }
+html[data-theme="light"] .inv-rev-panel__rank--2 { background: linear-gradient(180deg, #e2e8f0, #94a3b8); color: #1e293b; }
+html[data-theme="light"] .inv-rev-panel__rank--3 { background: linear-gradient(180deg, #94a3b8, #475569); color: #ffffff; }
+
+html[data-theme="light"] .inv-rev-panel__foot,
+html[data-theme="light"] .inv-rev-panel__foot svg { color: var(--zb-text-muted); }
+
+html[data-theme="light"] .inv-rev-panel__empty-icon {
+  background: rgba(37, 99, 235, 0.1);
+  border-color: rgba(37, 99, 235, 0.3);
+  color: var(--zb-primary);
+}
+html[data-theme="light"] .inv-rev-panel__empty-title { color: var(--zb-text); }
+html[data-theme="light"] .inv-rev-panel__empty-sub { color: var(--zb-text-muted); }
+
+/* ══════════════════════════════════════════════════════════════════
+   LIGHT-THEME GOLD CLEANUP
+   Remaining gold/amber hex values that bypass the design tokens —
+   rebind them to the cool blue / slate palette so the light UI is
+   fully gold-free.
+   ══════════════════════════════════════════════════════════════════ */
+html[data-theme="light"] .link-btn {
+  color: var(--zb-primary-700);
+}
+html[data-theme="light"] .link-btn:hover {
+  color: var(--zb-primary);
+}
+html[data-theme="light"] .mandat-btn--gold {
+  background: var(--zb-primary);
+  color: #ffffff;
+  text-shadow: none;
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.28),
+              inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+html[data-theme="light"] .mandat-btn--gold:hover { filter: brightness(1.05); }
+html[data-theme="light"] .plot-page-btn--gold {
+  background: var(--zb-primary);
+  color: #ffffff;
+  text-shadow: none;
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.28);
+}
+html[data-theme="light"] .plot-page-btn--gold:hover { filter: brightness(1.05); }
+html[data-theme="light"] .health-pct-overlay--yellow,
+html[data-theme="light"] .health-card-sub--yellow { color: var(--zb-text-dim); }
+html[data-theme="light"] .health-bar-fill--yellow {
+  background: linear-gradient(90deg, #94a3b8, #64748b);
+}
+html[data-theme="light"] .ap-role-badge--owner {
+  border-color: rgba(37, 99, 235, 0.3);
+  color: var(--zb-primary-700);
+  background: var(--zb-primary-50);
+}
+html[data-theme="light"] .badge--amber {
+  background: var(--zb-surface-2);
+  color: var(--zb-text-dim);
+  border: 0.5px solid var(--zb-border);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   TOP BAR — hide the key icon on the admin switch in light mode.
+   The button itself stays (it is the admin entry) but the icon is
+   swapped out via the ::after badge and the inner SVG is masked.
+   ══════════════════════════════════════════════════════════════════ */
+html[data-theme="light"] .top-admin-switch svg { display: none; }
+html[data-theme="light"] .top-admin-switch {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+html[data-theme="light"] .top-admin-switch::before {
+  content: "•••";
+  font-size: 14px;
+  line-height: 1;
+  letter-spacing: 1px;
+  color: currentColor;
+  font-weight: 900;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   DASHBOARD — "Mon profil" pill in the greeting card.
+   Turn the faint primary-50 tint into a proper gradient button with a
+   visible icon badge + lift shadow so it reads unambiguously as a CTA.
+   ══════════════════════════════════════════════════════════════════ */
+/* Header is a blue gradient card in both themes — action buttons
+   (home / admin key / profile) are solid white pills with a navy icon
+   so they stay clearly visible against the gradient. */
+html[data-theme="light"] .inv-header__profile-btn,
+html[data-theme="light"] .inv-header__act-btn {
+  border: none;
+  background: rgba(255, 255, 255, 0.92);
+  color: #062a6e;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.14);
+  font-weight: 600;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+html[data-theme="light"] .inv-header__profile-btn:hover,
+html[data-theme="light"] .inv-header__act-btn:hover {
+  background: #ffffff;
+  color: #062a6e;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.20);
+}
+html[data-theme="light"] .inv-header__profile-btn .inv-header__profile-btn-icon {
+  background: transparent;
+  color: inherit;
+  border: none;
+}
+html[data-theme="light"] .inv-header__profile-btn:hover .inv-header__profile-btn-icon {
+  background: transparent;
+  color: inherit;
+}
+html[data-theme="light"] .inv-header__profile-btn:focus-visible,
+html[data-theme="light"] .inv-header__act-btn:focus-visible {
+  outline: 2px solid #ffffff;
+  outline-offset: 2px;
+}
+html[data-theme="light"] .inv-header .notif-menu__bell {
+  background: rgba(255, 255, 255, 0.92);
+  color: #062a6e;
+  border: none;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.14);
+}
+html[data-theme="light"] .inv-header .notif-menu__bell:hover {
+  background: #ffffff;
+  color: #062a6e;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.20);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   PROFILE MODAL — "Mon profil" header presented as a prominent badge
+   so it matches the new greeting-card button styling.
+   ══════════════════════════════════════════════════════════════════ */
+html[data-theme="light"] .inv-profile__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, var(--zb-primary-50), #ffffff);
+  border: 1px solid rgba(37, 99, 235, 0.35);
+  color: var(--zb-primary-700);
+  font-weight: 700;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.6) inset,
+              0 2px 6px rgba(37, 99, 235, 0.12);
+}
+html[data-theme="light"] .inv-profile__title::before {
+  content: "";
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: linear-gradient(180deg, var(--zb-primary), var(--zb-primary-600));
+  display: inline-block;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   PROFILE MODAL — redesigned "Enregistrer" + "Changer le numéro"
+   buttons. Gradient primary for the save CTA; tinted primary for the
+   phone-change CTA so the two read as a clear hierarchy.
+   ══════════════════════════════════════════════════════════════════ */
+html[data-theme="light"] .inv-profile__save {
+  background: linear-gradient(180deg, var(--zb-primary) 0%, var(--zb-primary-600) 100%);
+  color: #ffffff;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.35) inset,
+              0 8px 20px rgba(37, 99, 235, 0.32);
+  font-weight: 800;
+  letter-spacing: 0.2px;
+}
+html[data-theme="light"] .inv-profile__save:hover:not(:disabled) {
+  background: linear-gradient(180deg, var(--zb-primary) 0%, var(--zb-primary-700) 100%);
+  filter: none;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.4) inset,
+              0 12px 26px rgba(37, 99, 235, 0.42);
+}
+html[data-theme="light"] .inv-profile__save:disabled {
+  background: var(--zb-surface-3);
+  color: var(--zb-text-muted);
+  box-shadow: none;
+}
+html[data-theme="light"] .inv-profile__save .inv-profile__save-icon {
+  background: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+}
+
+html[data-theme="light"] .inv-profile__pc-card-cta {
+  background: linear-gradient(180deg, #ffffff 0%, var(--zb-primary-50) 100%);
+  color: var(--zb-primary-700);
+  border: 1px solid rgba(37, 99, 235, 0.45);
+  border-radius: 12px;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.6) inset,
+              0 4px 12px rgba(37, 99, 235, 0.1);
+  font-weight: 700;
+}
+html[data-theme="light"] .inv-profile__pc-card-cta:hover:not(:disabled) {
+  background: linear-gradient(180deg, var(--zb-primary-50) 0%, var(--zb-primary-100) 100%);
+  border-color: rgba(37, 99, 235, 0.6);
+  color: var(--zb-primary-700);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.7) inset,
+              0 6px 16px rgba(37, 99, 235, 0.2);
+  filter: none;
+}
+html[data-theme="light"] .inv-profile__pc-card-cta .inv-profile__pc-card-cta-icon {
+  background: var(--zb-primary);
+  color: #ffffff;
+  border: 1px solid var(--zb-primary-600);
+}
+html[data-theme="light"] .inv-profile__pc-card-cta .inv-profile__pc-card-cta-arrow {
+  color: var(--zb-primary);
+}
+html[data-theme="light"] .inv-profile__pc-card-cta:disabled {
+  background: var(--zb-surface-3);
+  color: var(--zb-text-muted);
+  border-color: var(--zb-border);
+  opacity: 1;
+}
+html[data-theme="light"] .inv-profile__pc-card-cta:disabled .inv-profile__pc-card-cta-icon {
+  background: var(--zb-border);
+  color: var(--zb-text-muted);
+  border-color: var(--zb-border);
+}

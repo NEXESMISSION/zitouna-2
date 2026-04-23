@@ -502,6 +502,11 @@ export default function SellPage() {
   const [clientSaving, setClientSaving] = useState(false)
   const [saleSaving, setSaleSaving] = useState(false)
   const [cinLookup, setCinLookup] = useState('')
+  // Country dial code for the buyer-lookup input. Defaults to Tunisia (+216);
+  // switching changes accepted length and lookup strategy (Tunisia keeps the
+  // local-8 last-8 match, other codes go straight to the DB with the full
+  // E.164 string to avoid false positives against Tunisian records).
+  const [cinLookupCc, setCinLookupCc] = useState('+216')
   const [cinLookupResult, setCinLookupResult] = useState(null)
   const [phoneLookupBusy, setPhoneLookupBusy] = useState(false)
   const [phoneLookupError, setPhoneLookupError] = useState(false)
@@ -684,6 +689,34 @@ export default function SellPage() {
     return Number.isFinite(num) && num >= 0 ? num : base
   }, [form.useCustomPrice, form.overridePrices, computedPlotPrice])
 
+  // Price contributed by a single plot under a given offer. Offers can price
+  // a plot three different ways; we resolve in this order (once the manual
+  // override didn't claim the plot):
+  //   1) price_per_sqm   — plot.area × offer.pricePerSqm (m²-based pricing)
+  //   2) offer flat price — per-plot price carried on the offer
+  //   3) cashAmount      — per-plot amount on cash-mode offers
+  // Falls back to the plot's catalog totalPrice when the offer says nothing.
+  // This is what makes m²-priced projects (offer.pricePerSqm > 0) actually
+  // compute a non-zero total — previously effectivePlotPrice ignored it.
+  const plotPriceForOffer = useCallback((pl, offer) => {
+    if (!pl) return 0
+    if (form.useCustomPrice) {
+      const raw = form.overridePrices?.[String(pl.id)]
+      if (raw !== undefined && raw !== null && raw !== '') {
+        const num = Number(String(raw).replace(/\s/g, '').replace(',', '.'))
+        if (Number.isFinite(num) && num >= 0) return num
+      }
+      return Number(pl.totalPrice) || 0
+    }
+    const sqm = Number(offer?.pricePerSqm) || 0
+    if (sqm > 0) return (Number(pl.area) || 0) * sqm
+    const flat = Number(offer?.price) || 0
+    if (flat > 0) return flat
+    const cash = Number(offer?.cashAmount) || 0
+    if (cash > 0) return cash
+    return Number(pl.totalPrice) || 0
+  }, [form.useCustomPrice, form.overridePrices])
+
   const totalArea = selectedPlots.reduce((s, p) => s + (p.area || 0), 0)
   const totalPlotPrice = selectedPlots.reduce((s, p) => s + effectivePlotPrice(p), 0)
 
@@ -719,11 +752,16 @@ export default function SellPage() {
   // exist (staff creates it directly, delegated seller goes through the
   // create_buyer_stub_for_sale RPC). We enforce that here so the wizard
   // cannot reach salesCreate with an empty uuid.
+  // Only block the submit when there is at least one *installments*-mode
+  // offer to choose from. Cash-mode offers can't be picked in the
+  // échelonné flow, so counting them here used to force the user to
+  // select one when none was actually eligible.
+  const installmentsOfferCount = projectOffers.filter((o) => o?.mode !== 'cash').length
   const saleFormSubmitBlocked =
     !form.projectId ||
     form.plotIds.length === 0 ||
     !form.clientId ||
-    (form.paymentType === 'installments' && form.offerId === '' && projectOffers.length > 0)
+    (form.paymentType === 'installments' && form.offerId === '' && installmentsOfferCount > 0)
 
   // Must resolve from cinLookupResult when the client was found via fetchClientByPhone
   // (delegated sellers often don't have the full clients[] list in memory).
@@ -738,10 +776,24 @@ export default function SellPage() {
   const wizardFinancialRecap = useMemo(() => {
     const arabon = Number(form.deposit) || 0
     if (form.paymentType === 'full' && selectedPlots.length > 0) {
-      const toPay = Math.max(0, totalPlotPrice - arabon)
+      // Comptant mode has no offer selector. For m²-priced projects the
+      // plot's catalog totalPrice is 0, so we fall back to the first offer
+      // that defines a price/m² (preferring a cash-mode offer) so the admin
+      // still sees a meaningful total.
+      let fullTotal = totalPlotPrice
+      if (fullTotal === 0 && !form.useCustomPrice) {
+        const fallbackOffer =
+          projectOffers.find((o) => o?.mode === 'cash' && (Number(o.pricePerSqm) || 0) > 0)
+          ?? projectOffers.find((o) => (Number(o.pricePerSqm) || 0) > 0)
+          ?? projectOffers.find((o) => o?.mode === 'cash' && (Number(o.cashAmount) || 0) > 0)
+        if (fallbackOffer) {
+          fullTotal = selectedPlots.reduce((s, p) => s + plotPriceForOffer(p, fallbackOffer), 0)
+        }
+      }
+      const toPay = Math.max(0, fullTotal - arabon)
       return {
         kind: 'full',
-        totalPlotPrice,
+        totalPlotPrice: fullTotal,
         arabon,
         toPay,
         plotCount: selectedPlots.length,
@@ -754,10 +806,10 @@ export default function SellPage() {
       selectedPlots.length > 0
     ) {
       const o = projectOffers[Number(form.offerId)]
-      const price = (!form.useCustomPrice && o.price) ? o.price * selectedPlots.length : totalPlotPrice
+      const price = selectedPlots.reduce((s, p) => s + plotPriceForOffer(p, o), 0)
       const down = Math.round((price * o.downPayment) / 100)
       const remaining = price - down
-      const monthly = Math.round(remaining / o.duration)
+      const monthly = o.duration > 0 ? Math.round(remaining / o.duration) : 0
       const toPay = Math.max(0, down - arabon)
       return {
         kind: 'installments',
@@ -774,7 +826,7 @@ export default function SellPage() {
       }
     }
     return { kind: 'incomplete' }
-  }, [form.deposit, form.paymentType, form.offerId, form.useCustomPrice, selectedPlots, totalPlotPrice, projectOffers])
+  }, [form.deposit, form.paymentType, form.offerId, form.useCustomPrice, selectedPlots, totalPlotPrice, projectOffers, plotPriceForOffer])
 
   const saleBeingEdited = useMemo(
     () => (editId ? sales.find((s) => String(s.id) === String(editId)) : null),
@@ -942,10 +994,21 @@ export default function SellPage() {
     const offer = isInstallments ? (projectOffers[Number(form.offerId)] || null) : null
 
     const plotsTotalPrice = plots.reduce((s, p) => s + effectivePlotPrice(p), 0)
-    // When the user manually overrides per-parcel prices, their total is
-    // authoritative and supersedes the offer's flat-price multiplication.
-    const price = (!form.useCustomPrice && offer && offer.price)
-      ? (offer.price * plots.length)
+    // Agreed price honors (in order): manual per-parcel overrides, the
+    // selected offer (m² → flat → cash), and finally catalog totalPrice.
+    // For comptant in an m²-priced project we fall back to the first offer
+    // carrying a price/m² so the sale can still be saved.
+    let fallbackOfferForFull = null
+    if (!isInstallments && !form.useCustomPrice && plotsTotalPrice === 0) {
+      fallbackOfferForFull =
+        projectOffers.find((o) => o?.mode === 'cash' && (Number(o.pricePerSqm) || 0) > 0)
+        ?? projectOffers.find((o) => (Number(o.pricePerSqm) || 0) > 0)
+        ?? projectOffers.find((o) => o?.mode === 'cash' && (Number(o.cashAmount) || 0) > 0)
+        ?? null
+    }
+    const priceOffer = offer || fallbackOfferForFull
+    const price = priceOffer
+      ? plots.reduce((s, p) => s + plotPriceForOffer(p, priceOffer), 0)
       : plotsTotalPrice
     // Arabon (terrain) is controlled only by project settings (project arabonDefault).
     // Never allow editing from this screen.
@@ -1140,7 +1203,7 @@ export default function SellPage() {
       window.clearTimeout(watchdog)
       if (!watchdogFired) setSaleSaving(false)
     }
-  }, [saleSaving, form, editId, clients, scopedProjects, projectOffers, sales, salesCreate, salesUpdate, updateParcelStatus, addToast, role, adminUser, closeSaleDrawer, refreshSales, sellerMode, sellerHasParcelWhitelist, sellerAssignedParcelDbIds, myClientId, effectiveSellerClientId, cinLookup, sellerClientRecord?.cin, effectivePlotPrice, buyerClientIdEqualsSeller])
+  }, [saleSaving, form, editId, clients, scopedProjects, projectOffers, sales, salesCreate, salesUpdate, updateParcelStatus, addToast, role, adminUser, closeSaleDrawer, refreshSales, sellerMode, sellerHasParcelWhitelist, sellerAssignedParcelDbIds, myClientId, effectiveSellerClientId, cinLookup, sellerClientRecord?.cin, effectivePlotPrice, plotPriceForOffer, buyerClientIdEqualsSeller])
 
   const advanceStatus = useCallback(async (sale) => {
     const flow = STATUS_FLOW[sale.status]
@@ -1742,7 +1805,7 @@ export default function SellPage() {
                       <span>Sélection</span>
                       <strong>
                         {selectedPlots
-                          .map((p) => `#${p.label ?? p.id}${p.area != null ? ` · ${Number(p.area).toLocaleString('fr-FR')} m²` : ''}${p.trees != null ? ` · ${p.trees} arbres` : ''}`)
+                          .map((p) => `#${p.label ?? p.id}${p.area != null ? ` · ${Number(p.area).toLocaleString('fr-FR')} m²` : ''}${Number(p.trees) > 0 ? ` · ${p.trees} arbres` : ''}`)
                           .join(' · ')}
                       </strong>
                     </div>
@@ -1798,20 +1861,23 @@ export default function SellPage() {
                   <div className="sp-edit__field sp-edit__field--full">
                     <label className="sp-edit__label">Offre</label>
                     <div className="sp-edit__offer-list">
-                      {projectOffers.map((o, i) => {
-                        const sel = String(form.offerId) === String(i)
-                        const mo = o.duration > 0 ? Math.round((o.price * (1 - o.downPayment / 100)) / o.duration) : 0
-                        return (
-                          <button key={i} type="button" className={`sp-edit__offer-opt${sel ? ' sp-edit__offer-opt--on' : ''}`}
-                            onClick={() => setForm(f => ({ ...f, offerId: String(i) }))}>
-                            <span className="sp-edit__offer-opt__radio" />
-                            <span className="sp-edit__offer-opt__info">
-                              <span className="sp-edit__offer-opt__name">{o.name}{o.price > 0 ? ` — ${o.price.toLocaleString('fr-FR')} TND` : ''}</span>
-                              <span className="sp-edit__offer-opt__meta">{o.downPayment}% acompte · {o.duration} mois{mo > 0 ? ` · ~${mo.toLocaleString('fr-FR')}/mois` : ''}</span>
-                            </span>
-                          </button>
-                        )
-                      })}
+                      {projectOffers
+                        .map((o, i) => ({ o, i }))
+                        .filter(({ o }) => o?.mode !== 'cash')
+                        .map(({ o, i }) => {
+                          const sel = String(form.offerId) === String(i)
+                          const mo = o.duration > 0 ? Math.round((o.price * (1 - o.downPayment / 100)) / o.duration) : 0
+                          return (
+                            <button key={i} type="button" className={`sp-edit__offer-opt${sel ? ' sp-edit__offer-opt--on' : ''}`}
+                              onClick={() => setForm(f => ({ ...f, offerId: String(i) }))}>
+                              <span className="sp-edit__offer-opt__radio" />
+                              <span className="sp-edit__offer-opt__info">
+                                <span className="sp-edit__offer-opt__name">{o.name}{o.price > 0 ? ` — ${o.price.toLocaleString('fr-FR')} TND` : ''}</span>
+                                <span className="sp-edit__offer-opt__meta">{o.downPayment}% acompte · {o.duration} mois{mo > 0 ? ` · ~${mo.toLocaleString('fr-FR')}/mois` : ''}</span>
+                              </span>
+                            </button>
+                          )
+                        })}
                     </div>
                   </div>
                 )}
@@ -2160,44 +2226,94 @@ export default function SellPage() {
             Téléphone du client<span className="sp-required" aria-hidden>*</span>
           </label>
           <div className="sp-wizard__row">
+            {/* Country-code picker. Defaults to +216 (Tunisia) but supports
+                the full PHONE_COUNTRY_CODES list so international buyers
+                can be recorded without jamming their number into 8 digits. */}
+            <select
+              aria-label="Indicatif pays"
+              className="sp-wizard__cc"
+              value={cinLookupCc}
+              onChange={(e) => {
+                const nextCc = e.target.value
+                setCinLookupCc(nextCc)
+                // Clear any prior match — the last-8 digits might collide with
+                // a different record once the country changes.
+                setCinLookupResult(null)
+                setForm(f => ({ ...f, clientId: '' }))
+                setPhoneLookupBusy(false)
+                setPhoneLookupError(false)
+              }}
+              style={{ flexShrink: 0 }}
+            >
+              {PHONE_COUNTRY_CODES.map((c) => (
+                <option key={c.code} value={c.code}>
+                  {c.flag} {c.code}
+                </option>
+              ))}
+            </select>
             <input
               id="sp-phone-input"
-              className={'sp-wizard__input' + (cinLookup.length > 0 && cinLookup.length < 8 ? ' sp-wizard__input--err' : '')}
+              className={'sp-wizard__input' + (
+                cinLookupCc === '+216' && cinLookup.length > 0 && cinLookup.length < 8
+                  ? ' sp-wizard__input--err'
+                  : ''
+              )}
               value={cinLookup}
               onChange={e => {
-                const val = normalizePhoneLookup(e.target.value)
+                // Strip anything non-digit. Max length: 8 for Tunisia (local
+                // convention) or 15 for international (E.164 max).
+                const isTN = cinLookupCc === '+216'
+                const cap = isTN ? 8 : 15
+                const raw = String(e.target.value || '').replace(/\D/g, '').slice(0, cap)
+                // For Tunisia we use the last-8 form everywhere (matches
+                // legacy data); for other CCs the full dialed number is
+                // what we store and look up.
+                const val = isTN ? raw.slice(-8) : raw
                 setCinLookup(val)
-                // Short-circuit: the user is typing their own phone. Don't run
-                // the local or remote lookup — it can only resolve to self,
-                // which is not a legal buyer.
-                if (selfPhoneLookup && val === selfPhoneLookup) {
+
+                // Short-circuit: the user is typing their own phone. Don't
+                // run the local or remote lookup — it can only resolve to
+                // self, which is not a legal buyer.
+                if (isTN && selfPhoneLookup && val === selfPhoneLookup) {
                   setCinLookupResult(null)
                   setForm(f => ({ ...f, clientId: '' }))
                   setPhoneLookupBusy(false)
                   setPhoneLookupError(false)
                   return
                 }
-                if (val.length >= 4) {
-                  // Instant match against the local clients list (cached view).
-                  // Never treat the current user's own client row as the buyer.
-                  const found = clients.find(
-                    (c) =>
-                      normalizePhoneLookup(c.phone) === val &&
-                      !buyerClientIdEqualsSeller(c.id),
-                  ) || null
-                  setCinLookupResult(found || null)
-                  if (found) setForm(f => ({ ...f, clientId: found.id }))
-                  else setForm(f => ({ ...f, clientId: '' }))
-                  // When fully entered and local list has no match, hit the DB
-                  //    so we don't invite the user to create a duplicate stub.
-                  if (!found && val.length >= 8) {
-                    const guard = val
+
+                // Local list scan only makes sense for Tunisia (the stored
+                // `clients.phone` strings are locally-normalized to 8
+                // digits). For +33 etc. last-8 would produce false
+                // positives, so we jump straight to the DB.
+                const minLen = isTN ? 4 : 6
+                if (val.length >= minLen) {
+                  if (isTN) {
+                    const found = clients.find(
+                      (c) =>
+                        normalizePhoneLookup(c.phone) === val &&
+                        !buyerClientIdEqualsSeller(c.id),
+                    ) || null
+                    setCinLookupResult(found || null)
+                    if (found) setForm(f => ({ ...f, clientId: found.id }))
+                    else setForm(f => ({ ...f, clientId: '' }))
+                  } else {
+                    setCinLookupResult(null)
+                    setForm(f => ({ ...f, clientId: '' }))
+                  }
+
+                  // DB lookup once the number looks complete.
+                  const readyForDb = isTN ? val.length >= 8 : val.length >= 7
+                  const alreadyFoundLocally = isTN && !!cinLookupResult && normalizePhoneLookup(cinLookupResult.phone) === val
+                  if (readyForDb && !alreadyFoundLocally) {
+                    const fullE164 = isTN ? `+216${val}` : `${cinLookupCc}${val}`
+                    const guard = fullE164
                     const gen = ++phoneLookupGenRef.current
                     setPhoneLookupBusy(true)
                     setPhoneLookupError(false)
-                    db.fetchClientByPhone(val)
+                    db.fetchClientByPhone(fullE164)
                       .then(dbClient => {
-                        if (guard !== val) return
+                        if (guard !== fullE164) return
                         if (dbClient) {
                           if (buyerClientIdEqualsSeller(dbClient.id)) {
                             addToast(
@@ -2230,8 +2346,9 @@ export default function SellPage() {
                   setForm(f => ({ ...f, clientId: '' }))
                 }
               }}
-              placeholder="Téléphone client (8 chiffres)"
-              maxLength={8}
+              placeholder={cinLookupCc === '+216' ? 'Téléphone (8 chiffres)' : 'Numéro sans indicatif'}
+              maxLength={cinLookupCc === '+216' ? 8 : 15}
+              inputMode="numeric"
               style={{ direction: 'ltr', fontFamily: 'monospace' }}
             />
             <button
@@ -2246,7 +2363,13 @@ export default function SellPage() {
               }
               onClick={() => {
                 if (buyerPhoneIsSelf) return
-                setClientForm({ name: '', phone: cinLookup || '', phoneCc: '+216', cin: '', city: '' })
+                setClientForm({
+                  name: '',
+                  phone: cinLookup || '',
+                  phoneCc: cinLookupCc || '+216',
+                  cin: '',
+                  city: '',
+                })
                 setClientModal(true)
               }}
             >
@@ -2273,85 +2396,30 @@ export default function SellPage() {
               <span style={{ fontSize: 10, fontWeight: 700 }}>OK</span>
             </div>
           )}
-          {phoneLookupBusy && cinLookup.length >= 8 && (
+          {phoneLookupBusy && cinLookup.length >= (cinLookupCc === '+216' ? 8 : 7) && (
             <div className="sp-wizard__mini" style={{ background: 'rgba(37, 99, 235, 0.08)', borderColor: 'rgba(37, 99, 235, 0.25)' }}>
               <span aria-hidden>…</span>
               <div style={{ fontSize: 12 }}>Recherche dans la base…</div>
             </div>
           )}
-          {!cinLookupResult && cinLookup.length >= 8 && !phoneLookupBusy && (
+          {!cinLookupResult && cinLookup.length >= (cinLookupCc === '+216' ? 8 : 7) && !phoneLookupBusy && (
             <div className="sp-wizard__mini sp-wizard__mini--warn" style={{ flexWrap: 'wrap' }}>
               <span>⚠</span>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontWeight: 700 }}>
                   {phoneLookupError
-                    ? 'Recherche indisponible — utilisez « Lier ce numéro »'
-                    : 'Aucun client visible avec ce téléphone'}
+                    ? 'Recherche indisponible'
+                    : 'Aucun client avec ce téléphone'}
                 </div>
                 <div style={{ fontSize: 11, marginTop: 2 }}>
                   {phoneLookupError
-                    ? 'La recherche directe a échoué (permissions ou réseau). Cliquez « Lier ce numéro » — si une fiche existe déjà, elle sera rattachée automatiquement.'
-                    : 'Le client n\'apparaît pas dans votre liste. Cliquez « + Nouveau » pour créer la fiche, ou « Lier ce numéro » : si un client existe déjà avec ce numéro, il sera rattaché automatiquement.'}
+                    ? 'La recherche a échoué (permissions ou réseau). Vérifiez le numéro et réessayez ; si le problème persiste, créez la fiche avec « + Nouveau ».'
+                    : 'Vérifiez le numéro saisi. Si le client n\'a vraiment pas de fiche, cliquez « + Nouveau » pour en créer une explicitement.'}
                 </div>
               </div>
-              <button
-                type="button"
-                className="sp-wizard__btn sp-wizard__btn--ghost"
-                style={{ whiteSpace: 'nowrap', fontSize: 11 }}
-                disabled={clientSaving}
-                title="Rattache la vente au client existant (par téléphone) ; crée une fiche anonyme sinon."
-                onClick={async () => {
-                  if (clientSaving) return
-                  setClientSaving(true)
-                  try {
-                    const phoneE164 = cinLookup.length === 8 ? `+216${cinLookup}` : cinLookup
-                    const stub = await withTimeout(
-                      db.createBuyerStubForSale({
-                        code: `CLI-${Date.now()}`,
-                        name: 'Client',
-                        email: '',
-                        phone: phoneE164,
-                        cin: '',
-                        city: '',
-                      }),
-                      8_000,
-                      'rpc_timeout',
-                    )
-                    if (!stub?.id) {
-                      addToast('Impossible de rattacher ce numéro pour le moment.', 'error')
-                      return
-                    }
-                    if (buyerClientIdEqualsSeller(stub.id)) {
-                      addToast(
-                        'Ce numéro correspond à votre fiche client : vous ne pouvez pas être l\'acheteur de votre propre vente.',
-                        'error',
-                      )
-                      return
-                    }
-                    setCinLookupResult(stub)
-                    setForm(f => ({ ...f, clientId: stub.id }))
-                    refreshClients().catch(() => {})
-                    addToast(stub.name && stub.name !== 'Client'
-                      ? `Client existant rattaché : ${stub.name}`
-                      : 'Fiche anonyme créée et rattachée.')
-                  } catch (err) {
-                    const raw = String(err?.message || err || '')
-                    if (/no_sell_grant/i.test(raw)) {
-                      addToast("Rattachement refusé : votre compte n'a pas l'accès vente.", 'error')
-                    } else if (/caller_not_linked_to_client/i.test(raw)) {
-                      addToast('Votre session n\'est liée à aucune fiche client.', 'error')
-                    } else if (/timeout/i.test(raw)) {
-                      addToast('Serveur lent : réessayez dans quelques secondes.', 'error')
-                    } else {
-                      addToast(`Erreur : ${raw}`, 'error')
-                    }
-                  } finally {
-                    setClientSaving(false)
-                  }
-                }}
-              >
-                {clientSaving ? '…' : 'Lier ce numéro'}
-              </button>
+              {/* "Lier ce numéro" removed on purpose: it was creating
+                  anonymous stub clients when no match existed, polluting
+                  the DB. Explicit "+ Nouveau" is the only creation path. */}
             </div>
           )}
         </div>
@@ -2400,32 +2468,48 @@ export default function SellPage() {
           </div>
         </div>
 
-        {form.paymentType === 'installments' && form.projectId && projectOffers.length > 0 && (
-          <div className="sp-wizard__panel">
-            <label className="sp-wizard__label">Offre de paiement</label>
-            <div className="sp-offer-list">
-              {projectOffers.map((o, i) => {
-                const sel = String(form.offerId) === String(i)
-                const mo = o.duration > 0 ? Math.round((o.price * (1 - o.downPayment / 100)) / o.duration) : 0
-                return (
-                  <button key={i} type="button" className={`sp-offer${sel ? ' sp-offer--on' : ''}`}
-                    onClick={() => setForm(f => ({ ...f, offerId: String(i) }))}>
-                    <div className="sp-offer__radio" />
-                    <div className="sp-offer__top">
-                      <span className="sp-offer__name">{o.name}</span>
-                      {o.price > 0 && <span className="sp-offer__price">{o.price.toLocaleString('fr-FR')} TND</span>}
-                    </div>
-                    <div className="sp-offer__chips">
-                      <span className="sp-offer__chip">{o.downPayment}%</span>
-                      <span className="sp-offer__chip">{o.duration} mois</span>
-                      {mo > 0 && <span className="sp-offer__chip">~{mo.toLocaleString('fr-FR')}/mois</span>}
-                    </div>
-                  </button>
-                )
-              })}
+        {form.paymentType === 'installments' && form.projectId && projectOffers.length > 0 && (() => {
+          // Offer picker only lists installments-mode offers. Cash-mode
+          // offers (e.g. "offre comptant") were leaking into this list
+          // because we iterated projectOffers without filtering, so users
+          // could pick a 0%/0-month cash offer and trip the math.
+          // We keep `i` as the original index so form.offerId stays valid
+          // against projectOffers[i] everywhere downstream.
+          const visible = projectOffers
+            .map((o, i) => ({ o, i }))
+            .filter(({ o }) => o?.mode !== 'cash')
+          if (visible.length === 0) {
+            return (
+              <div className="sp-fin-warn">⚠️ Aucune offre échelonnée pour ce projet — passez en comptant ou ajoutez une offre.</div>
+            )
+          }
+          return (
+            <div className="sp-wizard__panel">
+              <label className="sp-wizard__label">Offre de paiement</label>
+              <div className="sp-offer-list">
+                {visible.map(({ o, i }) => {
+                  const sel = String(form.offerId) === String(i)
+                  const mo = o.duration > 0 ? Math.round((o.price * (1 - o.downPayment / 100)) / o.duration) : 0
+                  return (
+                    <button key={i} type="button" className={`sp-offer${sel ? ' sp-offer--on' : ''}`}
+                      onClick={() => setForm(f => ({ ...f, offerId: String(i) }))}>
+                      <div className="sp-offer__radio" />
+                      <div className="sp-offer__top">
+                        <span className="sp-offer__name">{o.name}</span>
+                        {o.price > 0 && <span className="sp-offer__price">{o.price.toLocaleString('fr-FR')} TND</span>}
+                      </div>
+                      <div className="sp-offer__chips">
+                        <span className="sp-offer__chip">{o.downPayment}%</span>
+                        <span className="sp-offer__chip">{o.duration} mois</span>
+                        {mo > 0 && <span className="sp-offer__chip">~{mo.toLocaleString('fr-FR')}/mois</span>}
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
             </div>
-          </div>
-        )}
+          )
+        })()}
 
         {form.paymentType === 'installments' && form.projectId && projectOffers.length === 0 && (
           <div className="sp-fin-warn">⚠️ Aucune offre pour ce projet — passez en comptant ou configurez les offres.</div>
@@ -2433,16 +2517,16 @@ export default function SellPage() {
 
         {form.paymentType === 'installments' && form.offerId !== '' && projectOffers[Number(form.offerId)] && selectedPlots.length > 0 && (() => {
           const o = projectOffers[Number(form.offerId)]
-          const price = (!form.useCustomPrice && o.price) ? (o.price * selectedPlots.length) : totalPlotPrice
+          const price = selectedPlots.reduce((s, p) => s + plotPriceForOffer(p, o), 0)
           const down = Math.round(price * o.downPayment / 100)
           const remaining = price - down
-          const monthly = Math.round(remaining / o.duration)
+          const monthly = o.duration > 0 ? Math.round(remaining / o.duration) : 0
           const arabonVal = Number(form.deposit) || 0
           const toPay = Math.max(0, down - arabonVal)
           return (
             <div className="sp-wizard__panel">
               <div className="sp-fin-header">Détail des échéances — {selectedPlots.length} parcelle(s)</div>
-              {o.price && o.price * selectedPlots.length !== totalPlotPrice && (
+              {totalPlotPrice > 0 && price !== totalPlotPrice && (
                 <div className="sp-fin-catalog-note">
                   Prix catalogue : <s>{totalPlotPrice.toLocaleString('fr-FR')} TND</s> → offre : <strong>{price.toLocaleString('fr-FR')} TND</strong>
                 </div>
@@ -2471,13 +2555,18 @@ export default function SellPage() {
 
         {form.paymentType === 'full' && selectedPlots.length > 0 && (() => {
           const arabonVal = Number(form.deposit) || 0
-          const toPay = Math.max(0, totalPlotPrice - arabonVal)
+          // Prefer the recap's resolved total — it applies the m²-based
+          // fallback when the project prices via offer.pricePerSqm.
+          const fullTotal = wizardFinancialRecap.kind === 'full'
+            ? (wizardFinancialRecap.totalPlotPrice || 0)
+            : totalPlotPrice
+          const toPay = Math.max(0, fullTotal - arabonVal)
           return (
             <div className="sp-wizard__panel">
               <div className="sp-fin-header">Résumé comptant — {selectedPlots.length} parcelle(s)</div>
               <div className="sp-fin-grid">
                 <span>Montant total :</span>
-                <strong>{totalPlotPrice.toLocaleString('fr-FR')} TND</strong>
+                <strong>{fullTotal.toLocaleString('fr-FR')} TND</strong>
               </div>
               {arabonVal > 0 && (
                 <div className="sp-fin-deductions">
@@ -2635,7 +2724,7 @@ export default function SellPage() {
                 <strong>
                   {selectedPlots.length
                     ? selectedPlots
-                        .map((p) => `#${p.label ?? p.id}${p.area != null ? ` · ${p.area} m²` : ''}${p.trees != null ? ` · ${p.trees} arbres` : ''}`)
+                        .map((p) => `#${p.label ?? p.id}${p.area != null ? ` · ${p.area} m²` : ''}${Number(p.trees) > 0 ? ` · ${p.trees} arbres` : ''}`)
                         .join(' · ')
                     : '—'}
                 </strong>

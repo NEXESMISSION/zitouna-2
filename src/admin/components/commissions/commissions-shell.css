@@ -1,0 +1,136 @@
+/* ============================================================================
+   CommissionsShell — unified /admin/commissions container.
+   Header + tab bar + <Outlet/>. Tabs: Overview / Network / Ledger / Analytics /
+   Anomalies. The Network tab runs fullbleed so the org chart fills the screen.
+   ============================================================================ */
+
+.cxs {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: #f8fafc;
+  color: #0f172a;
+}
+
+.cxs__top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 20px 6px;
+  background: #fff;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.cxs__top-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+}
+
+.cxs__back {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  color: #334155;
+  font-size: 16px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.cxs__back:hover { background: #f1f5f9; border-color: #cbd5e1; }
+.cxs__back:active { background: #e2e8f0; }
+.cxs__back:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+
+.cxs__title-block { min-width: 0; }
+
+.cxs__title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: #0f172a;
+  line-height: 1.15;
+}
+
+.cxs__subtitle {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: #64748b;
+  line-height: 1.35;
+}
+
+/* ── Tab bar (sticky, scrollable on mobile) ────────────────────────────── */
+.cxs__tabs {
+  display: flex;
+  gap: 4px;
+  padding: 6px 20px 0;
+  background: #fff;
+  border-bottom: 1px solid #e2e8f0;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.cxs__tabs::-webkit-scrollbar { height: 0; }
+
+.cxs__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border: none;
+  background: transparent;
+  color: #475569;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+  cursor: pointer;
+  scroll-snap-align: start;
+  transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+}
+.cxs__tab:hover { color: #0f172a; background: #f8fafc; }
+.cxs__tab:focus-visible { outline: 2px solid #2563eb; outline-offset: -2px; border-radius: 6px; }
+
+.cxs__tab--on {
+  color: #1d4ed8;
+  border-bottom-color: #2563eb;
+}
+
+.cxs__tab-icon { font-size: 15px; line-height: 1; }
+.cxs__tab-label { line-height: 1; }
+
+.cxs__body {
+  flex: 1;
+  min-height: 0;
+  padding: 20px;
+}
+
+.cxs__body--bleed { padding: 0; }
+.cxs--bleed .cxs__body { background: #fff; }
+
+/* ── Mobile ────────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .cxs__top { padding: 10px 14px 4px; }
+  .cxs__title { font-size: 17px; }
+  .cxs__subtitle { display: none; }
+  .cxs__tabs { padding: 4px 10px 0; }
+  .cxs__tab { padding: 9px 10px; font-size: 12px; }
+  .cxs__tab-label { font-size: 12px; }
+  .cxs__body { padding: 14px; }
+  .cxs__body--bleed { padding: 0; }
+}
+
+@media (max-width: 420px) {
+  .cxs__tab-icon { display: none; }
+}

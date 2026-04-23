@@ -821,3 +821,66 @@
   .ct-graph-host--with-panel::after { right: 0; }
 }
 
+/* ══════════════════════════════════════════════════════════════
+   EMBEDDED VARIANT — when rendered inside CommissionsShell as the
+   "Réseau" tab, the page drops its fixed-inset layout and lives
+   inside the shell's body. The shell already provides back/title/tabs.
+   ══════════════════════════════════════════════════════════════ */
+.ct-fullscreen--embedded {
+  position: relative;
+  inset: auto;
+  height: calc(100vh - 128px); /* shell top+tabs ≈ 128px */
+  min-height: 520px;
+}
+.ct-fullscreen--embedded .ct-graph-host {
+  position: absolute;
+}
+/* On mobile the detail panel is a full-screen sheet, so the chart
+   no longer needs to squeeze — drop the right-side dimmer. */
+.ct-fullscreen--embedded .ct-graph-host--with-panel::after { right: 0; }
+
+.ct-topbar--embedded {
+  top: 10px;
+  left: 10px;
+  right: 10px;
+  padding: 6px 8px;
+}
+
+@media (max-width: 768px) {
+  .ct-fullscreen--embedded {
+    height: calc(100vh - 110px);
+    min-height: 460px;
+  }
+  .ct-topbar--embedded { top: 8px; left: 8px; right: 8px; }
+}
+
+/* "Bare" variant — no topbar, the chart fills the full embedded area. */
+.ct-fullscreen--bare .ct-graph-host { top: 0; left: 0; right: 0; bottom: 0; }
+
+/* Minimal empty state for the stripped /admin/commissions/network view. */
+.ct-empty-bare {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  color: #64748b;
+  padding: 24px;
+  text-align: center;
+}
+.ct-empty-bare__net {
+  width: 240px;
+  max-width: 90%;
+  height: auto;
+  opacity: 0.9;
+}
+.ct-empty-bare__title {
+  font-family: 'Inter Tight', 'Inter', sans-serif;
+  font-weight: 700;
+  font-size: 15px;
+  color: #334155;
+  letter-spacing: -0.01em;
+}
+

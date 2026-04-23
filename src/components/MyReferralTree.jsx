@@ -22,7 +22,7 @@ function fmtMoney(n) {
 // My direct children are the nodes at chainPath[level-2] (or chainPath[0] if
 // level is 2; or the seller at chainPath[0] if level is 1 since the seller IS
 // my direct descendant in that case).
-function buildTree(myId, ledger) {
+export function buildTree(myId, ledger) {
   const me = asId(myId)
   const childrenByParent = new Map()      // parentId -> Set<childId>
   const earningsFromNode = new Map()      // nodeId (in my subtree) -> TND earned by me attributable to that node
@@ -65,6 +65,16 @@ function buildTree(myId, ledger) {
     const buyerId  = asId(ev.buyer?.id)
     noteName(sellerId, ev.seller?.name, ev.seller?.phone)
     noteName(buyerId, ev.buyer?.name, ev.buyer?.phone)
+
+    // Chain ancestors are often neither seller nor buyer of any of the
+    // beneficiary's own events — their names only come through `chainClients`.
+    const chainClients = ev && typeof ev.chainClients === 'object' ? ev.chainClients : null
+    if (chainClients) {
+      for (const id of chain) {
+        const info = chainClients[id]
+        if (info) noteName(id, info.name, info.phone)
+      }
+    }
 
     // Build edges from chainPath if available; otherwise infer based on level.
     if (chain.length >= 2) {
@@ -200,6 +210,34 @@ export default function MyReferralTree({ myClientId, myName, ledger, loading = f
     () => (Array.isArray(ledger) ? ledger.some((e) => e.kind === 'commission') : false),
     [ledger],
   )
+  // Reverse-sale grant summary: detects commissions tagged with
+  // rule_snapshot.source === 'reverse_sale_grant'. When the signed-in user is
+  // a grant beneficiary, we surface the count + total + unique sources as a
+  // strip above the main stats tile so they know these earnings originate
+  // from an acquired right, not the normal parrainage chain.
+  const grantSummary = useMemo(() => {
+    if (!Array.isArray(ledger)) return null
+    let count = 0
+    let total = 0
+    const sources = new Map() // sourceId -> { name, phone, effectiveFrom }
+    for (const ev of ledger) {
+      if (ev?.kind !== 'commission') continue
+      const snap = ev.rule_snapshot || ev.ruleSnapshot
+      if (!snap || snap.source !== 'reverse_sale_grant') continue
+      count += 1
+      total += Number(ev.amount) || 0
+      const meta = snap.meta || {}
+      const src = asId(meta.grantSourceClientId)
+      if (src && !sources.has(src)) {
+        sources.set(src, {
+          name: ev.buyer?.id === src ? ev.buyer?.name : null,
+          effectiveFrom: meta.grantEffectiveFrom || null,
+        })
+      }
+    }
+    if (count === 0) return null
+    return { count, total, sources: Array.from(sources.entries()) }
+  }, [ledger])
   const [expanded, setExpanded] = useState(false)
 
   const myInitials = String(myName || 'Moi')
@@ -266,6 +304,21 @@ export default function MyReferralTree({ myClientId, myName, ledger, loading = f
           <h3 className="mrt__title">Mon arbre de commissions</h3>
           <span className="mrt__chev" aria-hidden>⛶</span>
         </div>
+
+        {grantSummary ? (
+          <div
+            className="mrt__grant-strip"
+            title="Droits acquis via vente inversée : vous touchez une commission L1 sur les ventes issues des nouvelles recrues de la source, postérieures à la date du droit."
+          >
+            <span className="mrt__grant-icon" aria-hidden>⇅</span>
+            <span className="mrt__grant-text">
+              <strong>{grantSummary.count}</strong> commission{grantSummary.count > 1 ? 's' : ''} acquise{grantSummary.count > 1 ? 's' : ''} via vente inversée
+              {' · '}
+              <strong>{fmtMoney(grantSummary.total)}</strong>
+              {grantSummary.sources.length ? ` · ${grantSummary.sources.length} source${grantSummary.sources.length > 1 ? 's' : ''}` : ''}
+            </span>
+          </div>
+        ) : null}
 
         {!isEmpty && (
           <div className="mrt__stats">

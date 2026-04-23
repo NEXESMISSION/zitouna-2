@@ -565,8 +565,64 @@
 .cdp__body { gap: 22px; }
 
 /* ---- Responsive ------------------------------------------------ */
-@media (max-width: 640px) {
-  .cdp { width: 100%; max-width: 100%; box-shadow: none; }
+@media (max-width: 768px) {
+  /* Full-screen sheet on mobile. The chart host no longer squeezes to 40%
+     width behind the panel — the sheet covers it entirely with a backdrop
+     and a sticky top bar so the close button is always thumb-reachable.
+     Safe-area inset applied to sticky chrome only, per team convention. */
+  .cdp {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    max-width: 100%;
+    border-left: none;
+    box-shadow: none;
+    z-index: 60;
+    animation: cdp-in-sheet 0.22s ease-out;
+  }
+  .cdp__header {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding-top: calc(14px + env(safe-area-inset-top, 0px));
+    background: #fff;
+  }
+  .cdp__body {
+    padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+  }
+  .cdp__close {
+    width: 40px;
+    height: 40px;
+    font-size: 22px;
+  }
   .cdp__kpis { grid-template-columns: 1fr 1fr; }
-  .cdp__levels { grid-template-columns: 1fr; }
+  .cdp__levels { grid-template-columns: 1fr 1fr; }
+}
+
+@keyframes cdp-in-sheet {
+  from { transform: translateY(16px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+/* Scrim shown on mobile behind the sheet so the underlying chart is dimmed.
+   Rendered only on mobile via the .cdp-scrim wrapper element. */
+.cdp-scrim {
+  display: none;
+}
+@media (max-width: 768px) {
+  .cdp-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.35);
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+    z-index: 55;
+    animation: cdp-scrim-in 0.18s ease-out;
+  }
+}
+
+@keyframes cdp-scrim-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }

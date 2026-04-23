@@ -1,28 +1,27 @@
 // Synchronous theme bootstrap. Runs before React mounts so initial paint
-// already has the correct background — prevents the dark→light flash on
-// /admin and the light→dark flash on /login. Loaded from /public/ (served
-// as-is by Vite) so the strict CSP `script-src 'self'` covers it without
-// needing an inline-script nonce. See docs/AUDIT/01_SECURITY_FINDINGS.md
-// (S-C4, S-L4).
+// already has the correct background. Loaded from /public/ (served as-is
+// by Vite) so the strict CSP `script-src 'self'` covers it without needing
+// an inline-script nonce.
+//
+// The dark-green theme has been removed — every route uses the light
+// canvas. /admin keeps its own data-theme="admin" attribute since the
+// admin stylesheet (ZADM) targets it directly; everything else is
+// "light" so theme-light.css owns the paint.
 /* eslint-disable no-unused-vars */
 (function () {
   try {
     var p = location.pathname || '';
-    var theme = 'dark';
-    if (p.indexOf('/admin') === 0) theme = 'admin';
-    else if (p === '/login' || p === '/register' || p === '/forgot-password' || p === '/reset-password') theme = 'auth';
+    var theme = (p.indexOf('/admin') === 0) ? 'admin' : 'light';
+
     document.documentElement.setAttribute('data-theme', theme);
-    var color = theme === 'admin' ? '#f8fafc' : '#071009';
+    document.body && document.body.setAttribute('data-theme', theme);
+
     var meta = document.createElement('meta');
     meta.name = 'theme-color';
-    meta.content = color;
+    meta.content = '#f8fafc';
     document.head.appendChild(meta);
   } catch (e) {
-    /* Plan 06 §9 hardening: if ANY of the above throws, force a
-       predictable data-theme="dark" so the CSS cascade has a known
-       starting point (prevents flash-of-unstyled-content). The outer
-       swallow is still fine — this inner try is belt-and-suspenders. */
-    try { document.documentElement.setAttribute('data-theme', 'dark'); } catch (_) { /* noop */ }
+    try { document.documentElement.setAttribute('data-theme', 'light'); } catch (_) { /* noop */ }
   }
 })();
 /* eslint-enable no-unused-vars */

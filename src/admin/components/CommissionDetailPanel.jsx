@@ -1,40 +1,19 @@
 import { useEffect, useMemo, useState } from 'react'
-import * as tree from '../lib/referralTree.js'
+import { resolveUpline, resolveUplineChain } from '../lib/resolveUpline.js'
+import {
+  asStr,
+  clientDisplayName,
+  clientInitials,
+  fmtDate,
+  fmtMoney,
+  fmtMoneyShort,
+  normalizeStatus as normalizeCommissionStatus,
+} from '../lib/commissionFormat.js'
 import './commission-detail-panel.css'
 
 const SALES_INITIAL = 8
 const EVENTS_INITIAL = 10
 const PAGE_STEP = 20
-
-function fmtMoney(n) {
-  const v = Number(n)
-  if (!Number.isFinite(v)) return '0 TND'
-  return `${v.toLocaleString('fr-FR', { maximumFractionDigits: 0 })} TND`
-}
-
-function fmtMoneyShort(n) {
-  const v = Number(n)
-  if (!Number.isFinite(v) || v === 0) return '0'
-  if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`
-  if (v >= 10_000) return `${Math.round(v / 1000)}k`
-  if (v >= 1000) return `${(v / 1000).toFixed(1)}k`
-  return v.toLocaleString('fr-FR', { maximumFractionDigits: 0 })
-}
-
-function fmtDate(iso) {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return String(iso)
-  return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: '2-digit' })
-}
-
-function normalizeCommissionStatus(e) {
-  if (!e) return 'pending'
-  if (e.status === 'paid' || e.paid_at || e.paidAt) return 'paid'
-  if (e.status === 'cancelled') return 'cancelled'
-  if (e.status === 'payable' || e.status === 'approved') return 'payable'
-  return 'pending'
-}
 
 function normalizeSaleStatus(s) {
   const raw = String(s?.status || '').toLowerCase()
@@ -47,19 +26,6 @@ function normalizeSaleStatus(s) {
 
 const COMMISSION_LABEL = { pending: 'En attente', payable: 'À payer', paid: 'Payé', cancelled: 'Annulé' }
 const SALE_LABEL = { completed: 'Terminée', active: 'En cours', pending: 'En attente', cancelled: 'Annulée' }
-
-function asStr(v) { return v == null ? '' : String(v) }
-
-function clientDisplayName(c) {
-  if (!c) return ''
-  return c.full_name || c.name || [c.first_name, c.last_name].filter(Boolean).join(' ') || c.email || c.code || '—'
-}
-
-function clientInitials(c) {
-  const name = clientDisplayName(c)
-  const parts = String(name).trim().split(/\s+/).filter(Boolean)
-  return ((parts[0]?.[0] || '?') + (parts[1]?.[0] || '')).toUpperCase()
-}
 
 export default function CommissionDetailPanel({ clientId, data, onClose }) {
   // Per-list "show more" limits — reset whenever the selected client changes.
@@ -85,74 +51,60 @@ export default function CommissionDetailPanel({ clientId, data, onClose }) {
     return () => window.removeEventListener('keydown', handler)
   }, [clientId, onClose])
 
+  // Split dependencies by slice so a change to one part of `data` (e.g. an
+  // event amount edit) does not force the sales-sort + synthetic-relation
+  // rebuild. Previously the whole object was in deps and every refresh
+  // reran the entire 200-line derivation.
+  const dClients = data?.clients
+  const dEvents = data?.commissionEvents
+  const dAuthRels = data?.sellerRelations
+  const dSales = data?.sales
+  const dProjects = data?.projects
+
   const payload = useMemo(() => {
     if (!clientId || !data) return null
-    const clients = data.clients || []
-    const events = data.commissionEvents || []
-    const authRels = data.sellerRelations || []
-    const sales = data.sales || []
-    const projects = data.projects || []
+    const _clients = dClients || []
+    const _events = dEvents || []
+    const _sales = dSales || []
+    const _projects = dProjects || []
 
     const idStr = asStr(clientId)
-    const client = clients.find((c) => asStr(c.id) === idStr)
+    // O(1) lookup — previously a linear scan was repeated dozens of times
+    // per render for ancestors/children.
+    const clientById = new Map(_clients.map((c) => [asStr(c.id), c]))
+    const projectById = new Map(_projects.map((p) => [asStr(p.id), p]))
+
+    const client = clientById.get(idStr)
     if (!client) return null
 
-    // Mirror the org chart's synthetic-relation logic so lineage numbers
-    // (ancestors, filleuls directs, Gen) stay consistent with the tree view
-    // when the DB trigger trg_sales_auto_parrainage missed a row.
-    const authChildSet = new Set()
-    for (const r of authRels) {
-      const c = asStr(r.child_client_id ?? r.childClientId)
-      if (c) authChildSet.add(c)
-    }
-    const salesByTime = [...sales].sort((a, b) => {
-      const ta = new Date(a.notary_completed_at || a.notaryCompletedAt || 0).getTime()
-      const tb = new Date(b.notary_completed_at || b.notaryCompletedAt || 0).getTime()
-      return ta - tb
+    // Shared resolver — stable tie-breaker (see resolveUpline.js) so the
+    // tree chart and this panel never disagree about a client's parent.
+    const { parentMap, childrenMap, syntheticChildSet } = resolveUpline({
+      sellerRelations: dAuthRels || [],
+      sales: _sales,
     })
-    const syntheticRels = []
-    const syntheticClaimed = new Set()
-    for (const s of salesByTime) {
-      const buyer = asStr(s.client_id ?? s.clientId)
-      const seller = asStr(s.seller_client_id ?? s.sellerClientId)
-      if (!buyer || !seller || buyer === seller) continue
-      if (authChildSet.has(buyer) || syntheticClaimed.has(buyer)) continue
-      syntheticClaimed.add(buyer)
-      syntheticRels.push({
-        parent_client_id: seller,
-        child_client_id: buyer,
-        source_sale_id: asStr(s.id) || null,
-      })
-    }
-    const rels = authRels.concat(syntheticRels)
-    const syntheticChildSet = new Set(syntheticClaimed)
-
-    const parentMap = tree.buildParentMap(rels)
-    const childMap = tree.buildChildrenMap(rels)
 
     // resolveUplineChain returns [self, parent, grandparent, ...]. Drop self.
-    const chain = tree.resolveUplineChain(idStr, parentMap)
+    const chain = resolveUplineChain(idStr, parentMap)
     const ancestors = chain.slice(1)
-      .map((id) => clients.find((c) => asStr(c.id) === asStr(id)))
+      .map((id) => clientById.get(asStr(id)))
       .filter(Boolean)
 
-    const directChildIds = childMap.get(idStr) || []
+    const directChildIds = childrenMap.get(idStr) || []
     const directChildren = directChildIds
-      .map((id) => clients.find((c) => asStr(c.id) === asStr(id)))
+      .map((id) => clientById.get(asStr(id)))
       .filter(Boolean)
+
     // Add per-filleul sales count so the admin sees who's active.
     const filleulSalesCount = new Map()
-    for (const s of sales) {
+    for (const s of _sales) {
       const seller = asStr(s.seller_client_id ?? s.sellerClientId)
       if (!seller) continue
       filleulSalesCount.set(seller, (filleulSalesCount.get(seller) || 0) + 1)
     }
 
-    const clientById = new Map(clients.map((c) => [asStr(c.id), c]))
-    const projectById = new Map(projects.map((p) => [asStr(p.id), p]))
-
     // Sales where this client was the seller
-    const salesAsSeller = sales
+    const salesAsSeller = _sales
       .filter((s) => asStr(s.seller_client_id ?? s.sellerClientId) === idStr)
       .map((s) => ({
         id: s.id,
@@ -166,7 +118,7 @@ export default function CommissionDetailPanel({ clientId, data, onClose }) {
       .sort((a, b) => String(b.notaryAt || '').localeCompare(String(a.notaryAt || '')))
 
     // Purchases (this client was the buyer)
-    const purchases = sales
+    const purchases = _sales
       .filter((s) => asStr(s.client_id ?? s.clientId) === idStr)
       .map((s) => ({
         id: s.id,
@@ -179,11 +131,13 @@ export default function CommissionDetailPanel({ clientId, data, onClose }) {
       }))
       .sort((a, b) => String(b.notaryAt || '').localeCompare(String(a.notaryAt || '')))
 
-    const myEvents = events
+    // Index sales once for event lookup — previously O(N·M) find in the map step.
+    const salesById = new Map(_sales.map((s) => [asStr(s.id), s]))
+    const myEvents = _events
       .filter((e) => asStr(e.beneficiary_client_id ?? e.beneficiaryClientId) === idStr)
       .map((e) => {
-        const sale = sales.find((s) => asStr(s.id) === asStr(e.sale_id ?? e.saleId))
-        const project = sale ? projectById.get(asStr(sale.project_id)) : null
+        const sale = salesById.get(asStr(e.sale_id ?? e.saleId))
+        const project = sale ? projectById.get(asStr(sale.project_id ?? sale.projectId)) : null
         return {
           id: e.id,
           level: Number(e.level) || 1,
@@ -224,20 +178,24 @@ export default function CommissionDetailPanel({ clientId, data, onClose }) {
       events: myEvents, stats, sellerTotals, buyerTotals, gen,
       syntheticChildSet,
     }
-  }, [clientId, data])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId, dClients, dEvents, dAuthRels, dSales, dProjects])
 
   if (!clientId) return null
   if (!payload) {
     return (
-      <aside className="cdp" role="complementary" aria-label="Détails bénéficiaire">
-        <header className="cdp__header">
-          <h2 className="cdp__title">Introuvable</h2>
-          <button type="button" className="cdp__close" onClick={onClose} aria-label="Fermer">×</button>
-        </header>
-        <div className="cdp__body">
-          <p className="cdp__empty">Ce client n’est pas présent dans le jeu de données actuel.</p>
-        </div>
-      </aside>
+      <>
+        <div className="cdp-scrim" onClick={onClose} aria-hidden="true" />
+        <aside className="cdp" role="complementary" aria-label="Détails bénéficiaire">
+          <header className="cdp__header">
+            <h2 className="cdp__title">Introuvable</h2>
+            <button type="button" className="cdp__close" onClick={onClose} aria-label="Fermer">×</button>
+          </header>
+          <div className="cdp__body">
+            <p className="cdp__empty">Ce client n’est pas présent dans le jeu de données actuel.</p>
+          </div>
+        </aside>
+      </>
     )
   }
 
@@ -258,6 +216,8 @@ export default function CommissionDetailPanel({ clientId, data, onClose }) {
     .sort((a, b) => a.lvl - b.lvl)
 
   return (
+    <>
+      <div className="cdp-scrim" onClick={onClose} aria-hidden="true" />
     <aside className="cdp" role="complementary" aria-label={`Détails ${clientDisplayName(client)}`}>
       <header className="cdp__header">
         <div className="cdp__avatar" aria-hidden="true">{clientInitials(client)}</div>
@@ -485,6 +445,7 @@ export default function CommissionDetailPanel({ clientId, data, onClose }) {
         </section>
       </div>
     </aside>
+    </>
   )
 }
 

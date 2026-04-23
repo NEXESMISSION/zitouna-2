@@ -1,0 +1,1003 @@
+/* =============================================================================
+ * auth.css — Login + Register split-pane design.
+ * Left: dark brand "stage" with ambient gradients, KPIs, proof, quote.
+ * Right: light form pane with segmented toggle, fields, primary CTA.
+ * Responsive: below 980px the stage collapses into a compact top header and
+ * the form stacks below it. Below 600px the form gutter tightens further.
+ * ========================================================================== */
+
+.auth-page {
+  --auth-bg: #F5F5F2;
+  --auth-ink: #0B1220;
+  --auth-ink-2: #1A2030;
+  --auth-muted: #6B7280;
+  --auth-faint: #9AA1AC;
+  --auth-hair: #ECECEC;
+  --auth-blue: #1E5CFF;
+  --auth-blue-softer: #F1F5FF;
+  --auth-green: #0FA968;
+  --auth-olive-deep: #0F1F1A;
+  --auth-olive-ink: #0A1612;
+  --auth-sun: #FFB84D;
+  /* Font stacks. When the user toggles to AR, `dir="rtl"` flips the
+     inherited family to Arabic-first so every glyph (title, labels,
+     buttons) renders through IBM Plex Sans Arabic instead of Inter's
+     weaker Arabic fallback. Readex Pro serves as the display face for
+     the hero headline in both languages (it has matching Arabic). */
+  --auth-font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --auth-font-display: 'Inter Tight', 'Inter', sans-serif;
+  --auth-font-sans-ar: 'IBM Plex Sans Arabic', 'Inter', -apple-system, 'Segoe UI', sans-serif;
+  --auth-font-display-ar: 'Readex Pro', 'IBM Plex Sans Arabic', 'Inter Tight', sans-serif;
+
+  min-height: 100dvh;
+  display: grid;
+  grid-template-columns: 1.05fr 1fr;
+  gap: 0;
+  background: var(--auth-bg);
+  color: var(--auth-ink);
+  font-family: var(--auth-font-sans);
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+/* Solo variant: no stage panel. Single column, form centered both
+   horizontally and vertically inside the viewport. Brand row stays
+   anchored at the top, footer pinned at the bottom. */
+.auth-page--solo {
+  display: block;
+  grid-template-columns: none;
+}
+.auth-page--solo .auth-pane {
+  min-height: 100dvh;
+  margin: 0 auto;
+  max-width: 460px;
+  width: 100%;
+  padding: 24px 24px 20px;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+@media (max-width: 600px) {
+  .auth-page--solo .auth-pane { padding: 18px 16px 20px; }
+}
+.auth-page--solo .auth-form-wrap {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 16px 0;
+  max-width: 100%;
+  width: 100%;
+}
+.auth-page--solo .auth-pane__foot {
+  flex-shrink: 0;
+  margin-top: auto;
+}
+
+/* RTL mode swaps the body + display font to Arabic-first stacks so the
+   glyphs are rendered correctly on every surface — not just the hero. */
+.auth-page[dir="rtl"] {
+  font-family: var(--auth-font-sans-ar);
+  /* Slightly looser tracking — Arabic glyphs need more breathing room
+     than Latin at small sizes, especially in bold weights. */
+  letter-spacing: 0;
+}
+.auth-page[dir="rtl"] .auth-title,
+.auth-page[dir="rtl"] .auth-hero h1,
+.auth-page[dir="rtl"] .auth-brand__name,
+.auth-page[dir="rtl"] .auth-kpi__v,
+.auth-page[dir="rtl"] .auth-fl__v {
+  font-family: var(--auth-font-display-ar);
+}
+@media (max-width: 980px) {
+  .auth-page { grid-template-columns: 1fr; }
+}
+
+/* ============== LEFT : BRAND STAGE ============== */
+.auth-stage {
+  position: relative;
+  overflow: hidden;
+  background: var(--auth-olive-deep);
+  color: #fff;
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 100dvh;
+  padding-top: calc(env(safe-area-inset-top, 0px) + 32px);
+}
+@media (max-width: 980px) {
+  .auth-stage { display: none; }
+}
+
+.auth-stage::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(1200px 600px at 85% -10%, rgba(255, 184, 77, 0.22), transparent 60%),
+    radial-gradient(900px 500px at 15% 100%, rgba(30, 92, 255, 0.35), transparent 55%),
+    linear-gradient(180deg, #0F1F1A 0%, #0A1612 100%);
+}
+.auth-stage::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.25;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.6 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+.auth-stage > * { position: relative; z-index: 1; }
+
+.auth-brand { display: flex; align-items: center; gap: 14px; }
+.auth-brand__logo {
+  width: 44px;
+  height: 44px;
+  border-radius: 13px;
+  background: #ffffff;
+  position: relative;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+.auth-brand__logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+.auth-brand__tx { line-height: 1.1; }
+.auth-brand__name {
+  font-family: 'Inter Tight', 'Inter', sans-serif;
+  font-weight: 800;
+  font-size: 17px;
+  letter-spacing: -0.02em;
+}
+.auth-brand__sub {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  margin-top: 2px;
+}
+
+.auth-hero { max-width: 520px; margin-top: 32px; }
+.auth-hero__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.65);
+  margin-bottom: 20px;
+}
+.auth-hero__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--auth-green);
+  box-shadow: 0 0 0 4px rgba(15, 169, 104, 0.2);
+}
+.auth-hero h1 {
+  font-family: 'Inter Tight', 'Inter', sans-serif;
+  font-weight: 900;
+  font-size: 56px;
+  line-height: 1.02;
+  letter-spacing: -0.035em;
+  margin: 0;
+  text-wrap: balance;
+}
+.auth-hero h1 em {
+  color: #FFB84D;
+  font-weight: 500;
+  font-style: italic;
+  font-family: 'Inter Tight', serif;
+}
+.auth-hero h1 .auth-u {
+  position: relative;
+  white-space: nowrap;
+}
+.auth-hero h1 .auth-u::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 4px;
+  height: 8px;
+  background: rgba(30, 92, 255, 0.45);
+  z-index: -1;
+  border-radius: 4px;
+}
+.auth-hero p {
+  font-size: 15px;
+  color: rgba(255, 255, 255, 0.72);
+  line-height: 1.55;
+  margin: 22px 0 0;
+  max-width: 440px;
+}
+@media (max-width: 980px) {
+  .auth-hero { margin-top: 20px; }
+  .auth-hero h1 { font-size: 32px; }
+  .auth-hero p { font-size: 13.5px; margin-top: 14px; }
+}
+@media (max-width: 600px) {
+  .auth-hero h1 { font-size: 26px; }
+}
+
+.auth-quote {
+  position: relative;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+  padding: 20px 22px;
+  margin-top: 28px;
+}
+.auth-quote::before {
+  content: "\201C";
+  position: absolute;
+  top: -14px;
+  left: 16px;
+  font-family: 'Inter Tight', serif;
+  font-size: 72px;
+  color: #FFB84D;
+  line-height: 1;
+}
+.auth-quote__q {
+  font-family: 'Inter Tight', serif;
+  font-style: italic;
+  font-size: 17px;
+  line-height: 1.45;
+  color: #fff;
+  text-wrap: balance;
+}
+.auth-quote__a {
+  margin-top: 12px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.6);
+}
+.auth-quote__a b { color: #fff; font-weight: 600; }
+
+.auth-bottom { display: flex; flex-direction: column; gap: 20px; margin-top: 24px; }
+
+.auth-proof { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+.auth-proof__avs { display: flex; }
+.auth-proof__av {
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  border: 2px solid var(--auth-olive-deep);
+  background: #555;
+  margin-left: -8px;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+}
+.auth-proof__av:first-child { margin-left: 0; }
+.auth-proof__txt { font-size: 12.5px; color: rgba(255, 255, 255, 0.7); line-height: 1.45; }
+.auth-proof__txt b { color: #fff; font-weight: 600; }
+.auth-proof__stars { color: #FFB84D; letter-spacing: 2px; font-size: 13px; }
+
+.auth-kpi {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 20px;
+}
+.auth-kpi__v {
+  font-family: 'Inter Tight', 'Inter', sans-serif;
+  font-weight: 800;
+  font-size: 22px;
+  letter-spacing: -0.02em;
+}
+.auth-kpi__v .auth-unit {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.5);
+  font-weight: 500;
+  margin-left: 2px;
+}
+.auth-kpi__k {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.55);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-top: 2px;
+}
+@media (max-width: 600px) {
+  .auth-kpi { gap: 12px; }
+  .auth-kpi__v { font-size: 18px; }
+  .auth-kpi__v .auth-unit { font-size: 11px; }
+  .auth-kpi__k { font-size: 10px; }
+}
+
+/* Floating insight cards — hidden below 980px */
+.auth-stage__cards { position: absolute; inset: 0; pointer-events: none; }
+.auth-fl {
+  position: absolute;
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 16px;
+  padding: 14px 16px;
+  color: #fff;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+}
+.auth-fl-1 { top: 80px; right: 40px; width: 230px; }
+.auth-fl-1 .auth-fl__row { display: flex; align-items: center; gap: 10px; }
+.auth-fl-1 .auth-fl__ic {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: var(--auth-blue);
+  display: grid;
+  place-items: center;
+}
+.auth-fl-1 .auth-fl__t {
+  font-size: 11.5px;
+  color: rgba(255, 255, 255, 0.6);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 600;
+}
+.auth-fl-1 .auth-fl__v {
+  font-family: 'Inter Tight', 'Inter', sans-serif;
+  font-weight: 800;
+  font-size: 20px;
+  letter-spacing: -0.02em;
+  margin-top: 2px;
+}
+.auth-fl-1 .auth-fl__spark { margin-top: 10px; height: 32px; display: block; }
+
+.auth-fl-3 {
+  bottom: 180px;
+  right: 60px;
+  width: 250px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.auth-fl-3 .auth-ring {
+  width: 48px;
+  height: 48px;
+  position: relative;
+  flex-shrink: 0;
+}
+.auth-fl-3 .auth-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+.auth-fl-3 .auth-ring__c { fill: none; stroke-width: 5; }
+.auth-fl-3 .auth-ring__c--t { stroke: rgba(255, 255, 255, 0.1); }
+.auth-fl-3 .auth-ring__c--p { stroke: #D4E4B8; stroke-linecap: round; }
+.auth-fl-3 .auth-ring__num {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-family: 'Inter Tight', 'Inter', sans-serif;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: -0.02em;
+}
+.auth-fl-3 .auth-fl__info .auth-fl__t {
+  font-family: 'Inter Tight', 'Inter', sans-serif;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: -0.01em;
+}
+.auth-fl-3 .auth-fl__info .auth-fl__s {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+  margin-top: 2px;
+  line-height: 1.4;
+}
+
+@media (max-width: 1200px) {
+  .auth-fl-1, .auth-fl-3 { display: none; }
+}
+@media (max-width: 980px) {
+  .auth-quote { display: none; }
+}
+
+/* ============== RIGHT : FORM PANE ============== */
+.auth-pane {
+  background: var(--auth-bg);
+  padding: 44px 56px;
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  position: relative;
+}
+@media (max-width: 980px) { .auth-pane { min-height: auto; padding: 32px 28px 40px; } }
+@media (max-width: 600px) { .auth-pane { padding: 24px 18px 36px; } }
+
+.auth-pane__top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.auth-pane__switcher {
+  font-size: 13px;
+  color: var(--auth-muted);
+}
+.auth-pane__switcher button {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--auth-blue);
+  font-weight: 600;
+  font: inherit;
+  cursor: pointer;
+}
+.auth-pane__switcher button:hover { text-decoration: underline; }
+
+.auth-lang {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 12px;
+  background: #fff;
+  border: 1px solid var(--auth-hair);
+  border-radius: 10px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--auth-ink);
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.auth-lang:hover { border-color: #C5C5C5; background: #FAFAF8; }
+
+/* Mobile-only brand strip inside the form pane. The .auth-stage (which
+   carries the desktop brand) is hidden below 980px, so the pane would
+   otherwise open with just a lone language button. This compact row
+   puts the logo + name back where the user expects to see them. */
+.auth-pane__brand { display: none; }
+.auth-pane__brand-mark {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: #ffffff;
+  border: 1px solid var(--auth-hair);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+.auth-pane__brand-mark img { width: 100%; height: 100%; object-fit: contain; }
+.auth-pane__brand-name {
+  font-family: 'Inter Tight', 'Inter', sans-serif;
+  font-weight: 800;
+  font-size: 15px;
+  letter-spacing: -0.02em;
+  color: var(--auth-ink);
+}
+@media (max-width: 980px) {
+  .auth-pane__brand { display: inline-flex; align-items: center; gap: 10px; }
+}
+
+/* Solo layout keeps the brand strip always visible (the dark stage that
+   normally carried the brand on multi-column layouts is absent here). */
+.auth-page--solo .auth-pane__brand { display: inline-flex; align-items: center; gap: 10px; }
+.auth-page--solo .auth-pane { background: transparent; }
+
+/* RTL polish: the input's leading icon needs to sit at the logical start,
+   and the primary CTA's trailing arrow already flips via inline transform. */
+.auth-page[dir="rtl"] .auth-title,
+.auth-page[dir="rtl"] .auth-subtitle,
+.auth-page[dir="rtl"] .auth-field__label,
+.auth-page[dir="rtl"] .auth-tos,
+.auth-page[dir="rtl"] .auth-strength-hint,
+.auth-page[dir="rtl"] .auth-hint {
+  text-align: right;
+}
+.auth-page[dir="rtl"] .auth-seg { align-self: flex-end; }
+
+/* Arabic type rhythm: the Latin-tuned sizes are too tight for Arabic
+   diacritics/kashida, so we loosen line-height and trim the boldest
+   display size by a notch. */
+.auth-page[dir="rtl"] .auth-title {
+  font-size: 30px;
+  line-height: 1.25;
+  letter-spacing: 0;
+}
+@media (max-width: 600px) {
+  .auth-page[dir="rtl"] .auth-title { font-size: 24px; line-height: 1.3; }
+}
+.auth-page[dir="rtl"] .auth-subtitle { line-height: 1.75; }
+.auth-page[dir="rtl"] .auth-hero h1 {
+  font-size: 48px;
+  line-height: 1.2;
+  letter-spacing: 0;
+}
+@media (max-width: 980px) {
+  .auth-page[dir="rtl"] .auth-hero h1 { font-size: 30px; line-height: 1.25; }
+}
+.auth-page[dir="rtl"] .auth-hero p { line-height: 1.8; }
+.auth-page[dir="rtl"] .auth-field__label {
+  /* Uppercase transforms mangle Arabic labels — drop it in AR and lift
+     the size a touch so they still read as labels. */
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 12.5px;
+}
+.auth-page[dir="rtl"] .auth-divide,
+.auth-page[dir="rtl"] .auth-hero__eyebrow,
+.auth-page[dir="rtl"] .auth-kpi__k,
+.auth-page[dir="rtl"] .auth-fl__t {
+  text-transform: none;
+  letter-spacing: 0.03em;
+}
+/* Quote + hero <em>: force the Arabic stack in RTL. The base rules
+   declare `font-family: 'Inter Tight', serif; font-style: italic` which
+   makes Arabic fall back to the OS serif in italic — the ugly rendering
+   the user flagged. We override family, kill italic, and pin a proper
+   weight so the glyphs have body. */
+.auth-page[dir="rtl"] .auth-quote__q {
+  font-family: var(--auth-font-sans-ar);
+  font-style: normal;
+  font-weight: 500;
+  font-size: 16px;
+  line-height: 1.8;
+}
+.auth-page[dir="rtl"] .auth-quote__a { font-family: var(--auth-font-sans-ar); }
+.auth-page[dir="rtl"] .auth-hero h1 em {
+  font-family: var(--auth-font-display-ar);
+  font-style: normal;
+  font-weight: 600;
+}
+.auth-page[dir="rtl"] .auth-quote::before {
+  content: "\00BB";
+  font-family: var(--auth-font-display-ar);
+}
+
+.auth-form-wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  /* Anchor to the top so Login (short form) and Register (tall form)
+     start at the same Y. Centering caused the title/tabs to jump several
+     dozen px when switching between the two pages. */
+  justify-content: flex-start;
+  max-width: 460px;
+  margin: 0 auto;
+  width: 100%;
+  padding: 40px 0 32px;
+}
+@media (max-width: 600px) { .auth-form-wrap { padding: 24px 0 28px; } }
+
+.auth-seg {
+  display: inline-flex;
+  background: #fff;
+  border: 1px solid var(--auth-hair);
+  border-radius: 12px;
+  padding: 4px;
+  margin-bottom: 24px;
+  align-self: flex-start;
+}
+.auth-seg button {
+  background: transparent;
+  border: 0;
+  padding: 8px 18px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--auth-muted);
+  font: inherit;
+  font-weight: 600;
+}
+.auth-seg button.is-active {
+  background: var(--auth-ink);
+  color: #fff;
+}
+
+.auth-title {
+  font-family: 'Inter Tight', 'Inter', sans-serif;
+  font-weight: 800;
+  font-size: 32px;
+  letter-spacing: -0.03em;
+  margin: 0 0 6px;
+  color: var(--auth-ink);
+  text-wrap: balance;
+}
+@media (max-width: 600px) { .auth-title { font-size: 26px; } }
+.auth-subtitle {
+  font-size: 14px;
+  color: var(--auth-muted);
+  margin: 0 0 24px;
+  line-height: 1.5;
+}
+
+.auth-divide {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 20px 0;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--auth-faint);
+  font-weight: 600;
+}
+.auth-divide::before,
+.auth-divide::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--auth-hair);
+}
+
+/* Fields */
+.auth-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-bottom: 14px;
+}
+.auth-field__label {
+  font-size: 11.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--auth-muted);
+  font-weight: 600;
+}
+.auth-input {
+  height: 50px;
+  background: #fff;
+  border: 1px solid var(--auth-hair);
+  border-radius: 12px;
+  padding: 0 14px;
+  font-size: 14px;
+  color: var(--auth-ink);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.auth-input:focus-within {
+  border-color: var(--auth-blue);
+  box-shadow: 0 0 0 4px var(--auth-blue-softer);
+}
+.auth-input input,
+.auth-input select {
+  border: 0;
+  outline: 0;
+  flex: 1;
+  font-size: 14.5px;
+  font-family: inherit;
+  color: var(--auth-ink);
+  background: transparent;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+}
+.auth-input input::placeholder { color: var(--auth-faint); }
+
+/* Chrome/Edge autofill: kill the blue/yellow background and blue text
+   fill-color. The inset box-shadow trick paints over the native fill,
+   -webkit-text-fill-color restores our ink color, and the very long
+   transition delay keeps the browser from briefly showing its default
+   color when the user clicks into an autofilled field. */
+.auth-input input:-webkit-autofill,
+.auth-input input:-webkit-autofill:hover,
+.auth-input input:-webkit-autofill:focus,
+.auth-input input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px #fff inset !important;
+  box-shadow: 0 0 0 1000px #fff inset !important;
+  -webkit-text-fill-color: var(--auth-ink) !important;
+  caret-color: var(--auth-ink);
+  transition: background-color 600000s 0s, color 600000s 0s;
+  border-radius: 0;
+}
+.auth-input svg {
+  width: 16px;
+  height: 16px;
+  color: var(--auth-muted);
+  flex-shrink: 0;
+}
+.auth-input__prefix {
+  color: var(--auth-muted);
+  font-size: 13.5px;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.auth-input__suffix {
+  color: var(--auth-muted);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  background: none;
+  border: 0;
+  padding: 0 2px;
+  font-family: inherit;
+}
+.auth-input__suffix:hover { color: var(--auth-blue); }
+
+/* ── Phone composite input ─────────────────────────────────────────
+   The phone field holds: flag · country code · divider · local number.
+   Previously the CC was 60px (54px on mobile) which chopped "+216" to
+   "+1". Use a proper width, give it a light-grey pill background so
+   the segment reads as a separate unit, and add a hair divider between
+   the two inputs so the grouping is visually obvious. */
+.auth-input--phone { gap: 8px; padding: 0 10px 0 12px; }
+.auth-input--phone .auth-input__prefix { font-size: 16px; line-height: 1; }
+.auth-input__cc {
+  flex: 0 0 62px;
+  width: 62px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  background: #F6F6F3;
+  border-radius: 8px;
+  height: 36px;
+  padding: 0 6px !important;
+  font-size: 13.5px !important;
+}
+.auth-input__divider {
+  width: 1px;
+  height: 24px;
+  background: var(--auth-hair);
+  flex-shrink: 0;
+}
+@media (max-width: 600px) {
+  .auth-input--phone { gap: 6px; padding: 0 8px 0 10px; }
+  .auth-input__cc { flex: 0 0 58px; width: 58px; height: 32px; font-size: 12.5px !important; }
+  .auth-input__divider { height: 20px; }
+}
+
+.auth-row-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+@media (max-width: 480px) {
+  .auth-row-2 { grid-template-columns: 1fr; gap: 0; }
+}
+
+/* ─── Mobile density: register / login form tightening ─────── */
+@media (max-width: 600px) {
+  .auth-pane { padding: 16px 14px 28px; }
+  .auth-form-wrap { padding: 14px 0 20px; max-width: 100%; }
+  .auth-seg { margin-bottom: 14px; padding: 3px; }
+  .auth-seg button { padding: 6px 14px; font-size: 12px; }
+  .auth-title { font-size: 20px; margin-bottom: 4px; }
+  .auth-subtitle { font-size: 12.5px; margin-bottom: 14px; line-height: 1.4; }
+  .auth-field { margin-bottom: 10px; gap: 5px; }
+  .auth-field__label { font-size: 10.5px; letter-spacing: 0.04em; }
+  .auth-input {
+    height: 44px;
+    padding: 0 12px;
+    gap: 8px;
+    border-radius: 10px;
+  }
+  .auth-input svg { width: 14px; height: 14px; }
+  .auth-input__prefix { font-size: 12.5px; gap: 3px; }
+  .auth-input__suffix { font-size: 11.5px; }
+  /* Phone CC width is owned by .auth-input__cc (phone composite rules). */
+  .auth-strength { margin-top: 6px; }
+  .auth-strength-hint { font-size: 10.5px; margin-top: 4px; }
+  .auth-opts { margin: 4px 0 14px; font-size: 12px; gap: 8px; }
+  .auth-check input { width: 15px; height: 15px; }
+  .auth-tos { font-size: 11px; margin: 12px 0 12px; line-height: 1.45; }
+  .auth-btn { height: 44px; font-size: 13.5px; border-radius: 10px; }
+  .auth-hint { font-size: 11px; }
+  .auth-divide { margin: 14px 0; font-size: 10px; }
+  .auth-alert { padding: 10px 12px; font-size: 12px; margin-bottom: 12px; border-radius: 10px; }
+  .auth-pane__foot { font-size: 11px; padding-top: 14px; gap: 8px; }
+  .auth-pane__foot-links { gap: 12px; }
+  .auth-magic { padding: 10px 12px; font-size: 11.5px; border-radius: 10px; margin-top: 14px; }
+  .auth-pane__switcher { font-size: 11.5px; }
+  .auth-lang { font-size: 11.5px; }
+}
+
+.auth-opts {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 6px 0 20px;
+  font-size: 13px;
+}
+.auth-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  color: var(--auth-ink-2);
+  user-select: none;
+}
+.auth-check input {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 17px;
+  height: 17px;
+  border: 1.5px solid var(--auth-hair);
+  border-radius: 5px;
+  background: #fff;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition: 0.15s;
+  margin: 0;
+}
+.auth-check input:checked {
+  background: var(--auth-blue);
+  border-color: var(--auth-blue);
+}
+.auth-check input:checked::after {
+  content: "";
+  width: 9px;
+  height: 5px;
+  border: 2px solid #fff;
+  border-top: 0;
+  border-right: 0;
+  transform: rotate(-45deg) translateY(-1px);
+}
+.auth-forgot {
+  color: var(--auth-blue);
+  font-weight: 600;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+}
+.auth-forgot:hover { text-decoration: underline; }
+
+.auth-btn {
+  height: 52px;
+  border-radius: 12px;
+  font-weight: 700;
+  font-size: 14.5px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  letter-spacing: 0;
+  font-family: inherit;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.auth-btn--primary {
+  background: var(--auth-ink);
+  color: #fff;
+  border-color: var(--auth-ink);
+  position: relative;
+  overflow: hidden;
+}
+.auth-btn--primary::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -60%;
+  width: 40%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.15), transparent);
+  animation: authShine 3s ease-in-out infinite;
+  animation-delay: 1s;
+}
+@keyframes authShine {
+  0%, 30% { left: -60%; }
+  80%, 100% { left: 120%; }
+}
+.auth-btn--primary:hover:not(:disabled) { background: var(--auth-blue); border-color: var(--auth-blue); }
+.auth-btn:disabled { opacity: 0.65; cursor: wait; }
+
+/* Password strength */
+.auth-strength { display: flex; gap: 4px; margin-top: 8px; }
+.auth-strength span {
+  flex: 1;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--auth-hair);
+}
+.auth-strength.is-w1 span:nth-child(1) { background: #EF4444; }
+.auth-strength.is-w2 span:nth-child(-n+2) { background: #F59E0B; }
+.auth-strength.is-w3 span:nth-child(-n+3) { background: #10B981; }
+.auth-strength.is-w4 span { background: #10B981; }
+.auth-strength-hint { font-size: 11.5px; color: var(--auth-faint); margin-top: 6px; }
+
+.auth-tos {
+  font-size: 12px;
+  color: var(--auth-muted);
+  margin: 16px 0 18px;
+  line-height: 1.5;
+}
+.auth-tos a { color: var(--auth-blue); font-weight: 600; }
+.auth-tos a:hover { text-decoration: underline; }
+
+/* Footer row */
+.auth-pane__foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--auth-muted);
+  padding-top: 20px;
+}
+.auth-pane__foot a { color: var(--auth-muted); }
+.auth-pane__foot a:hover { color: var(--auth-ink); }
+.auth-pane__foot-links { display: flex; gap: 16px; flex-wrap: wrap; }
+
+/* Inline status / error panels */
+.auth-alert {
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.45;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.auth-alert--error {
+  background: #FEF2F2;
+  border: 1px solid #FECACA;
+  color: #991B1B;
+}
+.auth-alert--success {
+  background: #ECFDF5;
+  border: 1px solid #A7F3D0;
+  color: #065F46;
+}
+.auth-alert__retry {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: underline;
+  font: inherit;
+  font-weight: 700;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.auth-status {
+  margin-top: 8px;
+  text-align: center;
+  opacity: 0.75;
+  font-size: 13px;
+  color: var(--auth-muted);
+}
+
+.auth-hint {
+  font-size: 12px;
+  opacity: 0.75;
+  margin-top: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--auth-muted);
+}
+
+/* Magic-link promo card on login */
+.auth-magic {
+  margin-top: 20px;
+  padding: 14px;
+  background: var(--auth-blue-softer);
+  border: 1px solid #DEE8FF;
+  border-radius: 12px;
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  font-size: 12.5px;
+  color: var(--auth-ink-2);
+  line-height: 1.45;
+}
+.auth-magic svg { flex-shrink: 0; margin-top: 2px; color: var(--auth-blue); }
+.auth-magic b { font-weight: 700; }
+
+/* iOS zoom guard (16px min input font) is already applied globally in
+   pwa-responsive.css via @media (max-width: 900px). Nothing to add here. */

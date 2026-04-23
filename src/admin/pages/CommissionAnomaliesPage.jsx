@@ -24,6 +24,7 @@ const CATEGORIES = [
   { key: 'orphan_commissions', label: 'Commissions orphelines' },
   { key: 'mismatched_l1', label: 'L1 incohérents' },
   { key: 'duplicate_upline', label: 'Upline en doublon' },
+  { key: 'reverse_sales', label: 'Ventes inversées' },
 ]
 
 // Extract an array no matter whether Postgres returns null, an object-keyed
@@ -99,12 +100,39 @@ function renderDuplicate(row, i) {
   )
 }
 
+function renderReverseSale(row, i) {
+  const sale = row?.sale_code || shortId(row?.sale_id)
+  const seller = shortId(row?.seller)
+  const buyer = shortId(row?.buyer)
+  const grantId = row?.grant_id
+  return (
+    <li key={`rev-${i}`} className="can-item">
+      <span className="can-item__title">Vente {sale}</span>
+      <span className="can-item__detail">
+        vendeur {seller} → acheteur {buyer} (acheteur est dans l'upline du vendeur)
+        {' '}
+        {grantId ? (
+          <a
+            href={`/admin/commissions/reverse-grants?grant=${grantId}`}
+            className="can-item__link"
+          >
+            · Voir le droit acquis
+          </a>
+        ) : (
+          <span className="can-item__muted">· Aucun droit lié</span>
+        )}
+      </span>
+    </li>
+  )
+}
+
 const RENDERERS = {
   cycles: renderCycle,
   self_referrals: renderSelfReferral,
   orphan_commissions: renderOrphan,
   mismatched_l1: renderMismatched,
   duplicate_upline: renderDuplicate,
+  reverse_sales: renderReverseSale,
 }
 
 function Section({ category, rows, open, onToggle }) {
@@ -147,6 +175,7 @@ export default function CommissionAnomaliesPage() {
     orphan_commissions: true,
     mismatched_l1: true,
     duplicate_upline: true,
+    reverse_sales: true,
   }))
 
   const refresh = useCallback(async () => {

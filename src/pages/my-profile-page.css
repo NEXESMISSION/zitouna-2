@@ -1,0 +1,310 @@
+/* ══════════════════════════════════════════════════════════════════════
+   /my/profile — standalone profile page
+   Matches the zb-* dashboard language (cards, typography, buttons).
+   ══════════════════════════════════════════════════════════════════════ */
+
+.mp-grid {
+  display: grid;
+  grid-template-columns: 1.15fr 1fr;
+  gap: 18px;
+  align-items: start;
+}
+@media (max-width: 960px) {
+  .mp-grid { grid-template-columns: 1fr; }
+}
+
+.mp-card {
+  padding: 22px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.mp-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.mp-card-head-ic {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: rgba(30, 92, 255, 0.10);
+  color: var(--zb-blue, #1E5CFF);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+.mp-card-head-ic--gold {
+  background: rgba(185, 167, 105, 0.14);
+  color: #8A7636;
+}
+.mp-card-title {
+  font-family: 'Inter Tight', 'Inter', sans-serif;
+  font-weight: 700;
+  font-size: 17px;
+  letter-spacing: -0.015em;
+  margin: 0;
+  color: var(--zb-ink);
+}
+.mp-card-sub {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  color: var(--zb-muted);
+  line-height: 1.45;
+}
+
+/* ── Fields ───────────────────────────────────────────────────────── */
+.mp-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 14px;
+}
+@media (max-width: 560px) {
+  .mp-fields { grid-template-columns: 1fr; }
+}
+.mp-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.mp-label {
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+  color: var(--zb-muted);
+}
+.mp-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.mp-input {
+  width: 100%;
+  padding: 11px 14px;
+  border: 1px solid var(--zb-border, #ECECE6);
+  border-radius: 12px;
+  background: var(--zb-surface, #FFFFFF);
+  color: var(--zb-ink);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.3;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+.mp-input::placeholder {
+  color: var(--zb-faint, #B4B4AE);
+}
+.mp-input:focus {
+  border-color: var(--zb-blue, #1E5CFF);
+  box-shadow: 0 0 0 3px rgba(30, 92, 255, 0.14);
+}
+.mp-input--locked {
+  background: var(--zb-surface-2, #F7F7F3);
+  color: var(--zb-ink);
+  cursor: default;
+  padding-right: 34px;
+}
+.mp-input--locked:focus {
+  border-color: var(--zb-border, #ECECE6);
+  box-shadow: none;
+}
+.mp-lock {
+  position: absolute;
+  right: 10px;
+  color: var(--zb-muted);
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.mp-textarea {
+  resize: vertical;
+  min-height: 72px;
+}
+
+/* ── Feedback messages ────────────────────────────────────────────── */
+.mp-msg {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.mp-msg--info {
+  background: rgba(30, 92, 255, 0.08);
+  color: #0B3CA8;
+}
+.mp-msg--ok {
+  background: rgba(48, 209, 88, 0.14);
+  color: #1A7F3A;
+}
+.mp-msg--err {
+  background: rgba(255, 69, 58, 0.10);
+  color: #C3261A;
+}
+
+/* ── Card actions (buttons) ───────────────────────────────────────── */
+.mp-card-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+.mp-card-actions--end {
+  justify-content: flex-end;
+}
+.mp-card-actions .zb-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ── Phone card ───────────────────────────────────────────────────── */
+.mp-phone-current {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--zb-surface-2, #F7F7F3);
+  border-radius: 12px;
+}
+.mp-phone-current-k {
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+  color: var(--zb-muted);
+}
+.mp-phone-current-v {
+  font-family: 'Inter Tight', 'Inter', sans-serif;
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--zb-ink);
+  letter-spacing: -0.005em;
+}
+
+.mp-status {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  border: 1px solid transparent;
+}
+.mp-status strong {
+  font-weight: 700;
+  font-size: 13.5px;
+}
+.mp-status-note {
+  color: var(--zb-muted);
+  font-size: 12.5px;
+}
+.mp-status--pending {
+  background: rgba(255, 159, 10, 0.10);
+  border-color: rgba(255, 159, 10, 0.25);
+  color: #8A4D00;
+}
+.mp-status--approved {
+  background: rgba(48, 209, 88, 0.12);
+  border-color: rgba(48, 209, 88, 0.25);
+  color: #1A7F3A;
+}
+.mp-status--rejected {
+  background: rgba(255, 69, 58, 0.08);
+  border-color: rgba(255, 69, 58, 0.22);
+  color: #C3261A;
+}
+
+/* Phone input split */
+.mp-phone-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.mp-phone-row {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: 8px;
+}
+.mp-phone-cc { text-align: center; font-weight: 600; }
+.mp-phone-preview {
+  font-size: 12.5px;
+  color: var(--zb-muted);
+}
+.mp-phone-preview strong {
+  color: var(--zb-ink);
+  font-weight: 700;
+}
+
+/* Success screen */
+.mp-phone-success {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+  padding: 12px 8px 4px;
+}
+.mp-phone-success-ic {
+  width: 56px;
+  height: 56px;
+  border-radius: 999px;
+  background: rgba(48, 209, 88, 0.14);
+  color: #1A7F3A;
+  display: grid;
+  place-items: center;
+  margin-bottom: 6px;
+}
+.mp-phone-success-title {
+  margin: 0;
+  font-family: 'Inter Tight', 'Inter', sans-serif;
+  font-weight: 700;
+  font-size: 17px;
+  letter-spacing: -0.015em;
+  color: var(--zb-ink);
+}
+.mp-phone-success-desc {
+  margin: 0;
+  font-size: 13px;
+  color: var(--zb-muted);
+  line-height: 1.5;
+  max-width: 40ch;
+}
+.mp-phone-success-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 14px;
+  background: var(--zb-surface-2, #F7F7F3);
+  border-radius: 10px;
+  margin: 6px 0 4px;
+}
+.mp-phone-success-summary span {
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--zb-muted);
+  font-weight: 700;
+}
+.mp-phone-success-summary strong {
+  font-family: 'Inter Tight', 'Inter', sans-serif;
+  font-size: 15px;
+  color: var(--zb-ink);
+  font-weight: 700;
+}
+
+/* Spinner */
+.mp-spin {
+  animation: mp-spin 0.9s linear infinite;
+}
+@keyframes mp-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

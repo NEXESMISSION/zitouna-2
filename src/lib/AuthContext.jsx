@@ -804,8 +804,9 @@ export function AuthProvider({ children }) {
         await withAuthTimeout(ensureCurrentClientProfile(), 6_000, 'ensureCurrentClientProfile[login-retry]')
         const retried = await syncSession(data.user)
         if (retried?.admin || retried?.client) {
-          const redirectTo = retried.admin ? '/admin' : '/dashboard'
-          return { ok: true, redirectTo }
+          // Everyone lands on /dashboard after login — including staff/admins.
+          // They can jump into /admin from the sidebar entry when they want.
+          return { ok: true, redirectTo: '/dashboard' }
         }
       } catch (healErr) {
         safeWarn('login ensureCurrentClientProfile failed:', healErr)
@@ -816,8 +817,10 @@ export function AuthProvider({ children }) {
       return { ok: false, error: 'Profil introuvable. Veuillez vous inscrire ou contactez le support.' }
     }
 
-    const redirectTo = admin ? '/admin' : '/dashboard'
-    return { ok: true, redirectTo }
+    // Product decision: every successful login lands on /dashboard, even
+    // for staff/admins. Admin surfaces are one click away from the
+    // sidebar — we don't fork the landing page by role.
+    return { ok: true, redirectTo: '/dashboard' }
   }, [syncSession, clearState])
 
   const register = useCallback(async ({ firstname, lastname, email, phone, countryCode, phoneLocal, password }) => {

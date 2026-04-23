@@ -1183,6 +1183,14 @@ export function useOffers() {
         price: Number(o.price || 0),
         downPayment: Number(o.avancePct ?? o.downPayment ?? 0),
         duration: Number(o.duration || 0),
+        // The offer editor persists these extras (cash-mode + price/m² +
+        // note). Stripping them here silently lost the values on every
+        // re-open of "Modifier l'offre" — the checkbox came back off and
+        // SellPage couldn't compute m² prices.
+        mode: o.mode === 'cash' ? 'cash' : 'installments',
+        cashAmount: Number(o.cashAmount || 0),
+        pricePerSqm: Number(o.pricePerSqm || 0),
+        note: o.note || '',
       }))
     }
     return out

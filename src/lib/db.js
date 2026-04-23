@@ -139,6 +139,16 @@ export async function fetchProjects() {
     description: p.description || '',
     mapUrl: p.map_url || '',
     arabonDefault: Number(p.arabon_default) || 50,
+    annualRevenueTotal: Number(p.annual_revenue_total) || 0,
+    totalTrees: p.total_trees != null ? Number(p.total_trees) : null,
+    treeHealthPct: p.tree_health_pct != null ? Number(p.tree_health_pct) : null,
+    soilHumidityPct: p.soil_humidity_pct != null ? Number(p.soil_humidity_pct) : null,
+    nutrientsPct: p.nutrients_pct != null ? Number(p.nutrients_pct) : null,
+    bioCertified: Boolean(p.bio_certified),
+    certificationBody: p.certification_body || '',
+    treeBatches: Array.isArray(p.tree_batches)
+      ? p.tree_batches.map((b) => ({ year: Number(b?.year) || null, count: Number(b?.count) || 0 }))
+      : [],
     plots: parcels
       .filter(x => x.project_id === p.id)
       .map(pl => ({
@@ -166,7 +176,7 @@ export async function fetchProjects() {
  */
 export async function fetchPublicCatalogProjects() {
   const [projRes, parcelRes] = await Promise.all([
-    db().from('projects').select('id,title,city,region,area,year_started,description,map_url,arabon_default'),
+    db().from('projects').select('id,title,city,region,area,year_started,description,map_url,arabon_default,annual_revenue_total,tree_batches,total_trees'),
     db().from('public_parcels').select('id,project_id,parcel_number,area_m2,tree_count,total_price,price_per_tree,status,map_url'),
   ])
   const projects = throwIfError(projRes, 'projects')
@@ -183,6 +193,11 @@ export async function fetchPublicCatalogProjects() {
       description: p.description || '',
       mapUrl: p.map_url || '',
       arabonDefault: Number(p.arabon_default) || 50,
+    annualRevenueTotal: Number(p.annual_revenue_total) || 0,
+      totalTrees: p.total_trees != null ? Number(p.total_trees) : null,
+      treeBatches: Array.isArray(p.tree_batches)
+        ? p.tree_batches.map((b) => ({ year: Number(b?.year) || null, count: Number(b?.count) || 0 }))
+        : [],
       plots: parcels
         .filter((x) => x.project_id === p.id)
         .map((pl) => ({
@@ -309,6 +324,22 @@ export async function fetchPublicProjectById(projectId) {
     description: p.description || '',
     mapUrl: p.map_url || '',
     arabonDefault: Number(p.arabon_default) || 50,
+    annualRevenueTotal: Number(p.annual_revenue_total) || 0,
+    // Project-level tree inventory (parcels are pure surface units — this
+    // value is the source of truth for "how many oliviers on the project").
+    // Falls back to the sum of parcel-level tree counts on legacy projects
+    // where the project column hasn't been set yet.
+    totalTrees: p.total_trees != null
+      ? Number(p.total_trees)
+      : plots.reduce((s, pl) => s + (Number(pl.trees) || 0), 0),
+    treeHealthPct: p.tree_health_pct != null ? Number(p.tree_health_pct) : null,
+    soilHumidityPct: p.soil_humidity_pct != null ? Number(p.soil_humidity_pct) : null,
+    nutrientsPct: p.nutrients_pct != null ? Number(p.nutrients_pct) : null,
+    bioCertified: Boolean(p.bio_certified),
+    certificationBody: p.certification_body || '',
+    treeBatches: Array.isArray(p.tree_batches)
+      ? p.tree_batches.map((b) => ({ year: Number(b?.year) || null, count: Number(b?.count) || 0 }))
+      : [],
     plots,
   }
 }
@@ -519,6 +550,16 @@ export async function fetchProjectsScopedByIds(projectIds = []) {
     description: p.description || '',
     mapUrl: p.map_url || '',
     arabonDefault: Number(p.arabon_default) || 50,
+    annualRevenueTotal: Number(p.annual_revenue_total) || 0,
+    totalTrees: p.total_trees != null ? Number(p.total_trees) : null,
+    treeHealthPct: p.tree_health_pct != null ? Number(p.tree_health_pct) : null,
+    soilHumidityPct: p.soil_humidity_pct != null ? Number(p.soil_humidity_pct) : null,
+    nutrientsPct: p.nutrients_pct != null ? Number(p.nutrients_pct) : null,
+    bioCertified: Boolean(p.bio_certified),
+    certificationBody: p.certification_body || '',
+    treeBatches: Array.isArray(p.tree_batches)
+      ? p.tree_batches.map((b) => ({ year: Number(b?.year) || null, count: Number(b?.count) || 0 }))
+      : [],
     plots: parcels
       .filter(x => x.project_id === p.id)
       .map(pl => ({
@@ -711,6 +752,47 @@ export async function upsertProject(project) {
     map_url: project.mapUrl || '',
     arabon_default: Number(project.arabonDefault) || 50,
   }
+  // Only overwrite annual_revenue_total when the caller actually provided a
+  // value — partial edit flows (e.g. admin "Modifier le projet" before this
+  // field existed, or future callers) must not clobber an existing figure.
+  if (project.annualRevenueTotal !== undefined) {
+    row.annual_revenue_total = Number(project.annualRevenueTotal) || 0
+  }
+  // Project-level tree inventory + health metrics (parcels-are-surface model).
+  // Each field is opt-in so callers that don't know about the column can't
+  // accidentally blank it out. Null → SQL NULL (clears the stored value).
+  if (project.totalTrees !== undefined) {
+    row.total_trees = project.totalTrees === '' || project.totalTrees == null
+      ? null
+      : Number(project.totalTrees) || 0
+  }
+  if (project.treeHealthPct !== undefined) {
+    row.tree_health_pct = project.treeHealthPct === '' || project.treeHealthPct == null
+      ? null
+      : Math.max(0, Math.min(100, Number(project.treeHealthPct) || 0))
+  }
+  if (project.soilHumidityPct !== undefined) {
+    row.soil_humidity_pct = project.soilHumidityPct === '' || project.soilHumidityPct == null
+      ? null
+      : Math.max(0, Math.min(100, Number(project.soilHumidityPct) || 0))
+  }
+  if (project.nutrientsPct !== undefined) {
+    row.nutrients_pct = project.nutrientsPct === '' || project.nutrientsPct == null
+      ? null
+      : Math.max(0, Math.min(100, Number(project.nutrientsPct) || 0))
+  }
+  // Project-level cohort composition — replaces per-parcel parcel_tree_batches.
+  // Shape: [{year:int, count:int}]. Pruned to non-empty rows.
+  if (project.treeBatches !== undefined) {
+    const cleaned = (Array.isArray(project.treeBatches) ? project.treeBatches : [])
+      .map((b) => ({
+        year: Number(b?.year) || new Date().getFullYear(),
+        count: Math.max(0, Number(b?.count) || 0),
+      }))
+      .filter((b) => b.count > 0)
+    row.tree_batches = cleaned
+    row.total_trees = cleaned.reduce((s, b) => s + b.count, 0)
+  }
   if (project.id) {
     const res = await db().from('projects').upsert(row).select().single()
     return throwIfError(res, 'upsertProject')
@@ -752,8 +834,25 @@ export async function fetchOffers() {
 
 // Cached probe for optional columns — avoids spamming the network every save
 // if the migration hasn't been applied yet. First write attempts the full row;
-// on a 42703 "column does not exist" error we drop the extras and retry once.
-let _offersExtrasOk = true
+// on a "column does not exist" / schema-cache error we drop the extras and
+// retry once. We also track per-column failures so a missing `note` column
+// doesn't also strip `mode` / `cash_amount` / `price_per_sqm` (which may
+// exist — older migrations landed those three before `note`).
+const _offersExtraOkByCol = { mode: true, cash_amount: true, price_per_sqm: true, note: true }
+
+function _isMissingColumnError(err, colName) {
+  if (!err) return false
+  const code = String(err.code || '')
+  const msg = String(err.message || err.details || '')
+  // 42703 = Postgres undefined_column; PGRST204 = PostgREST schema-cache miss.
+  if (code === '42703' || code === 'PGRST204') {
+    if (!colName) return true
+    return msg.toLowerCase().includes(`'${colName}'`) || msg.toLowerCase().includes(colName)
+  }
+  // Defensive string match for environments that don't surface the code.
+  if (/schema cache/i.test(msg) && (!colName || msg.toLowerCase().includes(colName))) return true
+  return false
+}
 
 export async function upsertOffer(projectId, offer) {
   const name = (offer.name ?? offer.label ?? '').toString().trim()
@@ -765,11 +864,14 @@ export async function upsertOffer(projectId, offer) {
     down_payment_pct: Number(offer.downPayment ?? offer.avancePct ?? 0) || 0,
     duration_months: Number(offer.duration ?? 0) || 0,
   }
-  const extras = {}
-  if (offer.mode != null) extras.mode = offer.mode === 'cash' ? 'cash' : 'installments'
-  if (offer.cashAmount != null) extras.cash_amount = Number(offer.cashAmount) || 0
-  if (offer.pricePerSqm != null) extras.price_per_sqm = Number(offer.pricePerSqm) || 0
-  if (offer.note != null) extras.note = String(offer.note || '')
+  const buildExtras = () => {
+    const extras = {}
+    if (offer.mode != null && _offersExtraOkByCol.mode) extras.mode = offer.mode === 'cash' ? 'cash' : 'installments'
+    if (offer.cashAmount != null && _offersExtraOkByCol.cash_amount) extras.cash_amount = Number(offer.cashAmount) || 0
+    if (offer.pricePerSqm != null && _offersExtraOkByCol.price_per_sqm) extras.price_per_sqm = Number(offer.pricePerSqm) || 0
+    if (offer.note != null && _offersExtraOkByCol.note) extras.note = String(offer.note || '')
+    return extras
+  }
 
   const tryWrite = async (row) => {
     if (offer.dbId) {
@@ -778,14 +880,25 @@ export async function upsertOffer(projectId, offer) {
     return db().from('project_offers').insert(row).select().single()
   }
 
-  const fullRow = _offersExtrasOk ? { ...baseRow, ...extras } : baseRow
-  const res = await tryWrite(fullRow)
-  if (res.error && String(res.error.code || '') === '42703' && _offersExtrasOk) {
-    // One of the optional columns is missing — fall back and remember.
-    _offersExtrasOk = false
-    const retry = await tryWrite(baseRow)
-    return throwIfError(retry, offer.dbId ? 'updateOffer' : 'insertOffer')
+  // Retry loop: strip one missing column at a time (up to the number of
+  // optional cols) so an old schema with none of them still succeeds.
+  const extraCols = ['mode', 'cash_amount', 'price_per_sqm', 'note']
+  let attempts = 0
+  while (attempts <= extraCols.length) {
+    const row = { ...baseRow, ...buildExtras() }
+    const res = await tryWrite(row)
+    if (!res.error) return throwIfError(res, offer.dbId ? 'updateOffer' : 'insertOffer')
+    // Figure out which column was rejected, drop it, and retry.
+    const missing = extraCols.find((c) => _offersExtraOkByCol[c] && _isMissingColumnError(res.error, c))
+    if (!missing) {
+      // Not a missing-column issue — surface the original error.
+      return throwIfError(res, offer.dbId ? 'updateOffer' : 'insertOffer')
+    }
+    _offersExtraOkByCol[missing] = false
+    attempts += 1
   }
+  // Exhausted retries — final attempt with the base row only.
+  const res = await tryWrite(baseRow)
   return throwIfError(res, offer.dbId ? 'updateOffer' : 'insertOffer')
 }
 
@@ -2360,6 +2473,10 @@ export async function submitCommissionPayoutRequest(beneficiaryClientId, actorUs
   const bid = String(beneficiaryClientId || '').trim()
   if (!bid) return { ok: false, reason: 'invalid' }
 
+  // Defense-in-depth — see reviewCommissionPayoutRequest() for rationale.
+  const actor = await resolveCurrentAdminActor()
+  if (!actor.adminId) return { ok: false, reason: 'not_admin' }
+
   const openRes = await db().from('commission_payout_requests').select('id').in('status', ['pending_review', 'approved'])
   const openRows = throwIfError(openRes, 'openPayoutRequests')
   const openIds = openRows.map((r) => r.id)
@@ -2425,6 +2542,13 @@ export async function reviewCommissionPayoutRequest(requestId, decision, opts = 
   const reviewerId = opts.reviewerId || null
   const paymentRef = opts.paymentRef || ''
   if (!id) return { ok: false, reason: 'missing_id' }
+
+  // Defense-in-depth: make sure the caller is an admin_users row, not just
+  // an authenticated customer. RLS on commission_payout_requests should
+  // already reject customer updates, but an explicit check produces a
+  // usable error message in the UI and fails loudly if RLS is misconfigured.
+  const actor = await resolveCurrentAdminActor()
+  if (!actor.adminId) return { ok: false, reason: 'not_admin' }
 
   const reqRes = await db().from('commission_payout_requests').select('*').eq('id', id).maybeSingle()
   if (reqRes.error || !reqRes.data) return { ok: false, reason: 'not_found' }
@@ -4018,6 +4142,21 @@ export async function fetchMyCommissionLedger(clientId = null) {
     const buyerRow = resolvedBuyerId ? clientById.get(resolvedBuyerId) : null
     const projectId = sale ? sid(sale.project_id) : (metaObj ? sid(metaObj.saleProjectId) : '')
     const project = projectId ? projectById.get(projectId) : null
+    // Resolve display info for every ancestor referenced in chainPath so the
+    // MyReferralTree can label intermediate levels (otherwise ancestors who
+    // never appear as seller/buyer in the signed-in user's own events show
+    // up as "—").
+    let chainClients = null
+    if (metaObj && Array.isArray(metaObj.chainPath) && metaObj.chainPath.length) {
+      const out = {}
+      for (const x of metaObj.chainPath) {
+        const id = sid(x)
+        if (!id || out[id]) continue
+        const row = clientById.get(id)
+        if (row) out[id] = { id: row.id, name: row.full_name || row.code || '', phone: row.phone || '' }
+      }
+      if (Object.keys(out).length) chainClients = out
+    }
     return {
       kind: 'commission',
       id: ev.id,
@@ -4029,6 +4168,7 @@ export async function fetchMyCommissionLedger(clientId = null) {
       // to reconstruct the user's subtree without additional DB calls.
       rule_snapshot: ev.rule_snapshot || null,
       ruleSnapshot: ev.rule_snapshot || null,
+      chainClients,
       sale: sale ? {
         id: sale.id,
         code: sale.code,
@@ -4804,25 +4944,70 @@ export { DEFAULT_HEALTH }
  * Staff-only (RLS). Returns { commissionEvents, clients, sellerRelations, sales }.
  */
 export async function fetchCommissionTrackerData() {
-  const [ceRes, clRes, srRes, saRes, prRes] = await Promise.all([
+  const [ceRes, clRes, srRes, saRes, prRes, rgRes] = await Promise.all([
     db().from('commission_events').select('id, beneficiary_client_id, sale_id, level, amount, status, rule_snapshot, created_at').order('created_at', { ascending: false }),
     db().from('clients').select('id, code, full_name, email, phone, phone_normalized, referred_by_client_id, status'),
     db().from('seller_relations').select('id, child_client_id, parent_client_id, source_sale_id, linked_at'),
     db().from('sales').select('id, code, client_id, seller_client_id, project_id, agreed_price, notary_completed_at, status').not('notary_completed_at','is', null).order('notary_completed_at', { ascending: false }),
     db().from('projects').select('id, title, city'),
+    db().from('commission_reverse_grants').select('id, beneficiary_client_id, source_client_id, trigger_sale_id, effective_from, status, revoked_at, revoke_reason, created_at'),
   ])
   if (ceRes.error) throw new Error(`commission_events: ${ceRes.error.message}`)
   if (clRes.error) throw new Error(`clients: ${clRes.error.message}`)
   if (srRes.error) throw new Error(`seller_relations: ${srRes.error.message}`)
   if (saRes.error) throw new Error(`sales: ${saRes.error.message}`)
   if (prRes.error) throw new Error(`projects: ${prRes.error.message}`)
+  // reverse grants table may not exist on older DBs — treat missing as empty.
+  const reverseGrants = rgRes?.error ? [] : (rgRes?.data || [])
   return {
     commissionEvents: ceRes.data || [],
     clients: clRes.data || [],
     sellerRelations: srRes.data || [],
     sales: saRes.data || [],
     projects: prRes.data || [],
+    reverseGrants,
   }
+}
+
+export async function fetchReverseGrantsAdmin() {
+  const [rgRes, clRes, saRes, ceRes] = await Promise.all([
+    db().from('commission_reverse_grants')
+      .select('id, beneficiary_client_id, source_client_id, trigger_sale_id, effective_from, status, revoked_at, revoked_by, revoke_reason, created_at, updated_at')
+      .order('created_at', { ascending: false }),
+    db().from('clients').select('id, code, full_name, phone_normalized'),
+    db().from('sales').select('id, code, project_id, agreed_price, notary_completed_at'),
+    db().from('commission_events').select('id, sale_id, beneficiary_client_id, amount, status, rule_snapshot'),
+  ])
+  if (rgRes.error) throw new Error(`commission_reverse_grants: ${rgRes.error.message}`)
+  if (clRes.error) throw new Error(`clients: ${clRes.error.message}`)
+  if (saRes.error) throw new Error(`sales: ${saRes.error.message}`)
+  return {
+    grants: rgRes.data || [],
+    clients: clRes.data || [],
+    sales: saRes.data || [],
+    commissionEvents: ceRes?.data || [],
+  }
+}
+
+export async function revokeReverseGrant({ grantId, reason = null }) {
+  const res = await db().rpc('revoke_reverse_grant', {
+    p_grant_id: grantId,
+    p_reason: reason,
+  })
+  throwIfError(res, 'revokeReverseGrant')
+  return res.data
+}
+
+export async function runBackfillReverseGrants() {
+  const res = await db().rpc('backfill_reverse_grants')
+  throwIfError(res, 'runBackfillReverseGrants')
+  return res.data
+}
+
+export async function runBackfillReverseGrantCommissions() {
+  const res = await db().rpc('backfill_reverse_grant_commissions')
+  throwIfError(res, 'runBackfillReverseGrantCommissions')
+  return res.data
 }
 
 // ===========================================================================
@@ -4863,4 +5048,352 @@ export async function adminApplyPhoneChange({ requestId, approve, note = '' }) {
   })
   throwIfError(res, 'adminApplyPhoneChange')
   return res.data
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Harvest system — project_harvests, harvest_distributions, project_events.
+// See database/dev/harvest_system.sql for the schema.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const DEFAULT_MATURITY_CURVE = [
+  { minAge: 0, rate: 0 },
+  { minAge: 3, rate: 45 },
+  { minAge: 6, rate: 75 },
+  { minAge: 10, rate: 90 },
+]
+
+function yieldPerTreeAtAge(ageYears, curve) {
+  const rows = Array.isArray(curve) && curve.length > 0 ? curve : DEFAULT_MATURITY_CURVE
+  const sorted = [...rows].sort((a, b) => (a.minAge || 0) - (b.minAge || 0))
+  let rate = 0
+  for (const row of sorted) {
+    if (ageYears >= (row.minAge || 0)) rate = Number(row.rate) || 0
+  }
+  return rate
+}
+
+function normalizeMaturityCurve(raw) {
+  if (!raw) return null
+  if (Array.isArray(raw)) {
+    return raw
+      .map((r) => ({ minAge: Number(r.minAge ?? r.min_age ?? 0), rate: Number(r.rate) || 0 }))
+      .filter((r) => Number.isFinite(r.minAge))
+  }
+  if (typeof raw === 'object') {
+    return Object.entries(raw)
+      .map(([k, v]) => ({ minAge: Number(k), rate: Number(v) || 0 }))
+      .filter((r) => Number.isFinite(r.minAge))
+      .sort((a, b) => a.minAge - b.minAge)
+  }
+  return null
+}
+
+/**
+ * Parcel revenue share is now pure surface-based:
+ *   parcel_revenue = project_annual_revenue × (parcel.area / sum(project.parcels.area))
+ *
+ * Trees live at the project level (projects.tree_batches). The old
+ * per-parcel cohort model is gone from the UI; historical
+ * parcel_tree_batches rows remain in the DB for backwards-compat reads
+ * only (they are not written by new flows).
+ */
+export function parcelAreaShare(project, parcel) {
+  if (!project || !parcel) return 0
+  const plots = Array.isArray(project.plots) ? project.plots : []
+  const total = plots.reduce((s, p) => s + (Number(p.area) || 0), 0)
+  const own = Number(parcel.area) || 0
+  if (total <= 0 || own <= 0) return 0
+  return own / total
+}
+
+export function parcelAnnualRevenueTnd(project, parcel) {
+  const share = parcelAreaShare(project, parcel)
+  if (share <= 0) return 0
+  const projectRevenue = projectedAnnualYieldTnd(project)
+  return Math.round(projectRevenue * share)
+}
+
+export function projectedAnnualYieldTnd(project) {
+  // Sum across all batches of (tree_count × yield_at_current_age). Falls back
+  // to project.annual_revenue_total when the admin has pinned a baseline.
+  const currentYear = new Date().getFullYear()
+  const curve = normalizeMaturityCurve(project?.maturity_curve ?? project?.maturityCurve)
+  const batches = project?.batches || project?.tree_batches || []
+  if (!Array.isArray(batches) || batches.length === 0) {
+    return Number(project?.annual_revenue_total ?? project?.annualRevenueTotal) || 0
+  }
+  return batches.reduce((sum, b) => {
+    const year = Number(b.batch_year ?? b.batchYear ?? b.year) || currentYear
+    const count = Number(b.tree_count ?? b.treeCount ?? b.count) || 0
+    const rate = yieldPerTreeAtAge(currentYear - year, curve)
+    return sum + count * rate
+  }, 0)
+}
+
+function mapHarvestRow(row) {
+  if (!row) return null
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    year: Number(row.harvest_year) || null,
+    date: row.harvest_date || null,
+    status: row.status,
+    projectedGrossTnd: Number(row.projected_gross_tnd) || 0,
+    actualKg: Number(row.actual_kg) || 0,
+    pricePerKgTnd: Number(row.price_per_kg_tnd) || 0,
+    actualGrossTnd: Number(row.actual_gross_tnd) || 0,
+    costsTnd: Number(row.costs_tnd) || 0,
+    netTnd: Number(row.net_tnd) || 0,
+    notes: row.notes || '',
+    distributedAt: row.distributed_at || null,
+    distributedBy: row.distributed_by || null,
+    cancelledReason: row.cancelled_reason || '',
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
+function mapDistributionRow(row) {
+  if (!row) return null
+  return {
+    id: row.id,
+    harvestId: row.harvest_id,
+    clientId: row.client_id,
+    ownedAreaM2: Number(row.owned_area_m2) || 0,
+    projectAreaM2: Number(row.project_area_m2) || 0,
+    sharePct: Number(row.share_pct) || 0,
+    amountTnd: Number(row.amount_tnd) || 0,
+    creditStatus: row.credit_status,
+    creditedAt: row.credited_at,
+    paidOutAt: row.paid_out_at,
+    payoutRequestId: row.payout_request_id || null,
+  }
+}
+
+function mapEventRow(row) {
+  if (!row) return null
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    date: row.event_date,
+    kind: row.kind,
+    title: row.title,
+    description: row.description || '',
+    mediaUrls: Array.isArray(row.media_urls) ? row.media_urls : [],
+  }
+}
+
+export async function fetchPublicProjectHarvests(projectId) {
+  const id = String(projectId || '').trim()
+  if (!id) return []
+  const res = await db()
+    .from('public_project_harvests')
+    .select('*')
+    .eq('project_id', id)
+    .order('harvest_year', { ascending: false })
+  throwIfError(res, 'publicProjectHarvests')
+  return (res.data || []).map(mapHarvestRow)
+}
+
+export async function fetchPublicProjectEvents(projectId, { limit = 40 } = {}) {
+  const id = String(projectId || '').trim()
+  if (!id) return []
+  const res = await db()
+    .from('public_project_events')
+    .select('*')
+    .eq('project_id', id)
+    .order('event_date', { ascending: false })
+    .limit(limit)
+  throwIfError(res, 'publicProjectEvents')
+  return (res.data || []).map(mapEventRow)
+}
+
+export async function fetchMyHarvestDistributions({ clientId } = {}) {
+  // RLS already filters by auth.uid() → client, but callers that know the
+  // client id can pass it for a tighter query plan.
+  let q = db()
+    .from('harvest_distributions')
+    .select('*, project_harvests:harvest_id(project_id, harvest_year, harvest_date, status)')
+    .order('credited_at', { ascending: false })
+  if (clientId) q = q.eq('client_id', clientId)
+  const res = await q
+  throwIfError(res, 'myHarvestDistributions')
+  return (res.data || []).map((row) => ({
+    ...mapDistributionRow(row),
+    projectId: row.project_harvests?.project_id || null,
+    harvestYear: Number(row.project_harvests?.harvest_year) || null,
+    harvestDate: row.project_harvests?.harvest_date || null,
+    harvestStatus: row.project_harvests?.status || null,
+  }))
+}
+
+export async function fetchUpcomingHarvestsForClient(clientId) {
+  // Projects where the client currently owns parcels + any planned/in-progress
+  // harvest rows for those projects. Used on the dashboard "Prochaine récolte"
+  // card. No RLS hop through distributions — these are public harvest rows.
+  const id = String(clientId || '').trim()
+  if (!id) return []
+  const salesRes = await db()
+    .from('sales')
+    .select('project_id, parcel_ids, parcel_id')
+    .eq('client_id', id)
+    .eq('status', 'completed')
+  throwIfError(salesRes, 'upcomingHarvests:sales')
+  const projectIds = Array.from(
+    new Set((salesRes.data || []).map((s) => s.project_id).filter(Boolean)),
+  )
+  if (projectIds.length === 0) return []
+
+  const harvestsRes = await db()
+    .from('public_project_harvests')
+    .select('*')
+    .in('project_id', projectIds)
+    .in('status', ['planned', 'in_progress', 'harvested'])
+    .order('harvest_year', { ascending: true })
+  throwIfError(harvestsRes, 'upcomingHarvests:harvests')
+  return (harvestsRes.data || []).map(mapHarvestRow)
+}
+
+// ─── Admin CRUD ─────────────────────────────────────────────────────────────
+export async function adminFetchProjectHarvests(projectId) {
+  const id = String(projectId || '').trim()
+  if (!id) return []
+  const res = await db()
+    .from('project_harvests')
+    .select('*')
+    .eq('project_id', id)
+    .order('harvest_year', { ascending: false })
+  throwIfError(res, 'adminProjectHarvests')
+  return (res.data || []).map(mapHarvestRow)
+}
+
+/*
+ * Fetch every project's harvests in one round trip. Used by the
+ * /admin/distributions page to surface harvests across the whole
+ * portfolio (the project-scoped fetcher above would need one call per
+ * project, which gets noisy at 20+ projects).
+ */
+export async function adminFetchAllHarvests() {
+  const res = await db()
+    .from('project_harvests')
+    .select('*')
+    .order('harvest_year', { ascending: false })
+  throwIfError(res, 'adminAllHarvests')
+  return (res.data || []).map(mapHarvestRow)
+}
+
+export async function adminUpsertProjectHarvest(projectId, harvest) {
+  const id = String(projectId || '').trim()
+  if (!id) throw new Error('adminUpsertProjectHarvest: projectId required')
+  const payload = {
+    project_id: id,
+    harvest_year: Number(harvest.year),
+    harvest_date: harvest.date || null,
+    status: harvest.status || 'planned',
+    projected_gross_tnd: Number(harvest.projectedGrossTnd) || 0,
+    actual_kg: Number(harvest.actualKg) || 0,
+    price_per_kg_tnd: Number(harvest.pricePerKgTnd) || 0,
+    actual_gross_tnd: Number(harvest.actualGrossTnd) || 0,
+    costs_tnd: Number(harvest.costsTnd) || 0,
+    notes: harvest.notes || null,
+    cancelled_reason: harvest.cancelledReason || null,
+  }
+  const query = harvest.id
+    ? db().from('project_harvests').update(payload).eq('id', harvest.id).select().maybeSingle()
+    : db().from('project_harvests').insert(payload).select().maybeSingle()
+  const res = await query
+  throwIfError(res, 'adminUpsertProjectHarvest')
+  return mapHarvestRow(res.data)
+}
+
+export async function adminDeleteProjectHarvest(harvestId) {
+  if (!harvestId) return
+  const res = await db().from('project_harvests').delete().eq('id', harvestId)
+  throwIfError(res, 'adminDeleteProjectHarvest')
+}
+
+export async function adminPreviewHarvestDistribution(harvestId) {
+  const res = await db().rpc('preview_harvest_distribution', { p_harvest_id: harvestId })
+  throwIfError(res, 'previewHarvestDistribution')
+  return (res.data || []).map((row) => ({
+    clientId: row.client_id,
+    clientName: row.client_name,
+    ownedAreaM2: Number(row.owned_area_m2) || 0,
+    sharePct: Number(row.share_pct) || 0,
+    amountTnd: Number(row.amount_tnd) || 0,
+  }))
+}
+
+export async function adminDistributeHarvest(harvestId) {
+  const res = await db().rpc('distribute_harvest', { p_harvest_id: harvestId })
+  throwIfError(res, 'distributeHarvest')
+  return (res.data || []).map((row) => ({
+    clientId: row.client_id,
+    ownedM2: Number(row.owned_m2) || 0,
+    amountTnd: Number(row.amount_tnd) || 0,
+  }))
+}
+
+export async function adminFetchProjectEvents(projectId) {
+  const id = String(projectId || '').trim()
+  if (!id) return []
+  const res = await db()
+    .from('project_events')
+    .select('*')
+    .eq('project_id', id)
+    .order('event_date', { ascending: false })
+  throwIfError(res, 'adminProjectEvents')
+  return (res.data || []).map(mapEventRow)
+}
+
+export async function adminUpsertProjectEvent(projectId, event) {
+  const id = String(projectId || '').trim()
+  if (!id) throw new Error('adminUpsertProjectEvent: projectId required')
+  const payload = {
+    project_id: id,
+    event_date: event.date || new Date().toISOString().slice(0, 10),
+    kind: event.kind || 'note',
+    title: event.title || '',
+    description: event.description || null,
+    media_urls: Array.isArray(event.mediaUrls) ? event.mediaUrls : [],
+  }
+  const query = event.id
+    ? db().from('project_events').update(payload).eq('id', event.id).select().maybeSingle()
+    : db().from('project_events').insert(payload).select().maybeSingle()
+  const res = await query
+  throwIfError(res, 'adminUpsertProjectEvent')
+  return mapEventRow(res.data)
+}
+
+export async function adminDeleteProjectEvent(eventId) {
+  if (!eventId) return
+  const res = await db().from('project_events').delete().eq('id', eventId)
+  throwIfError(res, 'adminDeleteProjectEvent')
+}
+
+// Upsert a full batch row (parcel-level). Existing code reads batches as part
+// of fetchPublicProjectById; admin batch editor uses these directly.
+export async function adminUpsertParcelBatch(parcelId, batch) {
+  if (!parcelId) throw new Error('adminUpsertParcelBatch: parcelId required')
+  const payload = {
+    parcel_id: Number(parcelId),
+    batch_year: Number(batch.year ?? batch.batchYear) || new Date().getFullYear(),
+    tree_count: Number(batch.treeCount ?? batch.count) || 0,
+    status: batch.status || 'planted',
+    planted_on: batch.plantedOn || null,
+    cultivar: batch.cultivar || null,
+    notes: batch.notes || null,
+  }
+  const query = batch.id
+    ? db().from('parcel_tree_batches').update(payload).eq('id', batch.id).select().maybeSingle()
+    : db().from('parcel_tree_batches').insert(payload).select().maybeSingle()
+  const res = await query
+  throwIfError(res, 'adminUpsertParcelBatch')
+  return res.data
+}
+
+export async function adminDeleteParcelBatch(batchId) {
+  if (!batchId) return
+  const res = await db().from('parcel_tree_batches').delete().eq('id', batchId)
+  throwIfError(res, 'adminDeleteParcelBatch')
 }
