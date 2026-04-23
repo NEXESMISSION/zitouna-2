@@ -913,6 +913,10 @@ export default function DashboardPage() {
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/><path d="M8 11h6M11 8v6"/></svg>
                     Explorer
                   </button>
+                  <button className="zb-btn zb-btn-ghost" type="button" onClick={() => navigate('/my/activity')}>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+                    Activité
+                  </button>
                 </div>
 
                 <div className="zb-rail zb-rail--3">

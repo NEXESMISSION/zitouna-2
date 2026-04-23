@@ -1,0 +1,211 @@
+/*
+ * /my/activity — statement-style feed, month-grouped.
+ * Scoped under .ma-* to avoid bleeding into other dashboard surfaces.
+ */
+
+.zb-greeting-sub {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--zb-muted);
+  max-width: 560px;
+  line-height: 1.4;
+}
+
+/* Totals rail */
+.ma-rail {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 14px 0 6px;
+  padding: 14px 16px;
+  background: var(--zb-surface);
+  border: 1px solid var(--zb-hair);
+  border-radius: 16px;
+}
+.ma-rail-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 8px;
+  border-right: 1px solid var(--zb-hair-2);
+}
+.ma-rail-cell:last-child { border-right: 0; }
+.ma-rail-k {
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--zb-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.ma-rail-v {
+  font-family: 'Inter Tight', 'Inter', sans-serif;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--zb-ink);
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+.ma-rail-u {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--zb-muted);
+}
+
+/* Filter tabs tweak */
+.ma-tabs {
+  align-self: flex-start;
+  margin-top: 8px;
+  margin-bottom: 4px;
+}
+.ma-tab-count {
+  margin-left: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--zb-muted);
+  background: var(--zb-hair-2);
+  padding: 2px 7px;
+  border-radius: 999px;
+  line-height: 1;
+}
+.zb-spark-tabs button.zb-active .ma-tab-count {
+  background: var(--zb-blue-soft);
+  color: var(--zb-blue);
+}
+
+/* Feed */
+.ma-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 6px;
+}
+.ma-group {
+  background: var(--zb-surface);
+  border: 1px solid var(--zb-hair);
+  border-radius: 16px;
+  overflow: hidden;
+}
+.ma-group-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 12px 18px 8px;
+  border-bottom: 1px solid var(--zb-hair-2);
+  background: #FBFBF8;
+}
+.ma-group-label {
+  font-family: 'Inter Tight', 'Inter', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--zb-ink);
+  letter-spacing: -0.005em;
+}
+.ma-group-count {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--zb-muted);
+}
+
+/* List + rows */
+.ma-list { padding: 2px 0; }
+.ma-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--zb-hair-2);
+}
+.ma-row:first-child { border-top: 0; }
+
+.ma-ic {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  color: var(--zb-ink-2);
+  background: #F3F3EF;
+}
+.ma-ic-in { background: var(--zb-green-soft); color: var(--zb-green); }
+.ma-ic-out { background: var(--zb-red-soft); color: var(--zb-red); }
+.ma-ic-schedule { background: var(--zb-amber-soft); color: var(--zb-amber); }
+
+.ma-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.ma-title {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  color: var(--zb-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ma-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--zb-muted);
+  line-height: 1.3;
+}
+.ma-date { font-weight: 500; color: var(--zb-ink-2); }
+.ma-dot { opacity: 0.6; }
+.ma-sub {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 40ch;
+}
+.ma-chip {
+  margin-top: 0;
+  font-size: 10.5px;
+  padding: 2px 7px;
+  line-height: 1.2;
+}
+
+.ma-amount {
+  font-family: 'Inter Tight', 'Inter', sans-serif;
+  font-weight: 700;
+  font-size: 14.5px;
+  letter-spacing: -0.01em;
+  text-align: right;
+  white-space: nowrap;
+}
+.ma-pos { color: var(--zb-green); }
+.ma-neg { color: var(--zb-red); }
+.ma-muted { color: var(--zb-ink-2); }
+.ma-unit {
+  color: var(--zb-muted);
+  font-size: 11px;
+  font-weight: 500;
+  margin-left: 3px;
+}
+
+/* Mobile tweaks */
+@media (max-width: 640px) {
+  .ma-rail {
+    grid-template-columns: repeat(3, 1fr);
+    padding: 12px 10px;
+    gap: 0;
+  }
+  .ma-rail-cell { padding: 0 6px; }
+  .ma-rail-v { font-size: 15px; }
+
+  .ma-row { padding: 12px 14px; gap: 12px; }
+  .ma-ic { width: 32px; height: 32px; border-radius: 9px; }
+  .ma-title { font-size: 13.5px; }
+  .ma-meta { font-size: 11.5px; }
+  .ma-amount { font-size: 13.5px; }
+  .ma-sub { max-width: 22ch; }
+  .ma-group-head { padding: 10px 14px 6px; }
+}
