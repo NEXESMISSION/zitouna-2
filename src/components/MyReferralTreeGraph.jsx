@@ -208,7 +208,12 @@ export default function MyReferralTreeGraph({
     const rect = box.getBoundingClientRect()
     const scaleW = (rect.width - 40) / tree.width
     const scaleH = (rect.height - 40) / tree.height
-    const next = Math.min(1.1, Math.max(ZOOM_MIN, Math.min(scaleW, scaleH)))
+    // On narrow screens, raise the minimum auto-fit zoom so cards stay
+    // big enough to tap (44px target). Users can still pinch-out to see
+    // more of the tree at once.
+    const isNarrow = rect.width < 640
+    const minFit = isNarrow ? 0.6 : ZOOM_MIN
+    const next = Math.min(1.1, Math.max(minFit, Math.min(scaleW, scaleH)))
     setView({
       zoom: next,
       x: (rect.width - tree.width * next) / 2,
@@ -308,19 +313,22 @@ export default function MyReferralTreeGraph({
         const t = e.touches[0]
         const startedOnCard = Boolean(isInteractive(t.target))
         state.startedOnCard = startedOnCard
-        // If the finger landed on a card/toolbar, let the tap go through so
-        // the card can be selected. Only start panning if it touched empty
-        // canvas. preventDefault on move keeps the page from scrolling.
-        if (startedOnCard) { state.mode = null; return }
-        e.preventDefault()
-        state.mode = 'pan'
+        // Always record start position so we can detect drag-vs-tap on
+        // touchmove. If the finger never moves more than DRAG_THRESHOLD,
+        // we treat it as a tap and let the click bubble. If it moves past
+        // the threshold, we promote to pan mode regardless of where it
+        // started — so users can drag from anywhere, including a card.
+        state.mode = startedOnCard ? 'pending' : 'pan'
         state.startX = t.clientX
         state.startY = t.clientY
         state.origX = view.x
         state.origY = view.y
         state.moved = 0
+        if (!startedOnCard) e.preventDefault()
       }
     }
+
+    const DRAG_THRESHOLD = 8
 
     const onTouchMove = (e) => {
       if (state.mode === 'pinch' && e.touches.length >= 2) {
@@ -338,12 +346,20 @@ export default function MyReferralTreeGraph({
         })
         return
       }
-      if (state.mode === 'pan' && e.touches.length === 1) {
-        e.preventDefault()
+      if ((state.mode === 'pan' || state.mode === 'pending') && e.touches.length === 1) {
         const t = e.touches[0]
         const dx = t.clientX - state.startX
         const dy = t.clientY - state.startY
-        state.moved = Math.max(state.moved, Math.abs(dx) + Math.abs(dy))
+        const movedNow = Math.abs(dx) + Math.abs(dy)
+        // Promote a pending touch (started on a card) to pan once finger
+        // moves past threshold — this keeps tap-to-select working but
+        // still lets users drag the canvas from anywhere.
+        if (state.mode === 'pending') {
+          if (movedNow < DRAG_THRESHOLD) return
+          state.mode = 'pan'
+        }
+        e.preventDefault()
+        state.moved = Math.max(state.moved, movedNow)
         setView((v) => ({ ...v, x: state.origX + dx, y: state.origY + dy }))
       }
     }
@@ -362,6 +378,13 @@ export default function MyReferralTreeGraph({
         return
       }
       if (e.touches.length === 0) {
+        // If the user dragged past the threshold, swallow the synthetic
+        // click so we don't accidentally select the card the pan started on.
+        if (state.mode === 'pan' && state.moved > DRAG_THRESHOLD) {
+          const swallow = (ev) => { ev.stopPropagation(); ev.preventDefault() }
+          el.addEventListener('click', swallow, { capture: true, once: true })
+          setTimeout(() => el.removeEventListener('click', swallow, { capture: true }), 350)
+        }
         state.mode = null
       }
     }
