@@ -725,6 +725,7 @@ declare
   v_gains numeric(14,2) := 0;
   v_released numeric(14,2) := 0;
   v_wallet numeric(14,2) := 0;
+  v_in_payout numeric(14,2) := 0;
   v_min_payout numeric(14,2) := 0;
   v_project_ids text[];
   v_max_depth int := 0;
@@ -753,6 +754,7 @@ begin
       'gainsAccrued', 0,
       'commissionsReleased', 0,
       'walletBalance', 0,
+      'inPayoutAmount', 0,
       'minPayoutAmount', 0,
       'fieldDepositMin', 0,
       'fullDepositTarget', 0,
@@ -796,6 +798,21 @@ begin
   where ce.beneficiary_client_id = v_client_id
     and ce.status = 'payable'
     and not exists (
+      select 1
+      from public.commission_payout_request_items pri
+      join public.commission_payout_requests pr on pr.id = pri.request_id
+      where pri.commission_event_id = ce.id
+        and pr.status in ('pending_review', 'approved')
+    );
+
+  -- inPayoutAmount: commissions currently tied up in a pending_review or
+  -- approved payout request. Surfaces the "disponible 0 / crédit légal 210"
+  -- gap so the buyer can see where their earnings went.
+  select coalesce(sum(ce.amount), 0) into v_in_payout
+  from public.commission_events ce
+  where ce.beneficiary_client_id = v_client_id
+    and ce.status = 'payable'
+    and exists (
       select 1
       from public.commission_payout_request_items pri
       join public.commission_payout_requests pr on pr.id = pri.request_id
@@ -966,6 +983,7 @@ begin
     'gainsAccrued', v_gains,
     'commissionsReleased', v_released,
     'walletBalance', v_wallet,
+    'inPayoutAmount', v_in_payout,
     'minPayoutAmount', v_min_payout,
     'fieldDepositMin', 0,
     'fullDepositTarget', 0,
@@ -3474,6 +3492,11 @@ grant execute on function public.admin_apply_phone_change(uuid, boolean, text) t
 -- Folded from dev/harvest_system.sql — distribution engine + preview.
 -- Tables live in 02_schema.sql; RLS/views/grants in 04_rls.sql.
 -- ============================================================================
+-- Per-parcel tree-count distribution. Each client's share of a harvest is
+-- owned_trees / project_total_trees, where tree counts come from
+-- parcels.tree_count (per-piece). The harvest_distributions columns
+-- `owned_area_m2` / `project_area_m2` are kept for schema compatibility
+-- but now carry tree counts (legacy names — not areas).
 create or replace function public.distribute_harvest(p_harvest_id uuid)
 returns table (client_id uuid, owned_m2 numeric, amount_tnd numeric)
 language plpgsql
@@ -3482,7 +3505,7 @@ set search_path = public
 as $fn_distribute$
 declare
   v_harvest        public.project_harvests%rowtype;
-  v_project_area   numeric(14, 2);
+  v_project_trees  numeric(14, 2);
   v_net            numeric(14, 2);
   v_admin_id       uuid;
   v_row            record;
@@ -3514,12 +3537,12 @@ begin
 
   v_net := greatest(coalesce(v_harvest.net_tnd, 0), 0);
 
-  select coalesce(sum(p.area_m2), 0) into v_project_area
+  select coalesce(sum(p.tree_count), 0) into v_project_trees
     from public.parcels p
     where p.project_id = v_harvest.project_id;
 
-  if v_project_area <= 0 then
-    raise exception 'distribute_harvest: project % has zero total area', v_harvest.project_id;
+  if v_project_trees <= 0 then
+    raise exception 'distribute_harvest: project % has zero total trees', v_harvest.project_id;
   end if;
 
   select id into v_admin_id
@@ -3529,7 +3552,7 @@ begin
 
   for v_row in
     select s.client_id as cid,
-           sum(coalesce(p.area_m2, 0)) as owned_m2
+           sum(coalesce(p.tree_count, 0)) as owned_trees
       from public.sales s
       join public.parcels p
         on p.id = any (case
@@ -3543,7 +3566,7 @@ begin
               (v_harvest.harvest_date + interval '1 day')::timestamptz,
               now())
       group by s.client_id
-      having sum(coalesce(p.area_m2, 0)) > 0
+      having sum(coalesce(p.tree_count, 0)) > 0
   loop
     insert into public.harvest_distributions (
       harvest_id, client_id,
@@ -3551,18 +3574,18 @@ begin
       credit_status, credited_at
     ) values (
       p_harvest_id, v_row.cid,
-      v_row.owned_m2, v_project_area,
-      round((v_row.owned_m2 / v_project_area) * 100, 6),
-      round(v_net * (v_row.owned_m2 / v_project_area), 2),
+      v_row.owned_trees, v_project_trees,
+      round((v_row.owned_trees / v_project_trees) * 100, 6),
+      round(v_net * (v_row.owned_trees / v_project_trees), 2),
       'credited', now()
     )
     on conflict (harvest_id, client_id) do nothing;
 
     insert into public.ambassador_wallets (client_id, balance)
-      values (v_row.cid, round(v_net * (v_row.owned_m2 / v_project_area), 2))
+      values (v_row.cid, round(v_net * (v_row.owned_trees / v_project_trees), 2))
     on conflict (client_id) do update
       set balance    = public.ambassador_wallets.balance
-                     + round(v_net * (v_row.owned_m2 / v_project_area), 2),
+                     + round(v_net * (v_row.owned_trees / v_project_trees), 2),
           updated_at = now();
   end loop;
 
@@ -3583,6 +3606,8 @@ $fn_distribute$;
 grant execute on function public.distribute_harvest(uuid) to authenticated;
 
 
+-- Per-parcel tree-count preview. `owned_area_m2` column name kept for
+-- back-compat but carries the client's total tree count for this project.
 create or replace function public.preview_harvest_distribution(p_harvest_id uuid)
 returns table (
   client_id       uuid,
@@ -3596,9 +3621,9 @@ security definer
 set search_path = public
 as $fn_preview$
 declare
-  v_harvest      public.project_harvests%rowtype;
-  v_project_area numeric(14, 2);
-  v_net          numeric(14, 2);
+  v_harvest       public.project_harvests%rowtype;
+  v_project_trees numeric(14, 2);
+  v_net           numeric(14, 2);
 begin
   if not public.is_active_staff() then
     raise exception 'preview_harvest_distribution: staff role required';
@@ -3609,17 +3634,17 @@ begin
 
   v_net := greatest(coalesce(v_harvest.net_tnd, 0), 0);
 
-  select coalesce(sum(p.area_m2), 0) into v_project_area
+  select coalesce(sum(p.tree_count), 0) into v_project_trees
     from public.parcels p where p.project_id = v_harvest.project_id;
 
-  if v_project_area <= 0 then return; end if;
+  if v_project_trees <= 0 then return; end if;
 
   return query
     select c.id,
            c.name,
-           sum(coalesce(p.area_m2, 0))::numeric,
-           round((sum(coalesce(p.area_m2, 0)) / v_project_area) * 100, 6),
-           round(v_net * (sum(coalesce(p.area_m2, 0)) / v_project_area), 2)
+           sum(coalesce(p.tree_count, 0))::numeric,
+           round((sum(coalesce(p.tree_count, 0)) / v_project_trees) * 100, 6),
+           round(v_net * (sum(coalesce(p.tree_count, 0)) / v_project_trees), 2)
       from public.sales s
       join public.clients c on c.id = s.client_id
       join public.parcels p
@@ -3634,8 +3659,8 @@ begin
               (v_harvest.harvest_date + interval '1 day')::timestamptz,
               now())
       group by c.id, c.name
-      having sum(coalesce(p.area_m2, 0)) > 0
-      order by sum(coalesce(p.area_m2, 0)) desc;
+      having sum(coalesce(p.tree_count, 0)) > 0
+      order by sum(coalesce(p.tree_count, 0)) desc;
 end;
 $fn_preview$;
 

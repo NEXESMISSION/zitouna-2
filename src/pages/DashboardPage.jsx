@@ -1758,15 +1758,21 @@ export default function DashboardPage() {
                         </span>
                         <div className="inv-wallet__hero-breakdown">
                           <span className="inv-wallet__chip">
-                            <span className="inv-wallet__chip-lbl">En attente</span>
+                            <span className="inv-wallet__chip-lbl">En cours de retrait</span>
                             <span className="inv-wallet__chip-val">
-                              {(showAmbassadorCard ? (referralSummary?.gainsAccrued ?? 0) : 0).toLocaleString('fr-FR', { maximumFractionDigits: 2 })} DT
+                              {(showAmbassadorCard ? (referralSummary?.inPayoutAmount ?? 0) : 0).toLocaleString('fr-FR', { maximumFractionDigits: 2 })} DT
                             </span>
                           </span>
                           <span className="inv-wallet__chip">
                             <span className="inv-wallet__chip-lbl">Crédit légal</span>
                             <span className="inv-wallet__chip-val">
                               {(showAmbassadorCard ? (referralSummary?.commissionsReleased ?? 0) : 0).toLocaleString('fr-FR', { maximumFractionDigits: 2 })} DT
+                            </span>
+                          </span>
+                          <span className="inv-wallet__chip">
+                            <span className="inv-wallet__chip-lbl">Avant notaire</span>
+                            <span className="inv-wallet__chip-val">
+                              {(showAmbassadorCard ? (referralSummary?.gainsAccrued ?? 0) : 0).toLocaleString('fr-FR', { maximumFractionDigits: 2 })} DT
                             </span>
                           </span>
                         </div>
@@ -2451,7 +2457,7 @@ function ProfileRevenuePanel({ purchases, totalInvested, totalRevenue }) {
         </h4>
         <span
           className="inv-rev-panel__slim-help"
-          title="Projection basée sur le rendement annuel total de chaque projet, réparti au prorata de la surface de vos parcelles."
+          title="Projection basée sur les arbres de chaque parcelle (cohortes × rendement par âge)."
           aria-label="Aide sur le calcul"
         >
           ⓘ

@@ -57,8 +57,6 @@ const EMPTY_PROJECT = {
   title: '', city: '', region: '', address: '', mapUrl: '',
   annualRevenueTotal: '',
   treeHealthPct: '', soilHumidityPct: '', nutrientsPct: '',
-  /** @type {{year: number|string, count: string}[]} Project-level cohorts */
-  treeBatches: [{ year: CY, count: '' }],
 }
 const EMPTY_OFFER = { label: '', mode: 'installments', avancePct: '', avanceTnd: '', avanceInput: 'pct', duration: '', cashAmount: '', note: '', usePricePerSqm: false, pricePerSqm: '' }
 const EMPTY_CHECK_ITEM = { key: '', label: '', required: true, grantAllowedPagesText: '' }
@@ -66,21 +64,23 @@ const DH = { treeSante: 95, humidity: 65, nutrients: 80 }
 
 function fmt(v) { return `${(Number(v) || 0).toLocaleString('fr-FR')} DT` }
 function ti(y) { const a = CY - y; if (a < 3) return { rate: 0, label: 'Jeune' }; if (a < 6) return { rate: 45, label: 'Dev.' }; if (a < 10) return { rate: 75, label: 'Croissance' }; return { rate: 90, label: 'Production' } }
-// Per-plot annual revenue estimate. When the project carries an
-// `annualRevenueTotal` figure (entered by the admin from the "Nouveau
-// projet" / "Modifier le projet" modals), each parcelle earns its share
-// of that total pro-rata to its own surface. Falls back to the historical
-// tree-age heuristic for legacy projects without a configured total.
+// Per-plot annual revenue estimate. Each parcel owns its own tree cohorts
+// (parcel_tree_batches) — revenue is the sum of cohort_count × age_rate.
+// Falls back to the project-level annualRevenueTotal split by tree-count
+// share when the parcel has no batches yet (legacy/empty rows).
 function pRev(p, proj) {
-  const totalArea = (proj?.plots || []).reduce((s, x) => s + (Number(x.area) || 0), 0)
-  const myArea = Number(p?.area) || 0
-  if (totalArea <= 0 || myArea <= 0) return 0
-  let projRev = Number(proj?.annualRevenueTotal) || 0
-  if (projRev <= 0 && Array.isArray(proj?.treeBatches)) {
-    projRev = proj.treeBatches.reduce((s, b) => s + (Number(b.count) || 0) * ti(Number(b.year) || CY).rate, 0)
+  const myBatches = Array.isArray(p?.treeBatches) ? p.treeBatches : []
+  if (myBatches.length) {
+    return Math.round(
+      myBatches.reduce((s, b) => s + (Number(b.count) || 0) * ti(Number(b.year) || CY).rate, 0)
+    )
   }
+  const projRev = Number(proj?.annualRevenueTotal) || 0
   if (projRev <= 0) return 0
-  return Math.round((myArea / totalArea) * projRev)
+  const totalTrees = (proj?.plots || []).reduce((s, x) => s + (Number(x.trees) || 0), 0)
+  const myTrees = Number(p?.trees) || 0
+  if (totalTrees <= 0 || myTrees <= 0) return 0
+  return Math.round((myTrees / totalTrees) * projRev)
 }
 function sLbl(s) { return s === 'available' ? 'Dispo' : s === 'reserved' ? 'Réservée' : 'Vendue' }
 function pillCls(s) { return s === 'available' ? 'pdp-pill pdp-pill--avail' : s === 'reserved' ? 'pdp-pill pdp-pill--reserved' : 'pdp-pill pdp-pill--sold' }
@@ -351,12 +351,6 @@ export default function ProjectDetailPage() {
 
   const openEdit = () => {
     if (!project) return
-    const batches = Array.isArray(project.treeBatches) && project.treeBatches.length
-      ? project.treeBatches.map((b) => ({
-          year: Number(b?.year) || CY,
-          count: b?.count != null ? String(b.count) : '',
-        }))
-      : [{ year: CY, count: '' }]
     setPf({
       title: project.title,
       city: project.city,
@@ -367,7 +361,6 @@ export default function ProjectDetailPage() {
       treeHealthPct: project.treeHealthPct != null ? String(project.treeHealthPct) : '',
       soilHumidityPct: project.soilHumidityPct != null ? String(project.soilHumidityPct) : '',
       nutrientsPct: project.nutrientsPct != null ? String(project.nutrientsPct) : '',
-      treeBatches: batches,
     })
     setModal('edit')
   }
@@ -401,7 +394,6 @@ export default function ProjectDetailPage() {
         annualRevenueTotal: pf.annualRevenueTotal === '' || pf.annualRevenueTotal == null
           ? (Number(project.annualRevenueTotal) || 0)
           : (Number(pf.annualRevenueTotal) || 0),
-        treeBatches: normalizeBatchInput(pf.treeBatches),
         treeHealthPct: pf.treeHealthPct === '' ? null : pf.treeHealthPct,
         soilHumidityPct: pf.soilHumidityPct === '' ? null : pf.soilHumidityPct,
         nutrientsPct: pf.nutrientsPct === '' ? null : pf.nutrientsPct,
@@ -472,20 +464,20 @@ export default function ProjectDetailPage() {
     const label = String(pcf.label || '').trim().toLowerCase().slice(0, 16)
     if (!label) return
     if (saving) return
+    const cleanedBatches = normalizeBatchInput(pcf.treeBatches)
+    const trees = sumBatchTrees(cleanedBatches)
     const res = await runSafeAction({
       setBusy: setSaving, onError: reportOpError, label: 'Ajouter la parcelle',
     }, async () => {
-      // Parcels-are-surface model: no trees, no cohorts at parcel level.
-      // Revenue is derived from project.treeBatches × (parcel.area / project.area).
       await db.upsertParcelForProject(project.id, {
         plotNumber: 0,
         label,
-        trees: 0,
+        trees,
         area: a,
         pricePerTree: 0,
         totalPrice: 0,
         status: 'available',
-        treeBatches: [],
+        treeBatches: cleanedBatches,
       })
       emitInvalidate('projects')
       await refreshProjects()
@@ -517,6 +509,10 @@ export default function ProjectDetailPage() {
     if (saving) return
     const pp = Number(pl.pricePerTree) || 0
     const label = String(pcf.label || '').trim().toLowerCase().slice(0, 16)
+    const cleanedBatches = normalizeBatchInput(pcf.treeBatches)
+    const trees = cleanedBatches.length
+      ? sumBatchTrees(cleanedBatches)
+      : (Number(pcf.trees) || Number(pl.trees) || 0)
     const res = await runSafeAction({
       setBusy: setSaving, onError: reportOpError, label: 'Enregistrer la parcelle',
     }, async () => {
@@ -524,12 +520,12 @@ export default function ProjectDetailPage() {
         dbId: pl.dbId || pcf.dbId,
         plotNumber: pl.id,
         label,
-        trees: Number(pl.trees) || 0,
+        trees,
         area: a,
         pricePerTree: pp,
         totalPrice: Number(pl.totalPrice) || 0,
         status: pcf.status || pl.status,
-        treeBatches: [],
+        treeBatches: cleanedBatches,
       })
       emitInvalidate('projects')
       await refreshProjects()
@@ -1224,76 +1220,11 @@ export default function ProjectDetailPage() {
               />
               {totalAreaM2 > 0 && Number(pf.annualRevenueTotal) > 0 ? (
                 <span className="pdp-field__hint">
-                  ≈ {(Number(pf.annualRevenueTotal) / totalAreaM2).toLocaleString('fr-FR', { maximumFractionDigits: 2 })} DT / m² — réparti au prorata de la surface de chaque parcelle.
+                  ≈ {(Number(pf.annualRevenueTotal) / totalAreaM2).toLocaleString('fr-FR', { maximumFractionDigits: 2 })} DT / m² — fallback si aucune cohorte n'est saisie au niveau de la parcelle.
                 </span>
               ) : (
-                <span className="pdp-field__hint">Réparti automatiquement entre les parcelles au prorata de leur surface.</span>
+                <span className="pdp-field__hint">Fallback uniquement : le revenu de chaque parcelle est calculé à partir de ses propres cohortes d'arbres.</span>
               )}
-            </div>
-
-            <div className="pdp-batches pdp-batches--edit">
-              <div className="pdp-field__label">Composition du verger *</div>
-              <p className="pdp-field__hint" style={{ margin: '0 0 8px' }}>
-                Une ligne par cohorte (année de plantation + nombre d'arbres). Défini au niveau du projet — les parcelles sont de pures surfaces, leur revenu est calculé au prorata de leur surface.
-              </p>
-              {(pf.treeBatches?.length ? pf.treeBatches : [{ year: CY, count: '' }]).map((b, i) => {
-                const info = ti(Number(b.year) || CY)
-                return (
-                  <div className="pdp-batch-edit-row" key={i}>
-                    <label className="pdp-batch-edit-row__lbl">Année
-                      <input className="zitu-page__input" type="number" min="1900" max="2100" step="1"
-                        value={b.year}
-                        onChange={e => setPf(f => {
-                          const rows = [...(f.treeBatches?.length ? f.treeBatches : [{ year: CY, count: '' }])]
-                          rows[i] = { ...rows[i], year: e.target.value }
-                          return { ...f, treeBatches: rows }
-                        })}
-                      />
-                    </label>
-                    <label className="pdp-batch-edit-row__lbl">Arbres
-                      <input className="zitu-page__input" type="number" min="0" step="1"
-                        value={b.count}
-                        onChange={e => setPf(f => {
-                          const rows = [...(f.treeBatches?.length ? f.treeBatches : [{ year: CY, count: '' }])]
-                          rows[i] = { ...rows[i], count: e.target.value }
-                          return { ...f, treeBatches: rows }
-                        })}
-                      />
-                    </label>
-                    <span className="pdp-batch-edit-row__age">
-                      {CY - (Number(b.year) || CY)}a · {info.label}
-                      {info.rate === 0 ? <em style={{ marginLeft: 6, color: '#92400e' }}>Non prod.</em> : null}
-                    </span>
-                    <button
-                      type="button"
-                      className="pdp-batch-edit-row__rm"
-                      disabled={(pf.treeBatches?.length || 0) <= 1}
-                      onClick={() => setPf(f => {
-                        const rows = [...(f.treeBatches?.length ? f.treeBatches : [{ year: CY, count: '' }])]
-                        if (rows.length <= 1) return f
-                        rows.splice(i, 1)
-                        return { ...f, treeBatches: rows }
-                      })}
-                      aria-label="Retirer cette cohorte"
-                    >
-                      −
-                    </button>
-                  </div>
-                )
-              })}
-              <button
-                type="button"
-                className="pdp-batch-add"
-                onClick={() => setPf(f => ({
-                  ...f,
-                  treeBatches: [...(f.treeBatches?.length ? f.treeBatches : [{ year: CY, count: '' }]), { year: CY, count: '' }],
-                }))}
-              >
-                + Ajouter une génération
-              </button>
-              <div className="pdp-batch-total">
-                Total : <strong>{sumBatchTrees(normalizeBatchInput(pf.treeBatches)).toLocaleString('fr-FR')}</strong> arbres
-              </div>
             </div>
 
             <div className="pdp-field__label" style={{ marginTop: 12, fontSize: 13, fontWeight: 600, color: '#0f172a' }}>Santé du projet (0–100)</div>
@@ -1362,7 +1293,73 @@ export default function ProjectDetailPage() {
               />
               <span className="pdp-field__hint">Texte libre, unique dans le projet. Le n° interne est attribué automatiquement.</span>
             </div>
-            <div className="zitu-page__field"><label className="zitu-page__field-label">Surface m² *</label><input className="zitu-page__input" type="number" min="1" placeholder="400" value={pcf.area} onChange={e => setPcf(f => ({ ...f, area: e.target.value }))} /><span className="pdp-field__hint">La parcelle est une surface pure. Sa part du revenu = surface / surface totale du projet.</span></div>
+            <div className="zitu-page__field"><label className="zitu-page__field-label">Surface m² *</label><input className="zitu-page__input" type="number" min="1" placeholder="400" value={pcf.area} onChange={e => setPcf(f => ({ ...f, area: e.target.value }))} /></div>
+
+            <div className="pdp-batches pdp-batches--edit">
+              <div className="pdp-field__label">Composition de la parcelle</div>
+              <p className="pdp-field__hint" style={{ margin: '0 0 8px' }}>
+                Une ligne par cohorte (année de plantation + nombre d'arbres). Chaque parcelle porte ses propres arbres.
+              </p>
+              {(pcf.treeBatches?.length ? pcf.treeBatches : [{ year: CY, count: '' }]).map((b, i) => {
+                const info = ti(Number(b.year) || CY)
+                return (
+                  <div className="pdp-batch-edit-row" key={i}>
+                    <label className="pdp-batch-edit-row__lbl">Année
+                      <input className="zitu-page__input" type="number" min="1900" max="2100" step="1"
+                        value={b.year}
+                        onChange={e => setPcf(f => {
+                          const rows = [...(f.treeBatches?.length ? f.treeBatches : [{ year: CY, count: '' }])]
+                          rows[i] = { ...rows[i], year: e.target.value }
+                          return { ...f, treeBatches: rows }
+                        })}
+                      />
+                    </label>
+                    <label className="pdp-batch-edit-row__lbl">Arbres
+                      <input className="zitu-page__input" type="number" min="0" step="1"
+                        value={b.count}
+                        onChange={e => setPcf(f => {
+                          const rows = [...(f.treeBatches?.length ? f.treeBatches : [{ year: CY, count: '' }])]
+                          rows[i] = { ...rows[i], count: e.target.value }
+                          return { ...f, treeBatches: rows }
+                        })}
+                      />
+                    </label>
+                    <span className="pdp-batch-edit-row__age">
+                      {CY - (Number(b.year) || CY)}a · {info.label}
+                      {info.rate === 0 ? <em style={{ marginLeft: 6, color: '#92400e' }}>Non prod.</em> : null}
+                    </span>
+                    <button
+                      type="button"
+                      className="pdp-batch-edit-row__rm"
+                      disabled={(pcf.treeBatches?.length || 0) <= 1}
+                      onClick={() => setPcf(f => {
+                        const rows = [...(f.treeBatches?.length ? f.treeBatches : [{ year: CY, count: '' }])]
+                        if (rows.length <= 1) return f
+                        rows.splice(i, 1)
+                        return { ...f, treeBatches: rows }
+                      })}
+                      aria-label="Retirer cette cohorte"
+                    >
+                      −
+                    </button>
+                  </div>
+                )
+              })}
+              <button
+                type="button"
+                className="pdp-batch-add"
+                onClick={() => setPcf(f => ({
+                  ...f,
+                  treeBatches: [...(f.treeBatches?.length ? f.treeBatches : [{ year: CY, count: '' }]), { year: CY, count: '' }],
+                }))}
+              >
+                + Ajouter une génération
+              </button>
+              <div className="pdp-batch-total">
+                Total : <strong>{sumBatchTrees(normalizeBatchInput(pcf.treeBatches)).toLocaleString('fr-FR')}</strong> arbres
+              </div>
+            </div>
+
             <p className="pdp-field__hint" style={{ margin: 0 }}>La nouvelle parcelle est créée avec le statut <strong>Disponible</strong>. Le prix se règle depuis l’édition de la parcelle.</p>
             <div className="zitu-page__form-actions">
               <button type="button" className="zitu-page__btn" onClick={() => setModal(null)}>Annuler</button>
@@ -1789,10 +1786,82 @@ export default function ProjectDetailPage() {
                 />
                 <span className="pdp-field__hint">Unique dans le projet. Laisser vide pour revenir au N° interne.</span>
               </div>
-              <div className="zitu-page__field"><label className="zitu-page__field-label">Surface m² *</label><input className="zitu-page__input" type="number" min="1" value={pcf.area} onChange={e => setPcf(f => ({ ...f, area: e.target.value }))} /><span className="pdp-field__hint">La parcelle est une surface pure. Sa part du revenu = surface / surface totale du projet.</span></div>
+              <div className="zitu-page__field"><label className="zitu-page__field-label">Surface m² *</label><input className="zitu-page__input" type="number" min="1" value={pcf.area} onChange={e => setPcf(f => ({ ...f, area: e.target.value }))} /></div>
               <div className="zitu-page__field"><label className="zitu-page__field-label">Statut</label><select className="zitu-page__input" value={pcf.status} onChange={e => setPcf(f => ({ ...f, status: e.target.value }))}><option value="available">Disponible</option><option value="reserved">Réservée</option><option value="sold">Vendue</option></select></div>
+
+              <div className="pdp-batches pdp-batches--edit">
+                <div className="pdp-field__label">Composition de la parcelle</div>
+                <p className="pdp-field__hint" style={{ margin: '0 0 8px' }}>
+                  Une ligne par cohorte (année de plantation + nombre d'arbres). Chaque parcelle porte ses propres arbres.
+                </p>
+                {(pcf.treeBatches?.length ? pcf.treeBatches : [{ year: CY, count: '' }]).map((b, i) => {
+                  const info = ti(Number(b.year) || CY)
+                  return (
+                    <div className="pdp-batch-edit-row" key={i}>
+                      <label className="pdp-batch-edit-row__lbl">Année
+                        <input className="zitu-page__input" type="number" min="1900" max="2100" step="1"
+                          value={b.year}
+                          onChange={e => setPcf(f => {
+                            const rows = [...(f.treeBatches?.length ? f.treeBatches : [{ year: CY, count: '' }])]
+                            rows[i] = { ...rows[i], year: e.target.value }
+                            return { ...f, treeBatches: rows }
+                          })}
+                        />
+                      </label>
+                      <label className="pdp-batch-edit-row__lbl">Arbres
+                        <input className="zitu-page__input" type="number" min="0" step="1"
+                          value={b.count}
+                          onChange={e => setPcf(f => {
+                            const rows = [...(f.treeBatches?.length ? f.treeBatches : [{ year: CY, count: '' }])]
+                            rows[i] = { ...rows[i], count: e.target.value }
+                            return { ...f, treeBatches: rows }
+                          })}
+                        />
+                      </label>
+                      <span className="pdp-batch-edit-row__age">
+                        {CY - (Number(b.year) || CY)}a · {info.label}
+                        {info.rate === 0 ? <em style={{ marginLeft: 6, color: '#92400e' }}>Non prod.</em> : null}
+                      </span>
+                      <button
+                        type="button"
+                        className="pdp-batch-edit-row__rm"
+                        disabled={(pcf.treeBatches?.length || 0) <= 1}
+                        onClick={() => setPcf(f => {
+                          const rows = [...(f.treeBatches?.length ? f.treeBatches : [{ year: CY, count: '' }])]
+                          if (rows.length <= 1) return f
+                          rows.splice(i, 1)
+                          return { ...f, treeBatches: rows }
+                        })}
+                        aria-label="Retirer cette cohorte"
+                      >
+                        −
+                      </button>
+                    </div>
+                  )
+                })}
+                <button
+                  type="button"
+                  className="pdp-batch-add"
+                  onClick={() => setPcf(f => ({
+                    ...f,
+                    treeBatches: [...(f.treeBatches?.length ? f.treeBatches : [{ year: CY, count: '' }]), { year: CY, count: '' }],
+                  }))}
+                >
+                  + Ajouter une génération
+                </button>
+                <div className="pdp-batch-total">
+                  Total : <strong>{sumBatchTrees(normalizeBatchInput(pcf.treeBatches)).toLocaleString('fr-FR')}</strong> arbres
+                </div>
+              </div>
+
               {(() => {
-                const previewPlot = { ...epData.plot, area: Number(pcf.area) || 0 }
+                const cleaned = normalizeBatchInput(pcf.treeBatches)
+                const previewPlot = {
+                  ...epData.plot,
+                  area: Number(pcf.area) || 0,
+                  trees: cleaned.length ? sumBatchTrees(cleaned) : (Number(epData.plot.trees) || 0),
+                  treeBatches: cleaned.length ? cleaned : (epData.plot.treeBatches || []),
+                }
                 const totalPrice = Number(epData.plot.totalPrice) || 0
                 return (
                   <div className="pdp-edit-preview">

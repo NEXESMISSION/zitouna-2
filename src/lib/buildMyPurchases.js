@@ -1,15 +1,18 @@
 const REVENUE_PER_TREE = 90
 
-// Trees attributable to one plot. Legacy per-parcel tree count wins when
-// set, otherwise we pro-rate the project's total tree batches by surface
-// share — matches the "parcels are pure surfaces" model now used for m²-
-// priced projects.
+// Trees attributable to one plot — read straight from the parcel's own
+// tree count / cohorts. Falls back to a tree-count share of the project
+// total only when the parcel itself has none recorded (legacy rows).
 function plotTreeShare(plot, project) {
   const direct = Number(plot?.trees) || 0
   if (direct > 0) return direct
-  const projectTotalTrees = Array.isArray(project?.treeBatches) && project.treeBatches.length
-    ? project.treeBatches.reduce((s, b) => s + (Number(b?.count) || 0), 0)
-    : (Number(project?.totalTrees) || 0)
+  const cohorts = Array.isArray(plot?.treeBatches) ? plot.treeBatches : []
+  const cohortSum = cohorts.reduce((s, b) => s + (Number(b?.count) || 0), 0)
+  if (cohortSum > 0) return cohortSum
+  const projectTotalTrees = (project?.plots || []).reduce(
+    (s, p) => s + (Number(p?.trees) || 0),
+    0,
+  )
   if (projectTotalTrees <= 0) return 0
   const totalArea = (project?.plots || []).reduce((s, p) => s + (Number(p.area) || 0), 0)
   const myArea = Number(plot?.area) || 0
@@ -18,13 +21,23 @@ function plotTreeShare(plot, project) {
 }
 
 function computePlotAnnualRevenue(plot, project) {
+  // Each parcel's own tree count drives its annual revenue estimate.
+  const trees = plotTreeShare(plot, project)
+  if (trees > 0) return Math.round(trees * REVENUE_PER_TREE)
+  // Fallback only when the parcel has no trees yet — split the project's
+  // configured total by tree-count share so the dashboard isn't empty.
   const total = Number(project?.annualRevenueTotal) || 0
   if (total > 0) {
-    const totalArea = (project?.plots || []).reduce((s, p) => s + (Number(p.area) || 0), 0)
-    const myArea = Number(plot?.area) || 0
-    if (totalArea > 0 && myArea > 0) return Math.round((myArea / totalArea) * total)
+    const totalTrees = (project?.plots || []).reduce(
+      (s, p) => s + (Number(p?.trees) || 0),
+      0,
+    )
+    const myTrees = Number(plot?.trees) || 0
+    if (totalTrees > 0 && myTrees > 0) {
+      return Math.round((myTrees / totalTrees) * total)
+    }
   }
-  return Math.round(plotTreeShare(plot, project) * REVENUE_PER_TREE)
+  return 0
 }
 
 export function buildMyPurchases(mySales, allProjects) {

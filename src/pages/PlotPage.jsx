@@ -37,27 +37,26 @@ function treeRevRate(plantYear, palette) {
 //
 // Fallback — older projects without a configured total still return a
 // synthetic tree-age based estimate so existing plots don't display 0 DT.
-// Parcels are pure surface. Revenue =
-//   project_annual_revenue × (parcel.area / sum(project.parcels.area))
+// Each parcel owns its own tree cohorts. Revenue =
+//   sum(cohort.count × age_rate) for the parcel's batches.
 //
-// Project-level revenue sources in order:
-//   1. project.annualRevenueTotal (admin-pinned baseline)
-//   2. derived from project.treeBatches (cohorts × per-age yield)
-//   3. 0 when neither is configured
+// Falls back to a tree-count share of the project annualRevenueTotal
+// when the parcel has no batches yet.
 function plotAnnualRevenue(plot, project) {
-  const totalArea = (project?.plots || []).reduce((s, p) => s + (Number(p.area) || 0), 0)
-  const myArea = Number(plot?.area) || 0
-  if (totalArea <= 0 || myArea <= 0) return 0
-  let projRev = Number(project?.annualRevenueTotal) || 0
-  if (projRev <= 0 && Array.isArray(project?.treeBatches)) {
-    projRev = project.treeBatches.reduce((s, b) => {
+  const myBatches = Array.isArray(plot?.treeBatches) ? plot.treeBatches : []
+  if (myBatches.length) {
+    return Math.round(myBatches.reduce((s, b) => {
       const age = CURRENT_YEAR - (Number(b?.year) || CURRENT_YEAR)
       const rate = age < 3 ? 0 : age < 6 ? 45 : age < 10 ? 75 : 90
       return s + (Number(b?.count) || 0) * rate
-    }, 0)
+    }, 0))
   }
+  const projRev = Number(project?.annualRevenueTotal) || 0
   if (projRev <= 0) return 0
-  return Math.round((myArea / totalArea) * projRev)
+  const totalTrees = (project?.plots || []).reduce((s, p) => s + (Number(p?.trees) || 0), 0)
+  const myTrees = Number(plot?.trees) || 0
+  if (totalTrees <= 0 || myTrees <= 0) return 0
+  return Math.round((myTrees / totalTrees) * projRev)
 }
 function HealthRing({ value, color, label }) {
   const circ = 2 * Math.PI * 42
@@ -159,20 +158,15 @@ function PlotPageBody({ project: proj, plot }) {
   const sharePct = projectTotalArea > 0 && Number(plot?.area) > 0
     ? (Number(plot.area) / projectTotalArea) * 100
     : 0
-  // Trees moved to project level — each parcel's olivier count is its
-  // pro-rata share of the project batches (or its own plot.trees when the
-  // legacy per-parcel model is still in use).
-  const projectTotalTrees = Array.isArray(proj?.treeBatches) && proj.treeBatches.length
-    ? proj.treeBatches.reduce((s, b) => s + (Number(b?.count) || 0), 0)
-    : (Number(proj?.totalTrees) || 0)
+  // Each parcel owns its own tree count + cohorts.
+  const plotBatches = Array.isArray(plot?.treeBatches) ? plot.treeBatches : []
+  const cohortSum = plotBatches.reduce((s, b) => s + (Number(b?.count) || 0), 0)
   const totalTrees = Number(plot?.trees) > 0
     ? Number(plot.trees)
-    : (projectTotalTrees > 0 && projectTotalArea > 0
-        ? Math.max(0, Math.round(projectTotalTrees * (Number(plot?.area) || 0) / projectTotalArea))
-        : 0)
+    : cohortSum
   // Earliest planting cohort (displayed as "Plantation" year on the side panel).
-  const firstBatch = Array.isArray(proj?.treeBatches) && proj.treeBatches.length
-    ? proj.treeBatches.reduce((acc, b) => {
+  const firstBatch = plotBatches.length
+    ? plotBatches.reduce((acc, b) => {
         const y = Number(b?.year)
         if (!Number.isFinite(y) || y <= 0) return acc
         return !acc || y < acc.year ? { year: y, count: Number(b?.count) || 0 } : acc
@@ -376,7 +370,7 @@ function PlotPageBody({ project: proj, plot }) {
             <div className="ppv2-note">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg>
               {annualRevenue > 0
-                ? <span>Revenu estimé ~{annualRevenue.toLocaleString('fr-FR')} DT/an au prorata de la surface.</span>
+                ? <span>Revenu estimé ~{annualRevenue.toLocaleString('fr-FR')} DT/an d'après les arbres de cette parcelle.</span>
                 : <span>Projet en démarrage — pas encore de revenu annuel configuré.</span>}
             </div>
           </div>

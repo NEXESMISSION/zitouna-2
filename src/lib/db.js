@@ -3960,6 +3960,7 @@ function defaultReferralSummary() {
     gainsAccrued: 0,
     commissionsReleased: 0,
     walletBalance: 0,
+    inPayoutAmount: 0,
     minPayoutAmount: 0,
     fieldDepositMin: 0,
     fullDepositTarget: 0,
@@ -3994,6 +3995,7 @@ export async function fetchAmbassadorReferralSummary() {
     gainsAccrued: Number(d.gainsAccrued ?? 0),
     commissionsReleased: Number(d.commissionsReleased ?? 0),
     walletBalance: Number(d.walletBalance ?? 0),
+    inPayoutAmount: Number(d.inPayoutAmount ?? 0),
     minPayoutAmount: Number(d.minPayoutAmount ?? 0),
     fieldDepositMin: Number(d.fieldDepositMin ?? 0),
     fullDepositTarget: Number(d.fullDepositTarget ?? 0),
@@ -5089,14 +5091,20 @@ function normalizeMaturityCurve(raw) {
 }
 
 /**
- * Parcel revenue share is now pure surface-based:
- *   parcel_revenue = project_annual_revenue × (parcel.area / sum(project.parcels.area))
+ * Parcel revenue share is per-parcel tree-count based:
+ *   parcel_revenue = sum(parcel.batches × yield_at_age(batch_year))
  *
- * Trees live at the project level (projects.tree_batches). The old
- * per-parcel cohort model is gone from the UI; historical
- * parcel_tree_batches rows remain in the DB for backwards-compat reads
- * only (they are not written by new flows).
+ * Each parcel owns its own tree count + cohorts (parcel_tree_batches).
  */
+export function parcelTreeShare(project, parcel) {
+  if (!project || !parcel) return 0
+  const plots = Array.isArray(project.plots) ? project.plots : []
+  const total = plots.reduce((s, p) => s + (Number(p.trees) || 0), 0)
+  const own = Number(parcel.trees) || 0
+  if (total <= 0 || own <= 0) return 0
+  return own / total
+}
+
 export function parcelAreaShare(project, parcel) {
   if (!project || !parcel) return 0
   const plots = Array.isArray(project.plots) ? project.plots : []
@@ -5107,27 +5115,52 @@ export function parcelAreaShare(project, parcel) {
 }
 
 export function parcelAnnualRevenueTnd(project, parcel) {
-  const share = parcelAreaShare(project, parcel)
+  const currentYear = new Date().getFullYear()
+  const curve = normalizeMaturityCurve(project?.maturity_curve ?? project?.maturityCurve)
+  const batches = parcel?.treeBatches || parcel?.batches || []
+  if (Array.isArray(batches) && batches.length > 0) {
+    return Math.round(batches.reduce((sum, b) => {
+      const year = Number(b.batch_year ?? b.batchYear ?? b.year) || currentYear
+      const count = Number(b.tree_count ?? b.treeCount ?? b.count) || 0
+      const rate = yieldPerTreeAtAge(currentYear - year, curve)
+      return sum + count * rate
+    }, 0))
+  }
+  // Fallback: split project annualRevenueTotal by tree-count share when the
+  // parcel has no batches yet (legacy rows / fresh parcel).
+  const share = parcelTreeShare(project, parcel)
   if (share <= 0) return 0
-  const projectRevenue = projectedAnnualYieldTnd(project)
+  const projectRevenue = Number(project?.annual_revenue_total ?? project?.annualRevenueTotal) || 0
   return Math.round(projectRevenue * share)
 }
 
 export function projectedAnnualYieldTnd(project) {
-  // Sum across all batches of (tree_count × yield_at_current_age). Falls back
-  // to project.annual_revenue_total when the admin has pinned a baseline.
+  // Sum per-parcel batches × yield_at_age. Each parcel carries its own
+  // cohorts in `parcel.treeBatches`; project total = sum across parcels.
   const currentYear = new Date().getFullYear()
   const curve = normalizeMaturityCurve(project?.maturity_curve ?? project?.maturityCurve)
-  const batches = project?.batches || project?.tree_batches || []
-  if (!Array.isArray(batches) || batches.length === 0) {
-    return Number(project?.annual_revenue_total ?? project?.annualRevenueTotal) || 0
+  const plots = Array.isArray(project?.plots) ? project.plots : []
+  let total = 0
+  for (const plot of plots) {
+    const batches = plot?.treeBatches || []
+    for (const b of batches) {
+      const year = Number(b.batch_year ?? b.batchYear ?? b.year) || currentYear
+      const count = Number(b.tree_count ?? b.treeCount ?? b.count) || 0
+      total += count * yieldPerTreeAtAge(currentYear - year, curve)
+    }
   }
-  return batches.reduce((sum, b) => {
-    const year = Number(b.batch_year ?? b.batchYear ?? b.year) || currentYear
-    const count = Number(b.tree_count ?? b.treeCount ?? b.count) || 0
-    const rate = yieldPerTreeAtAge(currentYear - year, curve)
-    return sum + count * rate
-  }, 0)
+  if (total > 0) return total
+  // Fallback to legacy project-level batches, then to pinned annualRevenueTotal.
+  const projectBatches = project?.batches || project?.tree_batches || []
+  if (Array.isArray(projectBatches) && projectBatches.length > 0) {
+    return projectBatches.reduce((sum, b) => {
+      const year = Number(b.batch_year ?? b.batchYear ?? b.year) || currentYear
+      const count = Number(b.tree_count ?? b.treeCount ?? b.count) || 0
+      const rate = yieldPerTreeAtAge(currentYear - year, curve)
+      return sum + count * rate
+    }, 0)
+  }
+  return Number(project?.annual_revenue_total ?? project?.annualRevenueTotal) || 0
 }
 
 function mapHarvestRow(row) {

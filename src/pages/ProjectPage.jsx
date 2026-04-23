@@ -83,10 +83,9 @@ function ProjectPageBody({ project: proj }) {
   const soldPct = totalPlots > 0 ? Math.round((soldPlots / totalPlots) * 100) : 0
   const totalArea = (proj.plots || []).reduce((s, p) => s + (Number(p.area) || 0), 0)
   const availableArea = publicPlots.reduce((s, p) => s + (Number(p.area) || 0), 0)
-  // Trees live at the project level (parcels are pure surface units).
-  // Falls back to summing parcel tree counts for legacy projects.
-  const totalTrees = Number(proj.totalTrees)
-    || (proj.plots || []).reduce((s, p) => s + (Number(p.trees) || 0), 0)
+  // Each parcel owns its own trees. Project total = sum of parcel counts.
+  const totalTrees = (proj.plots || []).reduce((s, p) => s + (Number(p.trees) || 0), 0)
+    || Number(proj.totalTrees) || 0
   const currentYear = new Date().getFullYear()
 
   // Health scores — admin-entered on the project. Used by the "Santé du
@@ -104,16 +103,8 @@ function ProjectPageBody({ project: proj }) {
     return { label: 'Critique', className: 'pd-health--low' }
   }
 
-  // Project-level cohorts. Parcels are pure surface; trees live on the
-  // project. Fall back to aggregating legacy per-parcel batches so old
-  // projects still render until re-entered.
+  // Per-parcel cohorts aggregated to project level for the inventory chart.
   const batches = (() => {
-    if (Array.isArray(proj.treeBatches) && proj.treeBatches.length) {
-      return proj.treeBatches
-        .map((b) => ({ year: Number(b?.year) || currentYear, count: Number(b?.count) || 0 }))
-        .filter((b) => b.count > 0)
-        .sort((a, b) => a.year - b.year)
-    }
     const map = new Map()
     for (const plot of proj.plots || []) {
       for (const b of plot.treeBatches || []) {
@@ -121,9 +112,18 @@ function ProjectPageBody({ project: proj }) {
         map.set(key, (map.get(key) || 0) + (Number(b.count) || 0))
       }
     }
-    return Array.from(map.entries())
-      .map(([year, count]) => ({ year: Number(year), count }))
-      .sort((a, b) => a.year - b.year)
+    if (map.size > 0) {
+      return Array.from(map.entries())
+        .map(([year, count]) => ({ year: Number(year), count }))
+        .sort((a, b) => a.year - b.year)
+    }
+    if (Array.isArray(proj.treeBatches) && proj.treeBatches.length) {
+      return proj.treeBatches
+        .map((b) => ({ year: Number(b?.year) || currentYear, count: Number(b?.count) || 0 }))
+        .filter((b) => b.count > 0)
+        .sort((a, b) => a.year - b.year)
+    }
+    return []
   })()
 
   // Cultivar distribution (legacy — only the old per-parcel batches carry

@@ -409,7 +409,7 @@ function ProjectForm({ form, onChange }) {
       <Field
         id="pj-annual-revenue"
         label="Revenu annuel total estimé (DT / an)"
-        hint="Sera réparti entre les parcelles au prorata de leur surface. Chaque acheteur voit sa part projetée sur la fiche parcelle."
+        hint="Fallback global : utilisé seulement quand une parcelle n'a pas encore ses propres cohortes d'arbres. Sinon, le revenu est calculé par parcelle."
       >
         <input
           id="pj-annual-revenue"
