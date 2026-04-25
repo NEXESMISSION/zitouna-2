@@ -264,14 +264,15 @@ export default function CoordinationPage() {
     for (const [, list] of map) list.sort((a, b) => String(a.time).localeCompare(String(b.time)))
     return map
   }, [appointments])
-  // Juridique team picker — admins whose `allowedPages` include
-  // `/admin/juridique`. Super Admins are listed too because they always
-  // have implicit access to every page.
+  // Juridique team picker — only admins explicitly granted access to
+  // `/admin/juridique` via their `allowedPages`. Super Admins are not
+  // listed here (they always see every file regardless) so the picker
+  // stays clean and shows the actual juridique staff only.
   const juridiqueAdmins = useMemo(() => {
     return (adminUsers || [])
       .filter((u) => {
         if (u.status && u.status !== 'active') return false
-        if (canonicalRole(u.role) === 'Super Admin') return true
+        if (canonicalRole(u.role) === 'Super Admin') return false
         const pages = Array.isArray(u.allowedPages) ? u.allowedPages : []
         return pages.includes('/admin/juridique')
       })
@@ -1144,24 +1145,22 @@ export default function CoordinationPage() {
 
             {scheduler.type === 'juridique' && (
               <div className="sp-detail__section">
-                <div className="sp-detail__section-title">
-                  Notaire / juridique assigné
-                </div>
+                <div className="sp-detail__section-title">Assigné à</div>
                 <select
                   id="cv-jur-user"
-                  className="cv-input"
+                  className="cv-input cv-input--select"
                   value={scheduler.juridiqueUserId || ''}
                   onChange={(e) => setScheduler((p) => ({ ...p, juridiqueUserId: e.target.value }))}
                 >
-                  <option value="">— Non assigné (visible Super Admin uniquement) —</option>
+                  <option value="">— Non assigné —</option>
                   {juridiqueAdmins.map((u) => (
                     <option key={u.id} value={u.id}>
                       {u.fullName || u.name || u.email || u.id}
                     </option>
                   ))}
                 </select>
-                <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 6 }}>
-                  Seul l&apos;utilisateur choisi verra ce dossier sur /admin/juridique.
+                <div className="cv-jur-hint">
+                  Seul l&apos;utilisateur choisi verra ce dossier.
                 </div>
               </div>
             )}
