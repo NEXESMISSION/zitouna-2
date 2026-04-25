@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabase.js'
 import AdminModal from '../components/AdminModal.jsx'
 import RenderDataGate from '../../components/RenderDataGate.jsx'
@@ -165,7 +164,6 @@ function Section({ category, rows, open, onToggle }) {
 }
 
 export default function CommissionAnomaliesPage() {
-  const navigate = useNavigate()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState(null)
@@ -221,16 +219,6 @@ export default function CommissionAnomaliesPage() {
   return (
     <div className="zitu-page" dir="ltr">
       <div className="zitu-page__column">
-        <button
-          type="button"
-          className="ds-back-btn"
-          onClick={() => navigate(-1)}
-          title="Revenir à la page précédente"
-        >
-          <span className="ds-back-btn__icon" aria-hidden>←</span>
-          <span className="ds-back-btn__label">Retour</span>
-        </button>
-
         <section className="cli-hero" aria-label="En-tête des anomalies de parrainage">
           <span className="cli-hero__badge" aria-hidden>🛡️</span>
           <div>

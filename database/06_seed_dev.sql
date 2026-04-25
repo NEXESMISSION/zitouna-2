@@ -8,9 +8,14 @@
 --   1) Wipes auth users + business/catalog data (destructive, guard-gated)
 --   2) Seeds 4 projects (workflow, checklist, commission rules, offers, slots)
 --   3) Seeds 20 parcels per project (80 total)
---   4) Seeds 2 SUPER_ADMIN + 2 plain clients for RLS probes (password: 123456)
---      - lassad@gmail.com / saif@gmail.com — SUPER_ADMIN
---      - rls_probe_a@zitouna.test / rls_probe_b@zitouna.test — buyers (not staff)
+--   4) Seeds 9 dev accounts (password: 123456) + 2 RLS probe accounts
+--      SUPER_ADMIN (2):
+--        - lassad@gmail.com / saif@gmail.com
+--      Clients (7):
+--        - abir@gmail.com / mohamed@gmail.com / ahmed@gmail.com
+--        - fatma@gmail.com / salma@gmail.com / khaled@gmail.com / yosra@gmail.com
+--      RLS probe buyers (infra — required by scripts/security/*):
+--        - rls_probe_a@zitouna.test / rls_probe_b@zitouna.test
 --
 -- IMPORTANT:
 --   Run this in the same SQL session after:
@@ -238,7 +243,8 @@ values
    'PROBE-B', 'RLS Probe B', 'rls_probe_b@zitouna.test', '+216 30 000 002', '+21630000002', 'active');
 
 -- -----------------------------------------------------------------------------
--- 4) SUPER_ADMIN + RLS probe auth accounts (password: 123456) + identities
+-- 4) SUPER_ADMIN + named clients + RLS probe auth accounts
+--    (password for all: 123456) + identities
 -- -----------------------------------------------------------------------------
 
 insert into auth.users (
@@ -264,8 +270,18 @@ select
   '',
   ''
 from (values
-  ('lassad@gmail.com',       'Lassad',    '+216 20 000 001'),
-  ('saif@gmail.com',         'Saif',      '+216 20 000 002'),
+  -- SUPER_ADMIN
+  ('lassad@gmail.com',         'Lassad',      '+216 58 415 500'),
+  ('saif@gmail.com',           'Saif',        '+216 58 415 520'),
+  -- Named clients
+  ('abir@gmail.com',           'Abir',        '+216 58 415 521'),
+  ('mohamed@gmail.com',        'Mohamed',     '+216 58 415 522'),
+  ('ahmed@gmail.com',          'Ahmed',       '+216 58 415 523'),
+  ('fatma@gmail.com',          'Fatma',       '+216 58 415 524'),
+  ('salma@gmail.com',          'Salma',       '+216 58 415 525'),
+  ('khaled@gmail.com',         'Khaled',      '+216 58 415 526'),
+  ('yosra@gmail.com',          'Yosra',       '+216 58 415 527'),
+  -- RLS probe buyers (infra)
   ('rls_probe_a@zitouna.test', 'RLS Probe A', '+216 30 000 001'),
   ('rls_probe_b@zitouna.test', 'RLS Probe B', '+216 30 000 002')
 ) as t(email, full_name, phone);
@@ -289,6 +305,13 @@ select
 from (values
   ('lassad@gmail.com'),
   ('saif@gmail.com'),
+  ('abir@gmail.com'),
+  ('mohamed@gmail.com'),
+  ('ahmed@gmail.com'),
+  ('fatma@gmail.com'),
+  ('salma@gmail.com'),
+  ('khaled@gmail.com'),
+  ('yosra@gmail.com'),
   ('rls_probe_a@zitouna.test'),
   ('rls_probe_b@zitouna.test')
 ) as t(email);
@@ -300,9 +323,34 @@ from (values
 insert into public.admin_users (id, code, full_name, email, phone, phone_normalized, role, status)
 values
   (('00000000-0000-4000-8000-' || substr(md5('lassad@gmail.com'),1,12))::uuid,
-   'ADM-LASSAD', 'Lassad', 'lassad@gmail.com', '+216 20 000 001', '+21620000001', 'SUPER_ADMIN', 'active'),
+   'ADM-LASSAD', 'Lassad', 'lassad@gmail.com', '+216 58 415 500', '+21658415500', 'SUPER_ADMIN', 'active'),
   (('00000000-0000-4000-8000-' || substr(md5('saif@gmail.com'),1,12))::uuid,
-   'ADM-SAIF',   'Saif',   'saif@gmail.com',   '+216 20 000 002', '+21620000002', 'SUPER_ADMIN', 'active');
+   'ADM-SAIF',   'Saif',   'saif@gmail.com',   '+216 58 415 520', '+21658415520', 'SUPER_ADMIN', 'active');
+
+-- -----------------------------------------------------------------------------
+-- 5b) Named client rows — linked to their auth.users via auth_user_id
+-- -----------------------------------------------------------------------------
+
+insert into public.clients
+  (id, code, full_name, email, phone, phone_normalized, auth_user_id, status)
+select
+  ('00000000-0000-4000-8000-' || substr(md5(t.email),1,12))::uuid,
+  t.code,
+  t.full_name,
+  t.email,
+  t.phone,
+  t.phone_normalized,
+  ('00000000-0000-4000-8000-' || substr(md5(t.email),1,12))::uuid,
+  'active'
+from (values
+  ('abir@gmail.com',    'CLI-ABIR',    'Abir',    '+216 58 415 521', '+21658415521'),
+  ('mohamed@gmail.com', 'CLI-MOHAMED', 'Mohamed', '+216 58 415 522', '+21658415522'),
+  ('ahmed@gmail.com',   'CLI-AHMED',   'Ahmed',   '+216 58 415 523', '+21658415523'),
+  ('fatma@gmail.com',   'CLI-FATMA',   'Fatma',   '+216 58 415 524', '+21658415524'),
+  ('salma@gmail.com',   'CLI-SALMA',   'Salma',   '+216 58 415 525', '+21658415525'),
+  ('khaled@gmail.com',  'CLI-KHALED',  'Khaled',  '+216 58 415 526', '+21658415526'),
+  ('yosra@gmail.com',   'CLI-YOSRA',   'Yosra',   '+216 58 415 527', '+21658415527')
+) as t(email, code, full_name, phone, phone_normalized);
 
 -- Recreate auth auto-link triggers for future account creation
 do $recreate_auth_trg$

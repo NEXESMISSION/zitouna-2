@@ -52,13 +52,13 @@
   margin: 0 auto;
   max-width: 460px;
   width: 100%;
-  padding: 24px 24px 20px;
+  padding: calc(env(safe-area-inset-top, 0px) + 24px) 24px 20px;
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
 }
 @media (max-width: 600px) {
-  .auth-page--solo .auth-pane { padding: 18px 16px 20px; }
+  .auth-page--solo .auth-pane { padding: calc(env(safe-area-inset-top, 0px) + 18px) 16px 20px; }
 }
 .auth-page--solo .auth-form-wrap {
   flex: 1 1 auto;

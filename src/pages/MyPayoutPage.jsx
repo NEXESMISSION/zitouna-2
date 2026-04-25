@@ -53,8 +53,8 @@ export default function MyPayoutPage() {
   let reason = ''
   if (referralLoading) reason = 'Chargement du portefeuille…'
   else if (referralVerificationBlocked) reason = "Vérification d'identité requise."
-  else if (balance <= 0) reason = 'Aucun gain disponible à retirer pour le moment.'
-  else if (balance < minPayout) reason = `Seuil minimum non atteint (${minPayout.toLocaleString('fr-FR')} DT).`
+  else if (balance <= 0) reason = 'Aucun gain à retirer.'
+  else if (balance < minPayout) reason = `Minimum non atteint (${minPayout.toLocaleString('fr-FR')} DT).`
 
   const handleSubmit = useCallback(async () => {
     if (disabled) return
@@ -76,7 +76,7 @@ export default function MyPayoutPage() {
   return (
     <DashboardShell active="payout">
       <div className="zb-greeting">
-        <h1 className="zb-greeting-h1">Retirer mes gains</h1>
+        <h1 className="zb-greeting-h1">Retirer</h1>
       </div>
 
           {success ? (
@@ -90,10 +90,10 @@ export default function MyPayoutPage() {
                 Demande envoyée
               </h2>
               <p style={{ color: 'var(--zb-muted)', fontSize: 14, lineHeight: 1.5, maxWidth: 380, margin: '0 auto 20px' }}>
-                L&apos;équipe finance examine votre demande. Le virement bancaire arrive habituellement sous 3 à 7 jours ouvrés.
+                Virement sous 3 à 7 jours ouvrés.
               </p>
               <button type="button" className="zb-btn zb-btn-primary" onClick={() => navigate('/my/commissions')}>
-                Retour à mes commissions
+                Retour
               </button>
             </div>
           ) : (
@@ -105,7 +105,7 @@ export default function MyPayoutPage() {
                 aria-busy={referralLoading || undefined}
               >
                 <div className="zb-eyebrow" style={{ justifyContent: 'center' }}>
-                  <span className="zb-dot-live" /> Montant à retirer
+                  <span className="zb-dot-live" /> À retirer
                 </div>
                 {referralLoading ? (
                   <>
@@ -124,7 +124,7 @@ export default function MyPayoutPage() {
                       <span className="zb-balance-unit">TND</span>
                     </div>
                     <div style={{ color: 'var(--zb-muted)', fontSize: 13, marginTop: 10 }}>
-                      Seuil minimum : {minPayout.toLocaleString('fr-FR')} DT
+                      Min : {minPayout.toLocaleString('fr-FR')} DT
                     </div>
                   </>
                 )}
@@ -134,11 +134,11 @@ export default function MyPayoutPage() {
               <div className="zb-card" style={{ padding: '14px 18px' }}>
                 <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 12 }}>
                   {[
-                    ['Seuil minimum', `${minPayout.toLocaleString('fr-FR')} DT — vous êtes ${balance >= minPayout ? 'au-dessus, la demande peut partir' : 'en-dessous, continuez à accumuler'}.`],
-                    ['Validation interne', "L'équipe finance vérifie puis déclenche le virement. Délai habituel : 3 à 7 jours ouvrés."],
-                    ['Commissions bloquées', "Pendant le traitement, les gains inclus dans la demande sont verrouillés et n'apparaissent plus comme disponibles."],
-                    ['Traçabilité', 'Une ligne "Demande de retrait" apparaît dans votre historique, avec le statut mis à jour à chaque étape.'],
-                    ['En cas de refus', 'Les gains retournent automatiquement dans votre portefeuille, vous pouvez redemander plus tard.'],
+                    ['Minimum', `${minPayout.toLocaleString('fr-FR')} DT.`],
+                    ['Délai', 'Virement sous 3 à 7 jours.'],
+                    ['Pendant le traitement', 'Gains verrouillés.'],
+                    ['Statut', "Visible dans l'historique."],
+                    ['En cas de refus', 'Gains restitués automatiquement.'],
                   ].map(([title, desc]) => (
                     <li key={title} style={{ fontSize: 13, color: 'var(--zb-muted)', lineHeight: 1.5, display: 'flex', gap: 10, alignItems: 'flex-start' }}>
                       <span style={{ width: 6, height: 6, background: 'var(--zb-blue)', borderRadius: 999, flexShrink: 0, marginTop: 7 }} />
@@ -165,7 +165,7 @@ export default function MyPayoutPage() {
                   Annuler
                 </button>
                 <button type="button" className="zb-btn zb-btn-primary" onClick={handleSubmit} disabled={disabled}>
-                  {busy ? 'Envoi…' : `Confirmer le retrait de ${balance.toLocaleString('fr-FR')} DT`}
+                  {busy ? 'Envoi…' : `Retirer ${balance.toLocaleString('fr-FR')} DT`}
                 </button>
               </div>
             </>

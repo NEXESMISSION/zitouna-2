@@ -1,6 +1,8 @@
 /* ============================================================================
-   CommissionOrgChart — top-down org chart of the referral/commission network.
-   Replaces the cramped circular node graph with clear cards + orthogonal links.
+   CommissionOrgChart — /admin/commissions network tree.
+   Admin-clean: soft grid backdrop, rounded cards with a generation stripe,
+   rounded-elbow connectors (slate when idle, blue when on the selected
+   lineage), collapsible legend, and a compact "more views" menu.
    ============================================================================ */
 
 .cog {
@@ -8,12 +10,10 @@
   inset: 0;
   overflow: hidden;
   background:
-    radial-gradient(circle at 1px 1px, rgba(15, 23, 42, 0.07) 1px, transparent 0)
-    0 0 / 24px 24px,
-    linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
-  /* Default cursor; toolbar/cards override when they're hovered. */
+    radial-gradient(circle at 1px 1px, rgba(15, 23, 42, 0.055) 1px, transparent 0)
+    0 0 / 28px 28px,
+    linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
   cursor: default;
-  /* Remove the brief touch-action delay so drag feels native. */
   touch-action: none;
   -webkit-user-select: none;
   user-select: none;
@@ -22,7 +22,6 @@
 .cog--grabbing { cursor: grabbing !important; }
 .cog--grabbing * { cursor: grabbing !important; }
 
-/* Viewport: fills the page, cards are transformed inside. No native scroll. */
 .cog-viewport {
   position: absolute;
   inset: 0;
@@ -34,31 +33,32 @@
   top: 0;
   left: 0;
   transform-origin: 0 0;
-  /* No transition — we need 1:1 mouse follow during panning. */
   will-change: transform;
 }
 
+/* ---- Edges ---- */
 .cog-edges {
   position: absolute;
   left: 0;
   top: 0;
   pointer-events: none;
 }
-.cog-edge path { pointer-events: stroke; cursor: default; transition: stroke 0.15s, opacity 0.15s; }
-.cog-edge--hover path { stroke: #64748b !important; }
-.cog-edge--active path { stroke: #1d4ed8 !important; }
-/* When a node is selected, edges outside the selected node's lineage fade
-   back so the active spine reads as the primary relationship. */
-.cog-edge--dim path { opacity: 0.18; }
+.cog-edge path {
+  pointer-events: stroke;
+  cursor: default;
+  transition: stroke 0.18s ease, stroke-width 0.18s ease, opacity 0.18s ease;
+}
+.cog-edge--dim path { opacity: 0.22; }
+.cog-edge--active path { filter: drop-shadow(0 1px 0 rgba(29, 78, 216, 0.15)); }
 
 /* ---- Cards ---- */
 .cog-card {
   position: absolute;
   padding: 10px 12px;
   background: #fff;
-  border: 1.5px solid #e2e8f0;
+  border: 1px solid #e2e8f0;
   border-radius: 12px;
-  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.05);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 2px 6px rgba(15, 23, 42, 0.04);
   cursor: pointer;
   display: flex;
   flex-direction: column;
@@ -68,33 +68,32 @@
   color: inherit;
   overflow: hidden;
   transition:
-    transform 0.15s,
-    border-color 0.15s,
-    box-shadow 0.15s,
-    opacity 0.15s;
-  /* A small top stripe gets colored per generation (--accent). */
+    transform 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    opacity 0.15s ease;
 }
 
 .cog-card::before {
   content: '';
   position: absolute;
   top: 0; left: 0; right: 0;
-  height: 4px;
+  height: 3px;
   background: var(--cog-accent, #cbd5e1);
 }
 
 .cog-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.10);
-  border-color: var(--cog-accent, #cbd5e1);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
+  border-color: #cbd5e1;
 }
 
 .cog-card--selected {
   border-color: var(--cog-accent, #1d4ed8) !important;
   box-shadow:
-    0 0 0 3px color-mix(in srgb, var(--cog-accent, #1d4ed8) 22%, transparent),
-    0 8px 20px rgba(15, 23, 42, 0.10);
-  transform: translateY(-2px);
+    0 0 0 3px color-mix(in srgb, var(--cog-accent, #1d4ed8) 20%, transparent),
+    0 6px 18px rgba(15, 23, 42, 0.10);
+  transform: translateY(-1px);
 }
 
 .cog-card--dim {
@@ -102,14 +101,14 @@
   filter: saturate(0.6);
 }
 
-/* Per-generation accents (also used by avatar + generation pill) */
+/* Per-generation accents */
 .cog-card--g1 { --cog-accent: #1d4ed8; }
 .cog-card--g2 { --cog-accent: #f59e0b; }
 .cog-card--g3 { --cog-accent: #10b981; }
 .cog-card--g4 { --cog-accent: #8b5cf6; }
 .cog-card--g5 { --cog-accent: #64748b; }
 
-/* ---- Card head (avatar + name + gen badge) ---- */
+/* ---- Card head ---- */
 .cog-card__head {
   display: flex;
   align-items: center;
@@ -150,6 +149,7 @@
   color: #64748b;
   display: inline-flex;
   gap: 4px;
+  flex-wrap: wrap;
 }
 .cog-card__gen {
   font-weight: 700;
@@ -160,9 +160,6 @@
 }
 .cog-card__sales { color: #64748b; font-weight: 500; }
 
-/* Reverse-sale badge: flags clients who are buyer or seller on a sale that
-   flows up the parrainage tree (filleul → parrain). Sits in the meta row
-   next to the "N ventes" counter. */
 .cog-card__reverse-badge {
   display: inline-flex;
   align-items: center;
@@ -179,19 +176,12 @@
   white-space: nowrap;
 }
 
-/* Card-level accent when a node participates in a reverse sale — subtle
-   red left-border that doesn't fight the generation color on the card. */
 .cog-card--reverse {
   box-shadow: inset 3px 0 0 #dc2626, 0 1px 2px rgba(15, 23, 42, 0.08);
 }
 
-/* Reverse-sale SVG curves — higher opacity & pointer-events off (purely
-   informational, no hover handlers attached). */
 .cog-edge--reverse { opacity: 0.85; pointer-events: none; }
 
-/* Reverse-sale grant badges: purple pill, distinct from the red reverse-sale
-   badge. --source appears on the grantor card (+N droits), --beneficiary on
-   the holder card (N hérité). */
 .cog-card__grant-badge {
   display: inline-flex;
   align-items: center;
@@ -212,21 +202,13 @@
   color: #5b21b6;
 }
 
-/* Grant SVG arcs — solid purple, hoverable (pointer-events enabled so the
-   qualifying-subtree highlight fires on mouseover). */
 .cog-edge--grant { cursor: help; }
 .cog-edge--grant path { pointer-events: stroke; transition: stroke-width 120ms ease; }
 .cog-edge--grant-hover path { filter: drop-shadow(0 0 2px rgba(124, 58, 237, 0.35)); }
 
-/* Qualifying-subtree highlight: when the user hovers a grant edge, nodes
-   whose incoming edge was linked AFTER the grant's effective_from glow. */
 .cog-card--grant-qualifying {
   box-shadow: 0 0 0 2px #a78bfa, 0 2px 8px rgba(124, 58, 237, 0.25);
   z-index: 3;
-}
-
-.cog-legend__hint--grant {
-  color: #6d28d9;
 }
 
 /* ---- Total row ---- */
@@ -270,7 +252,7 @@
 .cog-card__lvl--l4 { background: #f5f3ff; color: #6d28d9; }
 .cog-card__lvl--empty { background: #f1f5f9; color: #94a3b8; font-weight: 500; font-style: italic; }
 
-/* ---- "To pay" highlight bar at bottom ---- */
+/* ---- "To pay" highlight ---- */
 .cog-card__due {
   position: absolute;
   bottom: 0;
@@ -296,26 +278,55 @@
 }
 
 /* ============================================================================
-   Floating toolbar (top-left) + legend (top-right)
+   TOOLBAR (top-left) — back + title + search + zoom + fit
    ============================================================================ */
 .cog-toolbar {
   position: absolute;
-  top: 68px; /* below the page topbar */
-  left: 24px;
+  top: 14px;
+  left: 16px;
   z-index: 10;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 6px;
-  background: rgba(255, 255, 255, 0.95);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  padding: 6px 7px;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   border: 1px solid #e2e8f0;
-  border-radius: 10px;
+  border-radius: 12px;
   box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
+  max-width: calc(100% - 32px);
+}
+.cog-toolbar__title {
+  display: inline-flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0 6px 0 2px;
+  min-width: 0;
+}
+.cog-toolbar__title-main {
+  font-size: 13px;
+  font-weight: 800;
+  color: #0f172a;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+}
+.cog-toolbar__title-sub {
+  font-size: 10.5px;
+  color: #64748b;
+  line-height: 1.1;
+  margin-top: 1px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.cog-toolbar__sep {
+  width: 1px;
+  height: 22px;
+  background: #e2e8f0;
+  margin: 0 2px;
 }
 .cog-toolbar__search {
-  width: 180px;
+  width: 170px;
   padding: 6px 10px;
   border: 1px solid transparent;
   background: #f1f5f9;
@@ -323,6 +334,7 @@
   font-size: 12px;
   color: #0f172a;
   outline: none;
+  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
 }
 .cog-toolbar__search::placeholder { color: #94a3b8; }
 .cog-toolbar__search:focus {
@@ -330,13 +342,21 @@
   border-color: #bfdbfe;
   box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.12);
 }
+.cog-toolbar__zoomgroup {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  background: #f1f5f9;
+  border-radius: 8px;
+}
 .cog-toolbar__btn {
   width: 30px;
   height: 30px;
-  border: 1px solid #e2e8f0;
+  border: 1px solid transparent;
   background: #fff;
   color: #475569;
-  border-radius: 8px;
+  border-radius: 7px;
   font-size: 14px;
   font-weight: 700;
   cursor: pointer;
@@ -346,80 +366,204 @@
   justify-content: center;
   transition: border-color 0.12s, color 0.12s, background 0.12s;
 }
-.cog-toolbar__btn--wide { width: auto; padding: 0 10px; font-size: 11px; letter-spacing: 0.2px; }
-.cog-toolbar__btn:hover { border-color: #cbd5e1; color: #0f172a; background: #f8fafc; }
+.cog-toolbar__btn--ghost {
+  background: transparent;
+  color: #475569;
+  border-color: transparent;
+}
+.cog-toolbar__btn--wide { width: auto; padding: 0 12px; font-size: 11.5px; letter-spacing: 0.2px; font-weight: 700; }
+.cog-toolbar__zoomgroup .cog-toolbar__btn {
+  border-color: transparent;
+  background: transparent;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+}
+.cog-toolbar__btn:hover {
+  border-color: #cbd5e1;
+  color: #0f172a;
+  background: #f8fafc;
+}
+.cog-toolbar__zoomgroup .cog-toolbar__btn:hover {
+  background: #fff;
+  border-color: transparent;
+}
 .cog-toolbar__zoom {
   font-size: 11px;
   font-weight: 700;
   color: #475569;
-  min-width: 42px;
+  min-width: 36px;
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
 
-.cog-legend {
+/* ============================================================================
+   TOOLS (top-right) — legend toggle + "more views" menu button
+   ============================================================================ */
+.cog-tools {
   position: absolute;
-  top: 68px;
-  right: 24px;
+  top: 14px;
+  right: 16px;
   z-index: 10;
-  min-width: 150px;
-  padding: 10px 12px;
-  background: rgba(255, 255, 255, 0.95);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.cog-tools__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 11px;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   border: 1px solid #e2e8f0;
   border-radius: 10px;
   box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
+  color: #334155;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.1px;
+  cursor: pointer;
+  line-height: 1;
+  transition: border-color 0.12s, color 0.12s, background 0.12s, box-shadow 0.12s;
+}
+.cog-tools__btn:hover {
+  border-color: #cbd5e1;
+  color: #0f172a;
+  background: #fff;
+}
+.cog-tools__btn--on {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+.cog-tools__ico {
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+/* ---- more-views dropdown ---- */
+.cog-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
+  min-width: 240px;
+  padding: 4px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.10);
+}
+.cog-menu__head {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: #64748b;
+  padding: 8px 10px 4px;
+}
+.cog-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  color: #0f172a;
+  text-decoration: none;
+  transition: background 0.12s ease;
+}
+.cog-menu__item:hover { background: #f1f5f9; }
+.cog-menu__ico {
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  font-size: 13px;
+}
+.cog-menu__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.cog-menu__text strong {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.2;
+}
+.cog-menu__text small {
   font-size: 11px;
-  color: #475569;
+  color: #64748b;
+  margin-top: 1px;
+}
+
+/* ============================================================================
+   LEGEND — opens from the legend toggle in the top-right
+   ============================================================================ */
+.cog-legend {
+  position: absolute;
+  top: 62px;
+  right: 16px;
+  z-index: 9;
+  width: 240px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.98);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 10px 25px rgba(15, 23, 42, 0.08);
+  font-size: 11.5px;
+  color: #334155;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.cog-legend__group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 .cog-legend__title {
   font-weight: 800;
   color: #0f172a;
   font-size: 10px;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.6px;
   text-transform: uppercase;
-  margin-bottom: 6px;
+  margin-bottom: 2px;
 }
 .cog-legend__row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   padding: 1px 0;
 }
 .cog-legend__dot {
   width: 10px;
   height: 10px;
   border-radius: 50%;
+  flex-shrink: 0;
 }
+.cog-legend__swatch { flex-shrink: 0; }
 .cog-legend__dot--g1 { background: #1d4ed8; }
 .cog-legend__dot--g2 { background: #f59e0b; }
 .cog-legend__dot--g3 { background: #10b981; }
 .cog-legend__dot--g4 { background: #8b5cf6; }
 .cog-legend__hint {
-  margin-top: 6px;
-  padding-top: 6px;
+  padding-top: 10px;
   border-top: 1px dashed #e2e8f0;
-  font-size: 10px;
+  font-size: 10.5px;
   color: #64748b;
-  font-style: italic;
 }
-.cog-legend__hint--warn {
-  color: #b45309;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-style: normal;
-}
-.cog-legend__hint--warn svg { flex-shrink: 0; }
-.cog-legend__hint--reverse {
-  color: #b91c1c;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-style: normal;
-}
-.cog-legend__hint--reverse svg { flex-shrink: 0; }
 
 /* ============================================================================
    Empty state
@@ -440,10 +584,20 @@
 .cog-empty__sub { font-size: 13px; color: #64748b; }
 
 /* ============================================================================
-   Responsive — at small widths, shrink toolbar + legend
+   Responsive
    ============================================================================ */
-@media (max-width: 700px) {
-  .cog-toolbar { top: 108px; left: 12px; right: 12px; flex-wrap: wrap; }
-  .cog-toolbar__search { width: 100%; }
-  .cog-legend { display: none; }
+@media (max-width: 760px) {
+  .cog-toolbar {
+    left: 10px;
+    right: 10px;
+    max-width: none;
+    flex-wrap: wrap;
+  }
+  .cog-toolbar__search { width: auto; flex: 1; min-width: 110px; }
+  .cog-toolbar__sep { display: none; }
+  .cog-toolbar__title-sub { display: none; }
+  .cog-tools { top: auto; bottom: 14px; right: 10px; }
+  .cog-legend { top: auto; bottom: 62px; right: 10px; width: 220px; }
+  .cog-tools__lbl { display: none; }
+  .cog-tools__btn { padding: 9px; }
 }

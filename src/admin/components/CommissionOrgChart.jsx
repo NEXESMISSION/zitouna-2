@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import { resolveUpline } from '../lib/resolveUpline.js'
 import './commission-org-chart.css'
 
@@ -7,9 +8,10 @@ import './commission-org-chart.css'
 // =============================================================================
 const CARD_W = 200
 const CARD_H = 118
-const COL_GAP = 36   // space between sibling cards
-const ROW_GAP = 72   // vertical space between parent and child rows
-const PAGE_PAD = 48  // breathing room around the tree
+const COL_GAP = 40   // space between sibling cards
+const ROW_GAP = 88   // vertical space between parent and child rows — more
+                     // breathing room so rounded elbows don't crowd cards
+const PAGE_PAD = 56  // breathing room around the tree
 
 const ZOOM_MIN = 0.25
 const ZOOM_MAX = 2.5
@@ -155,36 +157,53 @@ function layoutForest(clientIds, childrenMap, parentMap) {
   return { positions: pxPositions, width, height, maxDepth }
 }
 
-// Right-angle connector: down from parent bottom → horizontal to child column
-// → down to a point just ABOVE the child so the arrow head sits clearly in
-// the gap between cards (instead of being swallowed by the card's top edge).
-// Direction is seller/sponsor (parent) → buyer/filleul (child).
-const ARROW_GAP = 12
+// Rounded-elbow connector (admin-clean look): parent bottom → down to the
+// row gutter → horizontal run to the child column → down to just above the
+// child card. Corners are rounded with a constant radius so the path reads
+// like a routed PCB trace instead of a jagged L-shape. Direction is
+// seller/sponsor (parent) → buyer/filleul (child).
+const ARROW_GAP = 14
+const ELBOW_R = 14
 function connectorPath(parent, child) {
   const x1 = parent.x + CARD_W / 2
   const y1 = parent.y + CARD_H
   const x2 = child.x + CARD_W / 2
   const y2 = child.y - ARROW_GAP
   const midY = y1 + (y2 - y1) / 2
-  if (Math.abs(x1 - x2) < 1) {
-    return `M ${x1} ${y1} L ${x1} ${y2}`
-  }
-  return `M ${x1} ${y1} L ${x1} ${midY} L ${x2} ${midY} L ${x2} ${y2}`
+  // Same column → single straight vertical segment, no elbow needed.
+  if (Math.abs(x1 - x2) < 1) return `M ${x1} ${y1} L ${x1} ${y2}`
+  // Clamp the corner radius so tight rows or narrow horizontal runs still
+  // render cleanly (never overshoot the elbow segment lengths).
+  const dx = x2 - x1
+  const xSign = dx > 0 ? 1 : -1
+  const r = Math.max(2, Math.min(ELBOW_R, Math.abs(dx) / 2, midY - y1, y2 - midY))
+  return [
+    `M ${x1} ${y1}`,
+    `L ${x1} ${midY - r}`,
+    `Q ${x1} ${midY} ${x1 + r * xSign} ${midY}`,
+    `L ${x2 - r * xSign} ${midY}`,
+    `Q ${x2} ${midY} ${x2} ${midY + r}`,
+    `L ${x2} ${y2}`,
+  ].join(' ')
 }
 
 // =============================================================================
 // Component
 // =============================================================================
 export default function CommissionOrgChart({ data, selectedClientId, onNodeClick }) {
+  const navigate = useNavigate()
   const viewportRef = useRef(null)
   // Single transform state so pan + zoom stay consistent across setState batches.
   const [view, setView] = useState({ x: 0, y: 0, zoom: 1 })
   const [search, setSearch] = useState('')
   const [isSpaceDown, setIsSpaceDown] = useState(false)
   const [isPanning, setIsPanning] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)   // "⋯ more views" dropdown
+  const [legendOpen, setLegendOpen] = useState(false) // legend collapsed by default
   // Refs for in-flight drag state — kept out of React so we don't re-render 60×/s.
   const panStateRef = useRef(null)
   const suppressNextClickRef = useRef(false)
+  const menuRef = useRef(null)
 
   // --------- build maps ---------------------------------------------------
   const built = useMemo(() => {
@@ -570,7 +589,7 @@ export default function CommissionOrgChart({ data, selectedClientId, onNodeClick
   const handleMouseDown = useCallback((e) => {
     if (e.button !== 0) return // left button only
     const clickedCard = e.target.closest && e.target.closest('.cog-card')
-    const clickedToolbar = e.target.closest && e.target.closest('.cog-toolbar, .cog-legend')
+    const clickedToolbar = e.target.closest && e.target.closest('.cog-toolbar, .cog-tools, .cog-legend, .cog-menu')
     if (clickedToolbar) return
     // If user clicks on a card and space isn't held → let the card handle it.
     if (clickedCard && !isSpaceDown) return
@@ -623,7 +642,26 @@ export default function CommissionOrgChart({ data, selectedClientId, onNodeClick
 
   // --------- edge hover ---------------------------------------------------
   const [hoverEdge, setHoverEdge] = useState(null)
-  const [hoverGrantId, setHoverGrantId] = useState(null)
+  // Grant arcs were removed — the purple card badges carry the same info
+  // without adding a second curve between the same pair of nodes. Keeping a
+  // constant `null` here lets the qualifying-highlight code below stay
+  // inert without rewiring all the grant metadata downstream.
+  const hoverGrantId = null
+
+  // Close the "more views" menu on outside click / Escape.
+  useEffect(() => {
+    if (!menuOpen) return undefined
+    const onDoc = (e) => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false)
+    }
+    const onKey = (e) => { if (e.key === 'Escape') setMenuOpen(false) }
+    document.addEventListener('mousedown', onDoc)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [menuOpen])
 
   // --------- render -------------------------------------------------------
   // `allIds.length` = laid-out cards (post relevance-filter). `clientById.size`
@@ -646,16 +684,30 @@ export default function CommissionOrgChart({ data, selectedClientId, onNodeClick
       ref={viewportRef}
       onMouseDown={handleMouseDown}
     >
-      {/* Top-left floating toolbar */}
+      {/* ── Top-left toolbar: back + title + search + zoom ─────────────── */}
       <div className="cog-toolbar">
+        <button
+          type="button"
+          className="cog-toolbar__btn cog-toolbar__btn--ghost"
+          onClick={() => navigate('/admin')}
+          aria-label="Retour"
+          title="Retour"
+        >
+          <span aria-hidden>←</span>
+        </button>
+        <div className="cog-toolbar__title" title="Réseau des commissions">
+          <span className="cog-toolbar__title-main">Réseau</span>
+          <span className="cog-toolbar__title-sub">
+            {built.hiddenCount > 0
+              ? `${clientsCount} actifs · ${built.hiddenCount} hors réseau`
+              : `${clientsCount} nœud${clientsCount > 1 ? 's' : ''}`}
+          </span>
+        </div>
+        <div className="cog-toolbar__sep" aria-hidden />
         <input
           type="search"
           className="cog-toolbar__search"
-          placeholder={
-            built.hiddenCount > 0
-              ? `Rechercher (${clientsCount} actifs / ${built.hiddenCount} hors réseau) …`
-              : `Rechercher (${clientsCount}) …`
-          }
+          placeholder="Rechercher…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           aria-label="Rechercher un membre du réseau"
@@ -665,48 +717,103 @@ export default function CommissionOrgChart({ data, selectedClientId, onNodeClick
               : undefined
           }
         />
-        <button type="button" className="cog-toolbar__btn" onClick={() => zoomBy(-ZOOM_STEP)} aria-label="Zoom arrière" title="Zoom −">−</button>
-        <span className="cog-toolbar__zoom" aria-live="polite">{Math.round(view.zoom * 100)}%</span>
-        <button type="button" className="cog-toolbar__btn" onClick={() => zoomBy(ZOOM_STEP)} aria-label="Zoom avant" title="Zoom +">+</button>
+        <div className="cog-toolbar__zoomgroup" role="group" aria-label="Zoom">
+          <button type="button" className="cog-toolbar__btn" onClick={() => zoomBy(-ZOOM_STEP)} aria-label="Zoom arrière" title="Zoom −">−</button>
+          <span className="cog-toolbar__zoom" aria-live="polite">{Math.round(view.zoom * 100)}%</span>
+          <button type="button" className="cog-toolbar__btn" onClick={() => zoomBy(ZOOM_STEP)} aria-label="Zoom avant" title="Zoom +">+</button>
+        </div>
         <button type="button" className="cog-toolbar__btn cog-toolbar__btn--wide" onClick={fitToScreen} title="Ajuster à l'écran">Ajuster</button>
-        <button type="button" className="cog-toolbar__btn cog-toolbar__btn--wide" onClick={zoomReset} title="Centrer à 100%">1:1</button>
       </div>
 
-      {/* Top-right legend */}
-      <div className="cog-legend" aria-hidden>
-        <div className="cog-legend__title">Générations</div>
-        <div className="cog-legend__row"><span className="cog-legend__dot cog-legend__dot--g1" /> G1 — Racine</div>
-        <div className="cog-legend__row"><span className="cog-legend__dot cog-legend__dot--g2" /> G2</div>
-        <div className="cog-legend__row"><span className="cog-legend__dot cog-legend__dot--g3" /> G3</div>
-        <div className="cog-legend__row"><span className="cog-legend__dot cog-legend__dot--g4" /> G4+</div>
-        <div className="cog-legend__hint">
-          <svg width="28" height="8" aria-hidden style={{ verticalAlign: 'middle', marginRight: 4 }}>
-            <line x1="0" y1="4" x2="22" y2="4" stroke="#3b82f6" strokeWidth="2.4" />
-            <path d="M 22 1 L 28 4 L 22 7 z" fill="#1d4ed8" />
-          </svg>
-          Flèche bleue = <strong>vendeur&nbsp;→&nbsp;filleul</strong>
-        </div>
-        {built.syntheticCount > 0 ? (
-          <div className="cog-legend__hint cog-legend__hint--warn" title="Lien déduit d'une vente (aucun parrainage enregistré).">
-            <svg width="28" height="8" aria-hidden><line x1="0" y1="4" x2="28" y2="4" stroke="#94a3b8" strokeWidth="1.8" strokeDasharray="4 4" /></svg>
-            {' '}Trait pointillé = déduit d'une vente
+      {/* ── Top-right: legend toggle + more-views menu ───────────────────── */}
+      <div className="cog-tools" ref={menuRef}>
+        <button
+          type="button"
+          className={`cog-tools__btn ${legendOpen ? 'cog-tools__btn--on' : ''}`}
+          onClick={() => setLegendOpen((v) => !v)}
+          aria-expanded={legendOpen}
+          aria-label="Afficher/masquer la légende"
+          title="Légende"
+        >
+          <span className="cog-tools__ico" aria-hidden>ⓘ</span>
+          <span className="cog-tools__lbl">Légende</span>
+        </button>
+        <button
+          type="button"
+          className={`cog-tools__btn ${menuOpen ? 'cog-tools__btn--on' : ''}`}
+          onClick={() => setMenuOpen((v) => !v)}
+          aria-expanded={menuOpen}
+          aria-haspopup="menu"
+          title="Autres vues"
+        >
+          <span className="cog-tools__ico" aria-hidden>⋯</span>
+          <span className="cog-tools__lbl">Autres vues</span>
+        </button>
+        {menuOpen ? (
+          <div className="cog-menu" role="menu">
+            <div className="cog-menu__head">Vues détaillées</div>
+            <Link to="/admin/commissions/ledger"         className="cog-menu__item" role="menuitem" onClick={() => setMenuOpen(false)}>
+              <span className="cog-menu__ico" aria-hidden>💰</span>
+              <span className="cog-menu__text"><strong>Journal</strong><small>Événements de commission détaillés</small></span>
+            </Link>
+            <Link to="/admin/commissions/analytics"      className="cog-menu__item" role="menuitem" onClick={() => setMenuOpen(false)}>
+              <span className="cog-menu__ico" aria-hidden>📈</span>
+              <span className="cog-menu__text"><strong>Analyses</strong><small>Tendances et répartitions</small></span>
+            </Link>
+            <Link to="/admin/commissions/reverse-grants" className="cog-menu__item" role="menuitem" onClick={() => setMenuOpen(false)}>
+              <span className="cog-menu__ico" aria-hidden>⇅</span>
+              <span className="cog-menu__text"><strong>Droits acquis</strong><small>Ventes inversées qualifiantes</small></span>
+            </Link>
+            <Link to="/admin/commissions/anomalies"      className="cog-menu__item" role="menuitem" onClick={() => setMenuOpen(false)}>
+              <span className="cog-menu__ico" aria-hidden>⚠</span>
+              <span className="cog-menu__text"><strong>Anomalies</strong><small>Cycles, orphelins, incohérences</small></span>
+            </Link>
           </div>
         ) : null}
-        {built.reverseEdges.length > 0 ? (
-          <div className="cog-legend__hint cog-legend__hint--reverse" title="Un filleul a vendu à son parrain (ou ascendant). Le chaînage des commissions est tronqué.">
-            <svg width="28" height="8" aria-hidden><line x1="0" y1="4" x2="28" y2="4" stroke="#dc2626" strokeWidth="2" strokeDasharray="5 4" /></svg>
-            {' '}Flèche rouge = vente inversée ({built.reverseEdges.length})
-          </div>
-        ) : null}
-        {built.grantEdges.length > 0 ? (
-          <div className="cog-legend__hint cog-legend__hint--grant" title="Droit acquis via vente inversée : le bénéficiaire touche une commission L1 sur les ventes issues des nouveaux filleuls de la source, postérieurs à la date du droit.">
-            <svg width="28" height="8" aria-hidden><line x1="0" y1="4" x2="28" y2="4" stroke="#7c3aed" strokeWidth="2.2" /></svg>
-            {' '}Flèche violette = droit acquis ({built.grantEdges.length})
-          </div>
-        ) : null}
-        <div className="cog-legend__hint">Cliquer : lignée complète (ascendants + descendants)</div>
-        <div className="cog-legend__hint">Molette : zoom · Glisser : déplacer · Espace + glisser : partout</div>
       </div>
+
+      {/* ── Legend — collapsed by default so the tree reads first ──────── */}
+      {legendOpen ? (
+        <div className="cog-legend" role="note">
+          <div className="cog-legend__group">
+            <div className="cog-legend__title">Générations</div>
+            <div className="cog-legend__row"><span className="cog-legend__dot cog-legend__dot--g1" /> G1 — Racine</div>
+            <div className="cog-legend__row"><span className="cog-legend__dot cog-legend__dot--g2" /> G2</div>
+            <div className="cog-legend__row"><span className="cog-legend__dot cog-legend__dot--g3" /> G3</div>
+            <div className="cog-legend__row"><span className="cog-legend__dot cog-legend__dot--g4" /> G4+</div>
+          </div>
+          <div className="cog-legend__group">
+            <div className="cog-legend__title">Liens</div>
+            <div className="cog-legend__row">
+              <svg width="34" height="10" aria-hidden className="cog-legend__swatch">
+                <line x1="2" y1="5" x2="28" y2="5" stroke="#2563eb" strokeWidth="2.4" strokeLinecap="round" />
+                <path d="M 28 2 L 34 5 L 28 8 z" fill="#1d4ed8" />
+              </svg>
+              <span>Parrain → filleul</span>
+            </div>
+            {built.syntheticCount > 0 ? (
+              <div className="cog-legend__row" title="Lien déduit d'une vente (aucun parrainage enregistré).">
+                <svg width="34" height="10" aria-hidden className="cog-legend__swatch">
+                  <line x1="2" y1="5" x2="34" y2="5" stroke="#94a3b8" strokeWidth="1.8" strokeDasharray="4 4" />
+                </svg>
+                <span>Déduit d'une vente</span>
+              </div>
+            ) : null}
+            {built.reverseEdges.length > 0 ? (
+              <div className="cog-legend__row" title="Vente inversée — un filleul a vendu à son parrain (ou à un ascendant).">
+                <svg width="38" height="12" aria-hidden className="cog-legend__swatch">
+                  <path d="M 4 9 C 18 9, 26 3, 34 3" fill="none" stroke="#dc2626" strokeWidth="1.6" strokeLinecap="round" />
+                  <path d="M 30 0.5 L 36 3 L 30 5.5 z" fill="#dc2626" />
+                </svg>
+                <span>Vente inversée ({built.reverseEdges.length})</span>
+              </div>
+            ) : null}
+          </div>
+          <div className="cog-legend__hint">
+            Cliquer : lignée · Molette : zoom · Glisser : déplacer
+          </div>
+        </div>
+      ) : null}
 
       <div className="cog-viewport">
         {isEmpty ? (
@@ -733,81 +840,45 @@ export default function CommissionOrgChart({ data, selectedClientId, onNodeClick
               aria-hidden
             >
               <defs>
-                {/* Bigger, higher-contrast head so the direction
-                    (parrain → filleul) reads at any zoom level. */}
-                <marker
-                  id="cog-arrow"
-                  viewBox="0 0 10 10"
-                  refX="9"
-                  refY="5"
-                  markerWidth="14"
-                  markerHeight="14"
-                  orient="auto-start-reverse"
-                >
-                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#1d4ed8" />
+                {/* Clean, slim arrowhead (M 0 0 L 8 4 L 0 8 z) sized so the
+                    tip nests neatly in the gap above the child card without
+                    dwarfing the stroke. Triangles share geometry; only the
+                    fill changes per edge type. */}
+                <marker id="cog-arrow" viewBox="0 0 8 8" refX="7.5" refY="4"
+                        markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+                  <path d="M 0 0 L 8 4 L 0 8 z" fill="#64748b" />
                 </marker>
-                {/* Mid-path arrow used on straight vertical runs so the
-                    direction is legible even when the head is clipped
-                    behind the child card. */}
-                <marker
-                  id="cog-arrow-mid"
-                  viewBox="0 0 10 10"
-                  refX="5"
-                  refY="5"
-                  markerWidth="10"
-                  markerHeight="10"
-                  orient="auto"
-                >
-                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#1d4ed8" />
+                <marker id="cog-arrow--active" viewBox="0 0 8 8" refX="7.5" refY="4"
+                        markerWidth="10" markerHeight="10" orient="auto-start-reverse">
+                  <path d="M 0 0 L 8 4 L 0 8 z" fill="#1d4ed8" />
                 </marker>
-                <marker
-                  id="cog-arrow--active"
-                  viewBox="0 0 10 10"
-                  refX="9"
-                  refY="5"
-                  markerWidth="16"
-                  markerHeight="16"
-                  orient="auto-start-reverse"
-                >
-                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#1d4ed8" />
-                </marker>
-                <marker
-                  id="cog-arrow--reverse"
-                  viewBox="0 0 10 10"
-                  refX="8"
-                  refY="5"
-                  markerWidth="7"
-                  markerHeight="7"
-                  orient="auto-start-reverse"
-                >
-                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#dc2626" />
-                </marker>
-                <marker
-                  id="cog-arrow--grant"
-                  viewBox="0 0 10 10"
-                  refX="8"
-                  refY="5"
-                  markerWidth="7"
-                  markerHeight="7"
-                  orient="auto-start-reverse"
-                >
-                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#7c3aed" />
+                <marker id="cog-arrow--reverse" viewBox="0 0 8 8" refX="7.5" refY="4"
+                        markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+                  <path d="M 0 0 L 8 4 L 0 8 z" fill="#dc2626" />
                 </marker>
               </defs>
-              {/* Reverse-sale back-arrows — drawn before forward edges so
-                  they sit underneath, then a second pass on top for clarity.
-                  A reverse sale flows seller → buyer where buyer is already
-                  an ancestor of the seller. We bow the curve out to the
-                  right so it doesn't overlap the normal parrainage spine. */}
+              {/* Reverse-sale arrows — a filleul sold to their parrain
+                  (or an ancestor). The arrow points seller → buyer so the
+                  direction of the transaction reads at a glance. Routed
+                  along the RIGHT edge of both cards with a tight bow so it
+                  lives alongside the forward parrainage spine instead of
+                  bowing wide across the tree. The purple grant arcs (acquired
+                  rights) were dropped — the purple card badges already
+                  signal them and adding a second curve for the same pair
+                  was the source of the "double arrows" confusion. */}
               {built.reverseEdges.map((re, i) => {
                 const sp = layout.positions.get(re.seller)
                 const bp = layout.positions.get(re.buyer)
                 if (!sp || !bp) return null
-                const x1 = sp.x + CARD_W
-                const y1 = sp.y + CARD_H / 2
-                const x2 = bp.x + CARD_W
-                const y2 = bp.y + CARD_H / 2
-                const bow = Math.max(80, Math.abs(y1 - y2) * 0.4)
+                // Anchor on the right edges so the forward parrainage arrows
+                // (which enter/exit via card centers) don't collide.
+                const x1 = sp.x + CARD_W - 6
+                const y1 = sp.y + 14
+                const x2 = bp.x + CARD_W - 6
+                const y2 = bp.y + CARD_H - 14
+                // Tight bow: 36–60 px outward. Keeps the curve close to the
+                // cards so it never crosses unrelated nodes.
+                const bow = Math.max(36, Math.min(72, Math.abs(y1 - y2) * 0.22))
                 const cx = Math.max(x1, x2) + bow
                 const d = `M ${x1} ${y1} C ${cx} ${y1}, ${cx} ${y2}, ${x2} ${y2}`
                 return (
@@ -816,54 +887,14 @@ export default function CommissionOrgChart({ data, selectedClientId, onNodeClick
                       d={d}
                       fill="none"
                       stroke="#dc2626"
-                      strokeWidth={2}
-                      strokeDasharray="5 4"
+                      strokeWidth={1.6}
+                      strokeLinecap="round"
                       markerEnd="url(#cog-arrow--reverse)"
                     >
                       <title>
                         Vente inversée — le vendeur a vendu à son propre parrain
-                        (ou à un ancêtre). Le chaînage des commissions est
-                        tronqué au niveau de l'acheteur.
-                      </title>
-                    </path>
-                  </g>
-                )
-              })}
-              {/* Reverse-sale grant edges — purple solid arcs from source to
-                  beneficiary. Distinct from red dashed reverse-sale arrows:
-                  the red arrow shows the transaction, the purple arrow shows
-                  the acquired right. Bowed to the LEFT so they don't collide
-                  with the reverse-sale arrows (bowed right). */}
-              {built.grantEdges.map((ge, i) => {
-                const sp = layout.positions.get(ge.source)
-                const bp = layout.positions.get(ge.beneficiary)
-                if (!sp || !bp) return null
-                const x1 = sp.x
-                const y1 = sp.y + CARD_H / 2
-                const x2 = bp.x
-                const y2 = bp.y + CARD_H / 2
-                const bow = Math.max(90, Math.abs(y1 - y2) * 0.45)
-                const cx = Math.min(x1, x2) - bow
-                const d = `M ${x1} ${y1} C ${cx} ${y1}, ${cx} ${y2}, ${x2} ${y2}`
-                const isHover = hoverGrantId === ge.id
-                return (
-                  <g
-                    key={`grant-${ge.id}`}
-                    className={`cog-edge cog-edge--grant ${isHover ? 'cog-edge--grant-hover' : ''}`}
-                    onMouseEnter={() => setHoverGrantId(ge.id)}
-                    onMouseLeave={() => setHoverGrantId((h) => (h === ge.id ? null : h))}
-                  >
-                    <path
-                      d={d}
-                      fill="none"
-                      stroke="#7c3aed"
-                      strokeWidth={isHover ? 3 : 2.2}
-                      markerEnd="url(#cog-arrow--grant)"
-                    >
-                      <title>
-                        Droit acquis via vente inversée — effectif depuis {' '}
-                        {ge.effectiveFrom ? new Date(ge.effectiveFrom).toLocaleDateString('fr-FR') : '—'}.
-                        Survolez pour mettre en évidence les filleuls qualifiants.
+                        (ou à un ancêtre). Le chaînage des commissions est tronqué
+                        au niveau de l'acheteur.
                       </title>
                     </path>
                   </g>
@@ -895,6 +926,11 @@ export default function CommissionOrgChart({ data, selectedClientId, onNodeClick
                 const tooltipText = edge.synthetic
                   ? `${parentName} → ${childName} (lien déduit d'une vente — pas de parrainage enregistré)`
                   : `${parentName} → ${childName}`
+                // Idle strokes are a quiet slate so the tree reads as
+                // "structure" rather than "noise"; the active lineage lifts
+                // to crisp blue so the spine pops out on selection.
+                const stroke = isActive ? '#1d4ed8' : (isHover ? '#475569' : '#94a3b8')
+                const width  = isActive ? 2.4 : (isHover ? 2 : 1.6)
                 return (
                   <g
                     key={`${edge.parent}-${edge.child}-${i}`}
@@ -905,9 +941,11 @@ export default function CommissionOrgChart({ data, selectedClientId, onNodeClick
                     <path
                       d={connectorPath(p, c)}
                       fill="none"
-                      stroke={isActive ? '#1d4ed8' : '#3b82f6'}
-                      strokeWidth={isActive ? 3 : 2.4}
-                      strokeDasharray={edge.synthetic ? '4 4' : undefined}
+                      stroke={stroke}
+                      strokeWidth={width}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeDasharray={edge.synthetic ? '4 5' : undefined}
                       markerEnd={`url(#${isActive ? 'cog-arrow--active' : 'cog-arrow'})`}
                     >
                       <title>{tooltipText}</title>

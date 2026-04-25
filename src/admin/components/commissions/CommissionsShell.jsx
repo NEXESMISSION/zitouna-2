@@ -2,69 +2,57 @@ import { useMemo } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import './commissions-shell.css'
 
-// Unified shell for everything commission-related. Replaces four independent
-// nav entries (Commissions / Ledger / Analytics / Anomalies) with a single
-// landing + tab set. Old routes are preserved via redirects in App.jsx.
+// /admin/commissions shell. The index route is the network tree and runs
+// chromeless (no header, no tabs) so the chart owns the full viewport — the
+// tree has its own toolbar with a "⋯ Autres vues" menu linking to the sub-
+// routes below. Sub-routes (ledger, analytics, etc.) get the standard shell:
+// back arrow + title + tab strip.
 
-const TABS = [
-  { to: '/admin/commissions',                 label: "Vue d'ensemble", icon: '📊', end: true },
-  { to: '/admin/commissions/network',         label: 'Réseau',         icon: '🌳' },
-  { to: '/admin/commissions/ledger',          label: 'Journal',        icon: '💰' },
-  { to: '/admin/commissions/analytics',       label: 'Analyses',       icon: '📈' },
-  { to: '/admin/commissions/reverse-grants',  label: 'Droits acquis',  icon: '⇅' },
-  { to: '/admin/commissions/anomalies',       label: 'Anomalies',      icon: '⚠' },
+const SUB_TABS = [
+  { to: '/admin/commissions/ledger',         label: 'Journal',       icon: '💰' },
+  { to: '/admin/commissions/analytics',      label: 'Analyses',      icon: '📈' },
+  { to: '/admin/commissions/reverse-grants', label: 'Droits acquis', icon: '⇅' },
+  { to: '/admin/commissions/anomalies',      label: 'Anomalies',     icon: '⚠' },
 ]
 
 export default function CommissionsShell() {
   const loc = useLocation()
   const navigate = useNavigate()
 
-  const activeIndex = useMemo(() => {
+  // The index path IS the tree — render chromeless so the chart fills the page.
+  const isTreeRoute = useMemo(() => {
     const path = loc.pathname.replace(/\/$/, '')
-    let best = 0
-    let bestLen = 0
-    TABS.forEach((t, i) => {
-      if (t.end) {
-        if (path === t.to && t.to.length >= bestLen) { best = i; bestLen = t.to.length }
-      } else if (path === t.to || path.startsWith(`${t.to}/`)) {
-        if (t.to.length > bestLen) { best = i; bestLen = t.to.length }
-      }
-    })
-    return best
+    return path === '/admin/commissions'
   }, [loc.pathname])
 
-  // `fullbleed` variant strips the shell padding so the Network tab (org
-  // chart SVG) can fill the viewport edge-to-edge like the previous design.
-  const fullbleed = activeIndex === 1
+  if (isTreeRoute) {
+    return (
+      <div className="cxs cxs--tree" dir="ltr">
+        <Outlet />
+      </div>
+    )
+  }
 
   return (
-    <div className={`cxs ${fullbleed ? 'cxs--bleed' : ''}`} dir="ltr">
+    <div className="cxs" dir="ltr">
       <header className="cxs__top">
-        <div className="cxs__top-left">
-          <button
-            type="button"
-            className="cxs__back"
-            aria-label="Retour"
-            title="Retour"
-            onClick={() => navigate(-1)}
-          >
-            <span aria-hidden>←</span>
-          </button>
-          <div className="cxs__title-block">
-            <h1 className="cxs__title">Commissions</h1>
-            <p className="cxs__subtitle">
-              Suivi, validation, paiement et analyse du réseau de commissions.
-            </p>
-          </div>
-        </div>
+        <button
+          type="button"
+          className="cxs__back"
+          aria-label="Retour à l'arbre des commissions"
+          title="Retour à l'arbre"
+          onClick={() => navigate('/admin/commissions')}
+        >
+          <span aria-hidden>←</span>
+        </button>
+        <h1 className="cxs__title">Commissions</h1>
       </header>
 
       <nav className="cxs__tabs" role="tablist" aria-label="Sections commissions">
-        {TABS.map((t) => (
+        {SUB_TABS.map((t) => (
           <NavLink
             key={t.to}
             to={t.to}
-            end={t.end || false}
             className={({ isActive }) => `cxs__tab ${isActive ? 'cxs__tab--on' : ''}`}
             role="tab"
           >
@@ -74,7 +62,7 @@ export default function CommissionsShell() {
         ))}
       </nav>
 
-      <div className={`cxs__body ${fullbleed ? 'cxs__body--bleed' : ''}`} role="tabpanel">
+      <div className="cxs__body" role="tabpanel">
         <Outlet />
       </div>
     </div>

@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import TopBar from '../TopBar.jsx'
+import NotificationsMenu from '../components/NotificationsMenu.jsx'
 import { usePublicProjectDetail } from '../lib/useSupabase.js'
 import RenderDataGate from '../components/RenderDataGate.jsx'
 import EmptyState from '../components/EmptyState.jsx'
 import { useTheme } from '../lib/ThemeContext.jsx'
+import headerLogo from '../../logo-header2.png'
 
 const CURRENT_YEAR = 2026
 // Centralised brand accent so hardcoded greens can be swapped for the
@@ -175,28 +176,44 @@ function PlotPageBody({ project: proj, plot }) {
 
   return (
     <section className="ppv2">
-      <TopBar />
+      <header className="ppv2-topbar">
+        <button
+          type="button"
+          className="ppv2-topbar-brand"
+          onClick={() => navigate('/dashboard')}
+          aria-label="Retour au tableau de bord"
+        >
+          <img src={headerLogo} alt="" />
+          <div>
+            <div className="ppv2-topbar-name">Zitouna Bladi</div>
+            <div className="ppv2-topbar-sub">Détail de parcelle</div>
+          </div>
+        </button>
+        <div className="ppv2-topbar-actions">
+          <NotificationsMenu />
+          <button
+            type="button"
+            className="ppv2-topbar-home"
+            onClick={() => navigate('/dashboard')}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 12L12 3l9 9" />
+              <path d="M5 10v10a1 1 0 0 0 1 1h4v-7h4v7h4a1 1 0 0 0 1-1V10" />
+            </svg>
+            <span>Tableau de bord</span>
+          </button>
+        </div>
+      </header>
+
       <div className="ppv2-shell">
 
-        {/* Sub-topnav: back + breadcrumb */}
         <div className="ppv2-topnav">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            <button type="button" className="ppv2-back" onClick={() => navigate(`/project/${proj.id}`)}>
-              <span className="ic">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
-              </span>
-              {proj.city}
-            </button>
-            <div className="ppv2-crumb">
-              {proj.region && <>
-                <span>{proj.region}</span>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M9 6l6 6-6 6"/></svg>
-              </>}
-              <span>{proj.city}</span>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M9 6l6 6-6 6"/></svg>
-              <b>Parcelle #{plot.label ?? plot.id}</b>
-            </div>
-          </div>
+          <button type="button" className="ppv2-back" onClick={() => navigate(`/project/${proj.id}`)}>
+            <span className="ic">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
+            </span>
+            {proj.title}
+          </button>
         </div>
 
         <main className="ppv2-main">
@@ -214,26 +231,21 @@ function PlotPageBody({ project: proj, plot }) {
               <span className={`ppv2-status ${plotStatusClass(plot.status)}`}>
                 <span className="d"></span> {plotStatusLabel(plot.status)}
               </span>
-              <div className="ppv2-iconrow">
-                <button type="button" className="ppv2-iconbtn" title="Imprimer" onClick={() => window.print()}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9V3h12v6"/><rect x="4" y="9" width="16" height="9" rx="2"/><path d="M6 14h12v7H6z"/></svg>
-                </button>
-                <button type="button" className="ppv2-iconbtn" title="Partager" onClick={() => { if (navigator.share) { navigator.share({ title: `Parcelle #${plot.label ?? plot.id}`, url: window.location.href }).catch(() => {}) } else if (navigator.clipboard) { navigator.clipboard.writeText(window.location.href) } }}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><path d="M16 6l-4-4-4 4"/><path d="M12 2v13"/></svg>
-                </button>
-              </div>
+              <button type="button" className="ppv2-iconbtn" title="Partager" onClick={() => { if (navigator.share) { navigator.share({ title: `Parcelle #${plot.label ?? plot.id}`, url: window.location.href }).catch(() => {}) } else if (navigator.clipboard) { navigator.clipboard.writeText(window.location.href) } }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><path d="M16 6l-4-4-4 4"/><path d="M12 2v13"/></svg>
+              </button>
             </div>
           </div>
 
           {/* Map */}
           <div className="ppv2-map-card">
             <div className="ppv2-map-head">
-              <div className="lbl"><span className="dot"></span> Emplacement de la parcelle</div>
-              <div className="ppv2-map-controls">
-                <button type="button" title="Satellite"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18"/></svg></button>
-                <button type="button" title="Calques"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 13l9 5 9-5M3 17l9 5 9-5"/></svg></button>
-                <button type="button" title="Plein écran" onClick={() => { if (proj.mapUrl) window.open(proj.mapUrl, '_blank', 'noopener') }}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
-              </div>
+              <div className="lbl"><span className="dot"></span> Emplacement</div>
+              {proj.mapUrl && (
+                <div className="ppv2-map-controls">
+                  <button type="button" title="Plein écran" onClick={() => window.open(proj.mapUrl, '_blank', 'noopener')}><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+                </div>
+              )}
             </div>
             <div className="ppv2-map-body">
               <iframe title={`Parcelle ${plot.label ?? plot.id}`} src={proj.mapUrl} loading="lazy" allowFullScreen />
@@ -242,7 +254,7 @@ function PlotPageBody({ project: proj, plot }) {
 
           {/* Section Santé */}
           <div className="ppv2-section-head">
-            <h2><span className="dot"></span> Santé de l&apos;arbre individualisée</h2>
+            <h2><span className="dot"></span> Santé</h2>
           </div>
 
           <div className="ppv2-health">
@@ -274,8 +286,7 @@ function PlotPageBody({ project: proj, plot }) {
               <div className="ppv2-pg-head">
                 <div className="ic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3s6 7 6 12a6 6 0 0 1-12 0c0-5 6-12 6-12z"/></svg></div>
                 <div>
-                  <div className="t">Dernier arrosage</div>
-                  <div className="s">Automatisé · système goutte-à-goutte</div>
+                  <div className="t">Arrosage</div>
                 </div>
               </div>
               <div className="meta">
@@ -289,8 +300,7 @@ function PlotPageBody({ project: proj, plot }) {
               <div className="ppv2-pg-head">
                 <div className="ic olive"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v18M12 3c3 3 5 5 5 8a5 5 0 1 1-10 0c0-3 2-5 5-8z"/></svg></div>
                 <div>
-                  <div className="t">Dernier traitement · Dacus oleae</div>
-                  <div className="s">Bio · phéromone</div>
+                  <div className="t">Traitement bio</div>
                 </div>
               </div>
               <div className="meta">
@@ -307,8 +317,8 @@ function PlotPageBody({ project: proj, plot }) {
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
             </div>
             <div className="txt">
-              <div className="k">Prochaine action prévue</div>
-              <div className="t"><b>Arrosage automatisé</b> · 0,5 L par arbre · secteur Nord</div>
+              <div className="k">Prochaine action</div>
+              <div className="t"><b>Arrosage automatisé</b></div>
             </div>
             <div className="eta">dans 4 h</div>
           </div>
@@ -325,7 +335,6 @@ function PlotPageBody({ project: proj, plot }) {
                   <div className="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 12h18M12 3v18"/></svg></div>
                   <div>
                     <h3>Part dans le projet</h3>
-                    <div className="s">Surface de la parcelle ÷ surface totale du projet</div>
                   </div>
                 </div>
                 <div className="ppv2-compo-card">
@@ -367,12 +376,12 @@ function PlotPageBody({ project: proj, plot }) {
               </div>
             </div>
 
-            <div className="ppv2-note">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg>
-              {annualRevenue > 0
-                ? <span>Revenu estimé ~{annualRevenue.toLocaleString('fr-FR')} DT/an d'après les arbres de cette parcelle.</span>
-                : <span>Projet en démarrage — pas encore de revenu annuel configuré.</span>}
-            </div>
+            {annualRevenue <= 0 && (
+              <div className="ppv2-note">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg>
+                <span>Projet en démarrage — pas encore de revenu configuré.</span>
+              </div>
+            )}
           </div>
 
           <div className="ppv2-side-card">
@@ -470,14 +479,37 @@ export default function PlotPage() {
         isEmpty={isEmptyGate}
         onRetry={refresh}
         skeleton={
-          <section className="dashboard-page" aria-busy="true" aria-live="polite">
-            <TopBar />
-            <PlotPageSkeleton />
+          <section className="ppv2" aria-busy="true" aria-live="polite">
+            <header className="ppv2-topbar">
+              <div className="ppv2-topbar-brand">
+                <img src={headerLogo} alt="" />
+                <div>
+                  <div className="ppv2-topbar-name">Zitouna Bladi</div>
+                  <div className="ppv2-topbar-sub">Détail de parcelle</div>
+                </div>
+              </div>
+            </header>
+            <div className="ppv2-shell">
+              <PlotPageSkeleton />
+            </div>
           </section>
         }
         empty={
-          <section className="dashboard-page">
-            <TopBar />
+          <section className="ppv2">
+            <header className="ppv2-topbar">
+              <button
+                type="button"
+                className="ppv2-topbar-brand"
+                onClick={() => navigate('/dashboard')}
+                aria-label="Retour au tableau de bord"
+              >
+                <img src={headerLogo} alt="" />
+                <div>
+                  <div className="ppv2-topbar-name">Zitouna Bladi</div>
+                  <div className="ppv2-topbar-sub">Détail de parcelle</div>
+                </div>
+              </button>
+            </header>
             <EmptyState
               icon={
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ color: 'var(--zb-primary, #a8cc50)' }}>

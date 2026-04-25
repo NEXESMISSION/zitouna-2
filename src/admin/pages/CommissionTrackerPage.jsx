@@ -7,14 +7,12 @@ import CommissionOverrideModal from '../components/CommissionOverrideModal.jsx'
 import RenderDataGate from '../../components/RenderDataGate.jsx'
 import { useAuth } from '../../lib/AuthContext.jsx'
 import { asId } from '../lib/commissionFormat.js'
-import './zitouna-admin-page.css'
 import './commission-tracker.css'
 
-// -- page --------------------------------------------------------------------
-// Slimmed down per user request: only the network graph (nodes + lines) is
-// rendered here. The stats bar, diagnostics button, refresh button, and the
-// verbose onboarding empty-hero were removed — the chart handles clicking a
-// node for details via CommissionDetailPanel, which slides in from the side.
+// /admin/commissions landing — the network tree owns the full viewport.
+// The shell renders chromeless on this route (see CommissionsShell.jsx),
+// so the tree fills edge-to-edge. All chrome (back, search, zoom, sub-route
+// menu) lives inside CommissionOrgChart's own toolbar.
 export default function CommissionTrackerPage() {
   const { data, loading, error, refresh } = useCommissionTracker()
   const { adminUser } = useAuth()
@@ -23,15 +21,13 @@ export default function CommissionTrackerPage() {
   const [selectedClientId, setSelectedClientId] = useState(null)
   const [overrideEvent, setOverrideEvent] = useState(null)
 
-  // Support deep-linking from the Overview page: /admin/commissions/network?focus=<clientId>
+  // Deep-linking: /admin/commissions?focus=<clientId>
   const focusParam = searchParams.get('focus')
   useEffect(() => {
     if (focusParam && selectedClientId !== focusParam) setSelectedClientId(String(focusParam))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusParam])
 
-  // Demo/seed clients (anything with "DEMO" in the name) are pruned from the
-  // visualization so the tree doesn't get polluted with fixture rows.
   const demoClientIds = useMemo(() => {
     const s = new Set()
     for (const c of data?.clients || []) {
@@ -67,8 +63,8 @@ export default function CommissionTrackerPage() {
   const hasSelection = Boolean(selectedClientId)
 
   return (
-    <div className="ct-fullscreen ct-fullscreen--embedded ct-fullscreen--bare" dir="ltr">
-      <div className={`ct-graph-host ${hasSelection ? 'ct-graph-host--with-panel' : ''}`}>
+    <div className="ctx" dir="ltr">
+      <div className={`ctx__host ${hasSelection ? 'ctx__host--with-panel' : ''}`}>
         <RenderDataGate
           loading={loading}
           error={error}
@@ -77,15 +73,15 @@ export default function CommissionTrackerPage() {
           skeleton="tree"
           isEmpty={(d) => !d || (Array.isArray(d.commissionEvents) && d.commissionEvents.length === 0)}
           empty={
-            <div className="ct-empty-bare" role="status" aria-live="polite">
-              <svg viewBox="0 0 320 180" className="ct-empty-bare__net" preserveAspectRatio="xMidYMid meet" aria-hidden>
+            <div className="ctx__empty" role="status" aria-live="polite">
+              <svg viewBox="0 0 320 180" className="ctx__empty-svg" preserveAspectRatio="xMidYMid meet" aria-hidden>
                 <g stroke="#cbd5e1" strokeWidth="1.5" fill="none">
-                  <path d="M160,36 L80,100" />
-                  <path d="M160,36 L240,100" />
-                  <path d="M80,100 L40,156" />
-                  <path d="M80,100 L120,156" />
-                  <path d="M240,100 L200,156" />
-                  <path d="M240,100 L280,156" />
+                  <path d="M160,36 C160,60 80,76 80,100" />
+                  <path d="M160,36 C160,60 240,76 240,100" />
+                  <path d="M80,100 C80,124 40,132 40,156" />
+                  <path d="M80,100 C80,124 120,132 120,156" />
+                  <path d="M240,100 C240,124 200,132 200,156" />
+                  <path d="M240,100 C240,124 280,132 280,156" />
                 </g>
                 <circle cx="160" cy="36" r="18" fill="#2563eb" />
                 <circle cx="80"  cy="100" r="14" fill="#e0e7ff" stroke="#6366f1" strokeWidth="1.5" />
@@ -94,7 +90,8 @@ export default function CommissionTrackerPage() {
                   <circle key={cx} cx={cx} cy="156" r="10" fill="#f1f5f9" stroke="#94a3b8" strokeWidth="1.2" />
                 ))}
               </svg>
-              <div className="ct-empty-bare__title">Aucune commission à afficher</div>
+              <div className="ctx__empty-title">Aucune commission à afficher</div>
+              <div className="ctx__empty-sub">Les nœuds apparaîtront dès qu'une vente avec vendeur client sera finalisée.</div>
             </div>
           }
         >

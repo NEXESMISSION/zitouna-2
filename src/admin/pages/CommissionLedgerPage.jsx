@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../lib/AuthContext.jsx'
 import { useClients, useCommissionLedger } from '../../lib/useSupabase.js'
 import { runSafeAction } from '../../lib/runSafeAction.js'
@@ -48,7 +47,6 @@ function statusTone(s) {
 }
 
 export default function CommissionLedgerPage() {
-  const navigate = useNavigate()
   const { adminUser } = useAuth()
   const { addToast } = useToast()
   const { clients } = useClients()
@@ -264,10 +262,6 @@ export default function CommissionLedgerPage() {
   return (
     <div className="sell-field" dir="ltr">
       <div className="led-topbar">
-        <button type="button" className="sp-back-btn" onClick={() => navigate(-1)}>
-          <span className="sp-back-btn__icon-wrap" aria-hidden>←</span>
-          <span>Retour</span>
-        </button>
         <button
           type="button"
           className="led-refresh"

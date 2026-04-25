@@ -31,6 +31,86 @@
 
 .ppv2 a { color: inherit; text-decoration: none; }
 
+/* Clean app-wide topbar — replaces the legacy <TopBar />. Matches the
+   hub / dashboard aesthetic: cream canvas + white surface for the brand
+   chip on the left, a thin hairline divider, and a compact actions
+   cluster on the right. */
+.ppv2-topbar {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 18px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--pp-hair);
+}
+.ppv2-topbar-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  color: inherit;
+}
+.ppv2-topbar-brand img {
+  height: 36px;
+  width: auto;
+  border-radius: 8px;
+  background: #fff;
+  padding: 4px;
+  box-shadow: var(--pp-shadow);
+}
+.ppv2-topbar-name {
+  font-family: 'Inter Tight', 'Inter', sans-serif;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+  color: var(--pp-ink);
+}
+.ppv2-topbar-sub {
+  font-size: 11px;
+  color: var(--pp-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-top: 2px;
+}
+.ppv2-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.ppv2-topbar-home {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: 1px solid var(--pp-hair);
+  background: #fff;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--pp-ink-2);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.ppv2-topbar-home:hover {
+  background: var(--pp-hair-2);
+  border-color: #DADADA;
+}
+@media (max-width: 640px) {
+  .ppv2-topbar { padding: 12px 14px; }
+  .ppv2-topbar-brand img { height: 30px; padding: 3px; }
+  .ppv2-topbar-name { font-size: 14px; }
+  .ppv2-topbar-sub { font-size: 10px; }
+  .ppv2-topbar-home span { display: none; }
+  .ppv2-topbar-home { padding: 8px; }
+}
+
 .ppv2-shell {
   max-width: 1120px;
   margin: 0 auto;

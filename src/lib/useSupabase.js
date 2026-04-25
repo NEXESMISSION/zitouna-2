@@ -2000,6 +2000,7 @@ export function useAmbassadorReferralSummary(enabled = true) {
     gainsAccrued: 0,
     commissionsReleased: 0,
     walletBalance: 0,
+    inPayoutAmount: 0,
     minPayoutAmount: 0,
     fieldDepositMin: 0,
     fullDepositTarget: 0,

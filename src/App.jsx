@@ -25,6 +25,7 @@ const MyParcellesPage = lazyWithRetry(() => import('./pages/MyParcellesPage.jsx'
 const MyTreePage = lazyWithRetry(() => import('./pages/MyTreePage.jsx'))
 const MyHarvestsPage = lazyWithRetry(() => import('./pages/MyHarvestsPage.jsx'))
 const MyProfilePage = lazyWithRetry(() => import('./pages/MyProfilePage.jsx'))
+const HubPage = lazyWithRetry(() => import('./pages/HubPage.jsx'))
 const ProjectPage = lazyWithRetry(() => import('./pages/ProjectPage.jsx'))
 const PlotPage = lazyWithRetry(() => import('./pages/PlotPage.jsx'))
 const ReferralInvitePage = lazyWithRetry(() => import('./pages/ReferralInvitePage.jsx'))
@@ -50,7 +51,6 @@ const CallCenterCalendarPage = lazyWithRetry(() => import('./admin/pages/CallCen
 const CommercialCalendarPage = lazyWithRetry(() => import('./admin/pages/CommercialCalendarPage.jsx'))
 const CommissionLedgerPage = lazyWithRetry(() => import('./admin/pages/CommissionLedgerPage.jsx'))
 const CommissionsShell = lazyWithRetry(() => import('./admin/components/commissions/CommissionsShell.jsx'))
-const CommissionsOverviewPage = lazyWithRetry(() => import('./admin/pages/CommissionsOverviewPage.jsx'))
 const ClientLinkRepairPage = lazyWithRetry(() => import('./admin/pages/ClientLinkRepairPage.jsx'))
 const PhoneChangesPage = lazyWithRetry(() => import('./admin/pages/PhoneChangesPage.jsx'))
 const CommissionAnomaliesPage = lazyWithRetry(() => import('./admin/pages/CommissionAnomaliesPage.jsx'))
@@ -60,6 +60,7 @@ const DangerZonePage = lazyWithRetry(() => import('./admin/pages/DangerZonePage.
 // RESEARCH 05 §5: was eagerly imported — now lazy, consistent with the rest.
 const CommissionTrackerPage = lazyWithRetry(() => import('./admin/pages/CommissionTrackerPage.jsx'))
 const DistributionsPage = lazyWithRetry(() => import('./admin/pages/DistributionsPage.jsx'))
+const RetraitsPage = lazyWithRetry(() => import('./admin/pages/RetraitsPage.jsx'))
 
 // Wire each lazy component into the preload registry so nav surfaces can
 // warm the chunk on hover/focus/idle. When the user finally clicks, the
@@ -80,13 +81,13 @@ const PRELOAD_PAIRS = [
   ['/admin/call-center', CallCenterPage],
   ['/admin/call-center/calendar', CallCenterCalendarPage],
   ['/admin/commercial-calendar', CommercialCalendarPage],
-  ['/admin/commissions', CommissionsOverviewPage],
-  ['/admin/commissions/network', CommissionTrackerPage],
+  ['/admin/commissions', CommissionTrackerPage],
   ['/admin/commissions/ledger', CommissionLedgerPage],
   ['/admin/commissions/analytics', CommissionAnalyticsPage],
   ['/admin/commissions/reverse-grants', ReverseGrantsPage],
   ['/admin/commissions/anomalies', CommissionAnomaliesPage],
   ['/admin/distributions', DistributionsPage],
+  ['/admin/retraits', RetraitsPage],
   ['/admin/client-link-repair', ClientLinkRepairPage],
 ]
 for (const [path, Comp] of PRELOAD_PAIRS) {
@@ -193,6 +194,7 @@ export default function App() {
         <Route path="/my/tree"        element={<RequireCustomerAuth><MyTreePage /></RequireCustomerAuth>} />
         <Route path="/my/harvests"    element={<RequireCustomerAuth><MyHarvestsPage /></RequireCustomerAuth>} />
         <Route path="/my/profile"     element={<RequireCustomerAuth><MyProfilePage /></RequireCustomerAuth>} />
+        <Route path="/hub"            element={<RequireCustomerAuth><HubPage /></RequireCustomerAuth>} />
 
         {/* Admin (no auth required now) */}
         <Route path="/admin" element={<RequireStaff><AdminLayout /></RequireStaff>}>
@@ -209,15 +211,16 @@ export default function App() {
               /admin/commissions/analytics) are preserved and redirected below so
               bookmarks keep working. */}
           <Route path="commissions" element={<CommissionsShell />}>
-            <Route index                element={<CommissionsOverviewPage />} />
-            <Route path="network"       element={<CommissionTrackerPage />} />
-            <Route path="ledger"        element={<CommissionLedgerPage />} />
+            <Route index                 element={<CommissionTrackerPage />} />
+            <Route path="network"        element={<Navigate to="/admin/commissions" replace />} />
+            <Route path="ledger"         element={<CommissionLedgerPage />} />
             <Route path="analytics"      element={<CommissionAnalyticsPage />} />
             <Route path="reverse-grants" element={<ReverseGrantsPage />} />
             <Route path="anomalies"      element={<CommissionAnomaliesPage />} />
           </Route>
           <Route path="commission-ledger" element={<Navigate to="/admin/commissions/ledger" replace />} />
           <Route path="distributions"      element={<DistributionsPage />} />
+          <Route path="retraits"           element={<RetraitsPage />} />
           <Route path="legal"                element={<NotaryDashboardPage />} />
           <Route path="coordination"         element={<CoordinationPage />} />
           <Route path="juridique"            element={<ServiceJuridiquePage />} />

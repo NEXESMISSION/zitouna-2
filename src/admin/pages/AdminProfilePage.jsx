@@ -29,6 +29,7 @@ const REMUNERATION_GROUP = [
   '/admin/commission-ledger',
   '/admin/commissions/analytics',
   '/admin/commissions/anomalies',
+  '/admin/retraits',
   '/admin/audit-log',
 ]
 
@@ -51,6 +52,7 @@ const ICON_BY_PATH = {
   '/admin/commission-ledger': '📒',
   '/admin/commissions/analytics': '📈',
   '/admin/commissions/anomalies': '🚩',
+  '/admin/retraits': '💸',
   '/admin/audit-log': '📜',
   '/admin/users': '🛡️',
   '/admin/client-link-repair': '🔗',
@@ -74,6 +76,7 @@ const HINT_BY_PATH = {
   '/admin/commission-ledger': 'Consulter le registre des commissions.',
   '/admin/commissions/analytics': 'Analyses et tendances des commissions.',
   '/admin/commissions/anomalies': 'Détecter les anomalies de parrainage.',
+  '/admin/retraits': 'Accepter ou refuser les demandes de retrait.',
   '/admin/audit-log': "Visualiser l'historique des actions.",
   '/admin/users': 'Créer et gérer les comptes internes.',
   '/admin/client-link-repair': 'Réparer les liens client orphelins.',
@@ -104,6 +107,7 @@ const TONE_BY_PATH = {
   '/admin/commission-ledger': 'purple',
   '/admin/commissions/analytics': 'purple',
   '/admin/commissions/anomalies': 'purple',
+  '/admin/retraits': 'purple',
   '/admin/audit-log': 'purple',
 }
 

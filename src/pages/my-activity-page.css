@@ -68,10 +68,15 @@
   padding: 2px 7px;
   border-radius: 999px;
   line-height: 1;
+  min-width: 18px;
+  text-align: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 .zb-spark-tabs button.zb-active .ma-tab-count {
-  background: var(--zb-blue-soft);
-  color: var(--zb-blue);
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
 }
 
 /* Feed */
@@ -208,4 +213,63 @@
   .ma-amount { font-size: 13.5px; }
   .ma-sub { max-width: 22ch; }
   .ma-group-head { padding: 10px 14px 6px; }
+}
+
+/* ── Mobile filter tabs — segmented control, edge-to-edge, readable ── */
+@media (max-width: 560px) {
+  .zb-spark-tabs.ma-tabs {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 3px;
+    padding: 4px;
+    border-radius: 14px;
+    box-shadow: 0 1px 2px rgba(17, 24, 39, 0.04);
+    margin: 6px 0 10px;
+    flex-wrap: nowrap;
+  }
+  .zb-spark-tabs.ma-tabs button {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 9px 4px;
+    font-size: 12.5px;
+    font-weight: 600;
+    gap: 5px;
+    border-radius: 10px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.15;
+  }
+  .zb-spark-tabs.ma-tabs button.zb-active {
+    box-shadow: 0 1px 3px rgba(17, 24, 39, 0.18),
+                0 0 0 0.5px rgba(17, 24, 39, 0.6) inset;
+  }
+  .ma-tabs .ma-tab-count {
+    margin-left: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 5px;
+    min-width: 15px;
+    line-height: 1.4;
+    letter-spacing: -0.01em;
+  }
+}
+
+/* ── Extra narrow phones: shrink text a hair more so 4 tabs fit ── */
+@media (max-width: 380px) {
+  .zb-spark-tabs.ma-tabs button {
+    padding: 9px 2px;
+    font-size: 11.5px;
+    gap: 3px;
+  }
+  .ma-tabs .ma-tab-count {
+    font-size: 9.5px;
+    padding: 1px 4px;
+    margin-left: 3px;
+    min-width: 14px;
+  }
 }

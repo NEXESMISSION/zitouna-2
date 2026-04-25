@@ -97,7 +97,7 @@ export default function MyCommissionsPage() {
               className="zb-card zb-hero-left"
               aria-busy={referralLoading || undefined}
             >
-              <div className="zb-eyebrow"><span className="zb-dot-live" /> Disponible au retrait</div>
+              <div className="zb-eyebrow"><span className="zb-dot-live" /> À retirer</div>
               <div>
                 <div className="zb-balance">
                   {referralLoading ? (
@@ -109,7 +109,7 @@ export default function MyCommissionsPage() {
                 </div>
                 <div className="zb-balance-sub">
                   <span className="zb-pill-up" style={{ background: 'var(--zb-blue-softer)', color: 'var(--zb-blue)' }}>
-                    Seuil min. {minPayout.toLocaleString('fr-FR')} DT
+                    Min : {minPayout.toLocaleString('fr-FR')} DT
                   </span>
                   {referralLoading ? (
                     <span className="sk sk-line" style={{ height: 12, width: 110 }} aria-hidden="true" />
@@ -131,14 +131,15 @@ export default function MyCommissionsPage() {
                   title={!canWithdraw && balance > 0 && balance < minPayout ? `Seuil minimum non atteint (${minPayout.toLocaleString('fr-FR')} DT).` : undefined}
                 >
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M4 12h12M12 5l7 7-7 7" /></svg>
-                  Ouvrir la demande de retrait
+                  Retirer
                 </button>
               </div>
 
               <div className="zb-rail">
                 {[
-                  { k: 'En attente', v: Number(referralSummary?.gainsAccrued ?? 0), cls: '' },
-                  { k: 'Crédit légal', v: Number(referralSummary?.commissionsReleased ?? 0), cls: '' },
+                  { k: 'En retrait', v: Number(referralSummary?.inPayoutAmount ?? 0), cls: '' },
+                  { k: 'Débloqué', v: Number(referralSummary?.commissionsReleased ?? 0), cls: '' },
+                  { k: 'Attente notaire', v: Number(referralSummary?.gainsAccrued ?? 0), cls: '' },
                   { k: 'Direct (L1)', v: Number(referralSummary?.l1Total ?? 0), cls: 'zb-blue' },
                   { k: 'Indirect (L2+)', v: Number(referralSummary?.l2Total ?? 0), cls: '' },
                 ].map((row) => (
@@ -160,10 +161,10 @@ export default function MyCommissionsPage() {
             <div className="zb-card" style={{ padding: 22, display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div>
                 <h3 style={{ margin: 0, fontFamily: "'Inter Tight',sans-serif", fontSize: 16, letterSpacing: '-0.02em' }}>
-                  Votre réseau de filleuls
+                  Mon réseau
                 </h3>
                 <p style={{ margin: '6px 0 0', color: 'var(--zb-muted)', fontSize: 13, lineHeight: 1.5 }}>
-                  Visualisez l&apos;ensemble de votre réseau et les commissions générées par chaque filleul, sur une page dédiée.
+                  Voir votre réseau et ses commissions.
                 </p>
               </div>
               <button
@@ -173,7 +174,7 @@ export default function MyCommissionsPage() {
                 onClick={() => navigate('/my/tree')}
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M7.8 7.8l3.4 8.4M16.2 7.8l-3.4 8.4"/></svg>
-                Ouvrir mon arbre de commissions
+                Voir l'arbre
               </button>
             </div>
           </section>
@@ -188,14 +189,14 @@ export default function MyCommissionsPage() {
 
           {referralVerificationBlocked && (
             <div className="zb-card" style={{ padding: 14, background: 'var(--zb-amber-soft)', border: '1px solid #F3E0A7', color: 'var(--zb-amber)', fontSize: 13 }}>
-              Vérification d&apos;identité requise avant tout retrait bancaire. Le portefeuille reste visible.
+              Vérification d&apos;identité requise avant retrait.
             </div>
           )}
 
           {/* Ledger */}
           <section>
             <div className="zb-section-head">
-              <h2>Historique des commissions</h2>
+              <h2>Historique</h2>
               <span style={{ color: 'var(--zb-muted)', fontSize: 13 }}>{myCommissionEvents.length} ligne{myCommissionEvents.length !== 1 ? 's' : ''}</span>
             </div>
 
@@ -208,7 +209,7 @@ export default function MyCommissionsPage() {
               empty={
                 <EmptyState
                   title="Aucune commission"
-                  description="Les montants s'affichent après clôture notaire des ventes concernées."
+                  description="Visibles après clôture notaire."
                 />
               }
             >

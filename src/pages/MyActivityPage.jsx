@@ -172,10 +172,7 @@ export default function MyActivityPage() {
     <DashboardShell active="dashboard">
       <div className="zb-greeting">
         <h1 className="zb-greeting-h1">Activité récente</h1>
-        <p className="zb-greeting-sub">
-          Chaque mouvement financier — commissions, retraits, et échéances
-          que vous avez envoyées.
-        </p>
+        <p className="zb-greeting-sub">Commissions, retraits et échéances.</p>
       </div>
 
       {/* Totals rail — quick picture of what's in view */}
@@ -230,7 +227,7 @@ export default function MyActivityPage() {
         empty={
           <EmptyState
             title="Aucune activité"
-            description="Aucun événement à afficher pour ce filtre."
+            description="Rien à afficher."
           />
         }
       >

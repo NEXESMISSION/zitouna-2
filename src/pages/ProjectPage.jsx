@@ -4,6 +4,7 @@ import { usePublicProjectDetail } from '../lib/useSupabase.js'
 import RenderDataGate from '../components/RenderDataGate.jsx'
 import EmptyState from '../components/EmptyState.jsx'
 import DashboardShell from '../components/DashboardShell.jsx'
+import PlotHealthPanel from '../components/PlotHealthPanel.jsx'
 import { fetchPublicProjectHarvests, fetchPublicProjectEvents } from '../lib/db.js'
 import './dashboard-page.css'
 
@@ -90,18 +91,14 @@ function ProjectPageBody({ project: proj }) {
 
   // Health scores — admin-entered on the project. Used by the "Santé du
   // projet" block.
+  // Health scores now rendered by <PlotHealthPanel/> — we just need to
+  // know whether the admin has filled at least one score so we can hide
+  // the block entirely for projects that haven't been measured yet.
   const healthScores = [
-    { id: 'trees', label: 'Santé des arbres', value: proj.treeHealthPct, icon: 'tree' },
-    { id: 'humidity', label: 'Humidité du sol', value: proj.soilHumidityPct, icon: 'drop' },
-    { id: 'nutrients', label: 'Nutriments', value: proj.nutrientsPct, icon: 'seed' },
-  ].filter((h) => h.value != null && Number.isFinite(Number(h.value)))
-  const scoreTier = (v) => {
-    const n = Number(v) || 0
-    if (n >= 85) return { label: 'Excellent', className: 'pd-health--great' }
-    if (n >= 70) return { label: 'Bon', className: 'pd-health--good' }
-    if (n >= 50) return { label: 'Moyen', className: 'pd-health--fair' }
-    return { label: 'Critique', className: 'pd-health--low' }
-  }
+    proj.treeHealthPct,
+    proj.soilHumidityPct,
+    proj.nutrientsPct,
+  ].filter((v) => v != null && Number.isFinite(Number(v)))
 
   // Per-parcel cohorts aggregated to project level for the inventory chart.
   const batches = (() => {
@@ -324,43 +321,18 @@ function ProjectPageBody({ project: proj }) {
             </div>
           </div>
 
-          {/* Health — Santé du projet */}
+          {/* Health — Santé du projet (même design que la fiche parcelle) */}
           {healthScores.length > 0 && (
-            <div className="pd-card pd-health-card">
-              <div className="pd-health-head">
-                <span className="pd-health-star">✦</span>
-                <h2>Santé du projet</h2>
+            <div className="pd-health-wrap">
+              <div className="pd-section-head">
+                <h2><span className="pd-dot" /> Santé du projet</h2>
               </div>
-              <div className="pd-health-grid">
-                {healthScores.map((h) => {
-                  const tier = scoreTier(h.value)
-                  return (
-                    <div key={h.id} className={`pd-health-cell ${tier.className}`}>
-                      <div className="pd-health-ic">
-                        {h.icon === 'tree' ? (
-                          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M12 3c4 3 6 7 6 11a6 6 0 0 1-12 0c0-4 2-8 6-11z" />
-                            <path d="M12 14v6" />
-                          </svg>
-                        ) : h.icon === 'drop' ? (
-                          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M12 3c4 5 7 9 7 12a7 7 0 0 1-14 0c0-3 3-7 7-12z" />
-                          </svg>
-                        ) : (
-                          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M12 22V8" />
-                            <path d="M5 12a7 7 0 0 1 7-4 7 7 0 0 1 7 4" />
-                            <path d="M12 14c-2-3-4-4-7-4M12 14c2-3 4-4 7-4" />
-                          </svg>
-                        )}
-                      </div>
-                      <div className="pd-health-v">{Math.round(Number(h.value) || 0)}%</div>
-                      <div className="pd-health-k">{h.label}</div>
-                      <div className="pd-health-tier">{tier.label}</div>
-                    </div>
-                  )
-                })}
-              </div>
+              <PlotHealthPanel
+                trees={proj.treeHealthPct}
+                humidity={proj.soilHumidityPct}
+                nutrients={proj.nutrientsPct}
+                gradientId={`ph-co2-proj-${proj.id}`}
+              />
             </div>
           )}
 

@@ -201,7 +201,6 @@ export default function MyProfilePage() {
             </div>
             <div>
               <h2 className="mp-card-title">Identité</h2>
-              <p className="mp-card-sub">Ces informations figurent sur vos documents.</p>
             </div>
           </header>
 
@@ -279,7 +278,7 @@ export default function MyProfilePage() {
             </div>
             <div>
               <h2 className="mp-card-title">Numéro de téléphone</h2>
-              <p className="mp-card-sub">Un administrateur valide chaque changement.</p>
+              <p className="mp-card-sub">Validation admin requise.</p>
             </div>
           </header>
 
@@ -296,7 +295,7 @@ export default function MyProfilePage() {
                 <div className="mp-status mp-status--pending">
                   <strong>Demande en cours</strong>
                   <span>Nouveau numéro : <span dir="ltr">{phoneChange.request.requested_phone}</span></span>
-                  <span className="mp-status-note">En attente de validation par un administrateur.</span>
+                  <span className="mp-status-note">En attente admin.</span>
                 </div>
               )}
               {phoneChange.request?.status === 'approved' && (
@@ -323,11 +322,11 @@ export default function MyProfilePage() {
                 >
                   <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>
                   {phoneChange.request?.status === 'pending'
-                    ? 'En attente de validation…'
+                    ? 'En attente…'
                     : phoneChange.request?.status === 'rejected'
                       ? 'Nouvelle demande'
                       : phoneChange.request?.status === 'approved'
-                        ? 'Demander un nouveau changement'
+                        ? 'Changer à nouveau'
                         : 'Changer le numéro'}
                 </button>
               </div>
@@ -387,7 +386,7 @@ export default function MyProfilePage() {
                 id="mp-phone-reason"
                 className="mp-input mp-textarea"
                 rows={3}
-                placeholder="Pourquoi voulez-vous changer de numéro ?"
+                placeholder="Motif (facultatif)"
                 value={phoneChange.reason}
                 onChange={(e) => setPhoneChange((p) => ({ ...p, reason: e.target.value }))}
               />
@@ -411,7 +410,7 @@ export default function MyProfilePage() {
                   onClick={handleSubmitPhoneChange}
                   disabled={!canSubmitPhone}
                 >
-                  {phoneChange.saving ? 'Envoi…' : 'Envoyer la demande'}
+                  {phoneChange.saving ? 'Envoi…' : 'Envoyer'}
                 </button>
               </div>
             </div>
@@ -426,7 +425,7 @@ export default function MyProfilePage() {
               </div>
               <h3 className="mp-phone-success-title">Demande envoyée</h3>
               <p className="mp-phone-success-desc">
-                Un administrateur examinera votre demande. Votre numéro actuel reste valide jusqu&apos;à la validation.
+                En attente admin. Numéro actuel actif jusqu&apos;à la validation.
               </p>
               {phoneChange.successPhone && (
                 <div className="mp-phone-success-summary">
@@ -439,7 +438,7 @@ export default function MyProfilePage() {
                 className="zb-btn zb-btn-primary"
                 onClick={dismissPhoneChangeSuccess}
               >
-                Retour au profil
+                Retour
               </button>
             </div>
           )}

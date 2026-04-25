@@ -1,9 +1,10 @@
 -- =============================================================================
--- ZITOUNA — 01_reset_full.sql  (dev/ — DESTRUCTIVE, NEVER RUN AGAINST PROD)
+-- ZITOUNA — 01_reset_full.sql  (DESTRUCTIVE, NEVER RUN AGAINST PROD)
 -- Complete database reset: wipes auth.users AND the public schema.
 --
 -- After running, re-apply in order:
---   02_schema.sql → 03_functions.sql → 04_rls.sql → (optional) 05_seed.sql
+--   02_schema.sql → 03_functions.sql → 04_rls.sql →
+--   07_hardening.sql → 08_notifications.sql → 06_seed_dev.sql
 --
 -- Storage buckets are NOT touched here — clear them from the Supabase dashboard
 -- if needed (Storage > select bucket > delete files).

@@ -702,12 +702,8 @@ export default function DashboardPage() {
         </aside>
 
         <main className="zb-main">
-          {/* Topbar: search · notifications · avatar */}
+          {/* Topbar: notifications · avatar (right-aligned, no search) */}
           <div className="zb-topbar">
-            <div className="zb-search">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
-              <input type="text" placeholder="Rechercher une parcelle, un projet…" readOnly />
-            </div>
             <div className="zb-topbar-actions">
               <NotificationsMenu />
               <div className="zb-avatar-wrap" ref={avatarMenuRef}>
@@ -783,106 +779,6 @@ export default function DashboardPage() {
 
           return (
             <>
-              {/* ── Hero: two earnings cards — Commissions + Récoltes ── */}
-              <section className="zb-hero zb-hero--earn">
-                {/* Commissions card */}
-                <article
-                  className="zb-earn zb-earn--commission"
-                  onClick={() => navigate('/my/commissions')}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(e) => { if (e.key === 'Enter') navigate('/my/commissions') }}
-                >
-                  <div className="zb-earn-head">
-                    <div className="zb-earn-ic zb-earn-ic--commission">
-                      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                        <circle cx="12" cy="12" r="9" />
-                        <path d="M12 7v10M9 9.5c0-1 1-2 3-2s3 1 3 2-1 1.5-3 2-3 1-3 2 1 2 3 2 3-1 3-2" />
-                      </svg>
-                    </div>
-                    <div className="zb-earn-head-tx">
-                      <div className="zb-earn-t">Commissions</div>
-                      <div className="zb-earn-s">{showAmbassadorCard ? 'Solde disponible · prêt à retirer' : 'Activez votre compte ambassadeur'}</div>
-                    </div>
-                  </div>
-                  <div className="zb-earn-v">
-                    {referralLoading ? '—' : Math.round(animCommission).toLocaleString('fr-FR')}
-                    <span className="zb-earn-u">TND</span>
-                  </div>
-                  <div className="zb-earn-meta">
-                    {showAmbassadorCard && Number(referralSummary?.commissionsReleased) > 0 ? (
-                      <>
-                        <span className="zb-earn-pill zb-earn-pill--green">
-                          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M6 14l6-6 6 6" /></svg>
-                          {Math.max(1, Math.round((commissionBalance / Number(referralSummary.commissionsReleased)) * 100))}%
-                        </span>
-                        <span className="zb-earn-sub">
-                          {Math.round(Number(referralSummary.commissionsReleased)).toLocaleString('fr-FR')} TND libérés · lifetime
-                        </span>
-                      </>
-                    ) : showAmbassadorCard ? (
-                      <span className="zb-earn-sub">Aucune commission encore libérée</span>
-                    ) : (
-                      <span className="zb-earn-sub">Parrainez pour toucher des commissions L1 + L2</span>
-                    )}
-                  </div>
-                  <div className="zb-earn-cta">
-                    {showAmbassadorCard
-                      ? (commissionBalance > 0 ? 'Retirer maintenant →' : 'Voir mes commissions →')
-                      : 'Découvrir le parrainage →'}
-                  </div>
-                </article>
-
-                {/* Récoltes card */}
-                <article
-                  className="zb-earn zb-earn--harvest"
-                  onClick={() => navigate('/my/harvests')}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(e) => { if (e.key === 'Enter') navigate('/my/harvests') }}
-                >
-                  <div className="zb-earn-head">
-                    <div className="zb-earn-ic zb-earn-ic--harvest">
-                      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M12 3c4 3 6 7 6 11a6 6 0 0 1-12 0c0-4 2-8 6-11z" />
-                        <path d="M12 14v6" />
-                      </svg>
-                    </div>
-                    <div className="zb-earn-head-tx">
-                      <div className="zb-earn-t">Récoltes {currentYear}</div>
-                      <div className="zb-earn-s">Revenu des oliviers distribué cette année</div>
-                    </div>
-                  </div>
-                  <div className="zb-earn-v">
-                    {salesLoading ? '—' : Math.round(harvestThisYearTnd).toLocaleString('fr-FR')}
-                    <span className="zb-earn-u">TND</span>
-                  </div>
-                  <div className="zb-earn-meta">
-                    {totalRevenue > 0 ? (
-                      <>
-                        <span className="zb-earn-pill zb-earn-pill--blue">
-                          {Math.min(100, Math.max(0, Math.round((harvestThisYearTnd / totalRevenue) * 100)))}%
-                        </span>
-                        <span className="zb-earn-sub">
-                          du revenu annuel projeté ({Math.round(totalRevenue).toLocaleString('fr-FR')} TND)
-                        </span>
-                      </>
-                    ) : nextHarvest ? (
-                      <span className="zb-earn-sub">
-                        Prochaine récolte · {nextHarvest.date
-                          ? new Date(nextHarvest.date).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
-                          : nextHarvest.year}
-                      </span>
-                    ) : (
-                      <span className="zb-earn-sub">Premiers revenus à partir de la 3ᵉ année</span>
-                    )}
-                  </div>
-                  <div className="zb-earn-cta">
-                    {nextHarvest ? `Prochaine : ${nextHarvest.date ? new Date(nextHarvest.date).toLocaleDateString('fr-FR', { month: 'short', year: 'numeric' }) : nextHarvest.year} →` : 'Voir mes récoltes →'}
-                  </div>
-                </article>
-              </section>
-
               {/* Quick actions + portfolio rail */}
               <section className="zb-card zb-hero-actions">
                 <div className="zb-actions">
@@ -916,27 +812,6 @@ export default function DashboardPage() {
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
                     Activité
                   </button>
-                </div>
-
-                <div className="zb-rail zb-rail--3">
-                  <div>
-                    <div className="zb-k">Oliviers</div>
-                    <div className="zb-v">{salesLoading ? '—' : Math.round(animTrees).toLocaleString('fr-FR')}</div>
-                  </div>
-                  <div>
-                    <div className="zb-k">Revenu annuel projeté</div>
-                    <div className="zb-v zb-blue">
-                      {salesLoading ? '—' : Math.round(animRevenue).toLocaleString('fr-FR')}
-                      <span className="zb-s">TND</span>
-                    </div>
-                  </div>
-                  <div>
-                    <div className="zb-k">Capital placé</div>
-                    <div className="zb-v">
-                      {salesLoading ? '—' : Math.round(animInvested).toLocaleString('fr-FR')}
-                      <span className="zb-s">TND · ROI {animRoi.toFixed(1)}%</span>
-                    </div>
-                  </div>
                 </div>
               </section>
 
@@ -1085,7 +960,7 @@ export default function DashboardPage() {
                 <div className="zb-card zb-ech">
                   <div className="zb-ech-head">
                     <div>
-                      <h2>Prochaines échéances</h2>
+                      <h2>À payer</h2>
                       <div className="zb-ech-sub">
                         {ipStats.total} plan{ipStats.total !== 1 ? 's' : ''} actif{ipStats.total !== 1 ? 's' : ''}
                         {ipStats.rejected > 0 && ` · ${ipStats.rejected} à corriger`}
@@ -1209,6 +1084,59 @@ export default function DashboardPage() {
                     })
                   )}
                 </div>
+              </section>
+
+              {/* ── Compact earn summary — Commissions + Récoltes ── */}
+              <section className="zb-hero zb-hero--earn zb-hero--earn-compact">
+                <article
+                  className="zb-earn zb-earn--commission zb-earn--compact"
+                  onClick={() => navigate('/my/commissions')}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => { if (e.key === 'Enter') navigate('/my/commissions') }}
+                >
+                  <div className="zb-earn-head">
+                    <div className="zb-earn-ic zb-earn-ic--commission">
+                      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="9" />
+                        <path d="M12 7v10M9 9.5c0-1 1-2 3-2s3 1 3 2-1 1.5-3 2-3 1-3 2 1 2 3 2 3-1 3-2" />
+                      </svg>
+                    </div>
+                    <div className="zb-earn-t">Commissions</div>
+                  </div>
+                  <div className="zb-earn-v">
+                    {referralLoading ? '—' : Math.round(animCommission).toLocaleString('fr-FR')}
+                    <span className="zb-earn-u">TND</span>
+                  </div>
+                  <div className="zb-earn-cta">
+                    {showAmbassadorCard
+                      ? (commissionBalance > 0 ? 'Retirer →' : 'Voir →')
+                      : 'Activer →'}
+                  </div>
+                </article>
+
+                <article
+                  className="zb-earn zb-earn--harvest zb-earn--compact"
+                  onClick={() => navigate('/my/harvests')}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => { if (e.key === 'Enter') navigate('/my/harvests') }}
+                >
+                  <div className="zb-earn-head">
+                    <div className="zb-earn-ic zb-earn-ic--harvest">
+                      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 3c4 3 6 7 6 11a6 6 0 0 1-12 0c0-4 2-8 6-11z" />
+                        <path d="M12 14v6" />
+                      </svg>
+                    </div>
+                    <div className="zb-earn-t">Récoltes {currentYear}</div>
+                  </div>
+                  <div className="zb-earn-v">
+                    {salesLoading ? '—' : Math.round(harvestThisYearTnd).toLocaleString('fr-FR')}
+                    <span className="zb-earn-u">TND</span>
+                  </div>
+                  <div className="zb-earn-cta">Voir →</div>
+                </article>
               </section>
             </>
           )
@@ -1394,7 +1322,7 @@ export default function DashboardPage() {
                 </span>
                 <div>
                   <h1 className="ip__hero-title">Mes échéances</h1>
-                  <p className="ip__hero-sub">Suivez vos paiements en temps réel</p>
+                  <p className="ip__hero-sub">Vos paiements</p>
                 </div>
               </div>
               <div className="ip__hero-kpi ip__hero-kpi--strip" role="list">
@@ -1467,7 +1395,7 @@ export default function DashboardPage() {
                                 <span className="ip__plan-next__text">F.{nextAction.month} — {ipStatusMeta(nextAction.status).label}</span>
                               </>
                             ) : (
-                              <span className="ip__plan-next__text ip__plan-next__text--done">Toutes les facilités sont confirmées.</span>
+                              <span className="ip__plan-next__text ip__plan-next__text--done">Tout est payé.</span>
                             )}
                           </div>
                           <div className="ip__plan-cta">
@@ -1512,17 +1440,17 @@ export default function DashboardPage() {
                           <div className="ip-metric ip-metric--ok">
                             <div className="ip-metric__label">Validé</div>
                             <div className="ip-metric__value">{instMetrics.formatMoneyTnd(m.cashValidatedStrict)}</div>
-                            <div className="ip-metric__hint">1er versement + mensualités confirmées</div>
+                            <div className="ip-metric__hint">Versements payés</div>
                           </div>
                           <div className="ip-metric ip-metric--review">
                             <div className="ip-metric__label">En révision</div>
                             <div className="ip-metric__value">{instMetrics.formatMoneyTnd(m.submittedAmount)}</div>
-                            <div className="ip-metric__hint">Reçus envoyés, en attente</div>
+                            <div className="ip-metric__hint">En attente</div>
                           </div>
                           <div className="ip-metric ip-metric--bad">
                             <div className="ip-metric__label">À corriger</div>
                             <div className="ip-metric__value">{instMetrics.formatMoneyTnd(m.rejectedAmount)}</div>
-                            <div className="ip-metric__hint">Reçus refusés à renvoyer</div>
+                            <div className="ip-metric__hint">À renvoyer</div>
                           </div>
                           <div className="ip-metric ip-metric--neutral">
                             <div className="ip-metric__label">Reste à valider</div>
@@ -1643,8 +1571,7 @@ export default function DashboardPage() {
             <div className="ip__modal" onClick={e => e.stopPropagation()}>
               <div className="ip__modal-header">
                 <div>
-                  <h3 className="ip__modal-title">Soumettre votre reçu</h3>
-                  <p className="ip__modal-sub">Validation rapide de votre mensualité</p>
+                  <h3 className="ip__modal-title">Envoyer le reçu</h3>
                 </div>
                 <button type="button" className="ip__modal-close" onClick={ipClosePay} aria-label="Fermer">
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
@@ -1681,7 +1608,7 @@ export default function DashboardPage() {
                 {ipReceiptFile && <div className="ip__upload-size">Taille optimisée : {(ipReceiptFile.size / 1024).toFixed(0)} Ko</div>}
                 {ipError && <div className="ip__upload-error">⚠ {ipError}</div>}
                 <div className="ip__upload-label">Note (optionnelle)</div>
-                <textarea className="ip__upload-note" placeholder="Ajouter un commentaire pour l'équipe finance…" value={ipNote} onChange={e => setIpNote(e.target.value)} />
+                <textarea className="ip__upload-note" placeholder="Commentaire (facultatif)…" value={ipNote} onChange={e => setIpNote(e.target.value)} />
               </div>
               <div className="ip__modal-footer">
                 <button type="button" className="ip__modal-cancel" onClick={ipClosePay}>Annuler</button>
@@ -1745,7 +1672,7 @@ export default function DashboardPage() {
                   <>
                     <div className="inv-wallet__panel">
                       <div className="inv-wallet__hero">
-                        <span className="inv-wallet__hero-label">Disponible au retrait</span>
+                        <span className="inv-wallet__hero-label">À retirer</span>
                         <strong className="inv-wallet__hero-amount">
                           {(showAmbassadorCard ? (referralSummary?.walletBalance ?? 0) : 0).toLocaleString('fr-FR', {
                             minimumFractionDigits: 0,
@@ -1764,13 +1691,13 @@ export default function DashboardPage() {
                             </span>
                           </span>
                           <span className="inv-wallet__chip">
-                            <span className="inv-wallet__chip-lbl">Crédit légal</span>
+                            <span className="inv-wallet__chip-lbl">Débloqué</span>
                             <span className="inv-wallet__chip-val">
                               {(showAmbassadorCard ? (referralSummary?.commissionsReleased ?? 0) : 0).toLocaleString('fr-FR', { maximumFractionDigits: 2 })} DT
                             </span>
                           </span>
                           <span className="inv-wallet__chip">
-                            <span className="inv-wallet__chip-lbl">Avant notaire</span>
+                            <span className="inv-wallet__chip-lbl">Attente notaire</span>
                             <span className="inv-wallet__chip-val">
                               {(showAmbassadorCard ? (referralSummary?.gainsAccrued ?? 0) : 0).toLocaleString('fr-FR', { maximumFractionDigits: 2 })} DT
                             </span>
@@ -2137,7 +2064,7 @@ export default function DashboardPage() {
                             {payoutBusy ? 'Traitement…' : 'Retirer les gains'}
                           </button>
                           <p className="inv-wallet__actions-note">
-                            {reason || 'Validation interne avant virement.'}
+                            {reason || 'Vérification avant virement.'}
                           </p>
                         </>
                       )
@@ -2158,7 +2085,7 @@ export default function DashboardPage() {
                             </div>
                             <div>
                               <h3 className="inv-payout__title">Confirmer le retrait</h3>
-                              <p className="inv-payout__sub">Votre demande sera transmise à la finance.</p>
+                              <p className="inv-payout__sub">Envoyée à la finance.</p>
                             </div>
                           </header>
 
@@ -2168,21 +2095,11 @@ export default function DashboardPage() {
                           </div>
 
                           <ul className="inv-payout__notes">
-                            <li>
-                              <strong>Seuil minimum&nbsp;:</strong> {min.toLocaleString('fr-FR')} DT. Vous êtes au-dessus, la demande peut partir.
-                            </li>
-                            <li>
-                              <strong>Validation interne&nbsp;:</strong> l'équipe finance vérifie puis déclenche le virement bancaire. Délai habituel&nbsp;: 3 à 7 jours ouvrés.
-                            </li>
-                            <li>
-                              <strong>Commissions bloquées&nbsp;:</strong> pendant le traitement, les gains inclus dans la demande sont verrouillés et n'apparaissent plus comme "disponibles".
-                            </li>
-                            <li>
-                              <strong>Traçabilité&nbsp;:</strong> une ligne "Demande de retrait" apparaît dans votre historique ci-dessous, avec le statut mis à jour à chaque étape (En revue → Approuvé → Payé).
-                            </li>
-                            <li>
-                              <strong>En cas de refus&nbsp;:</strong> les gains retournent automatiquement dans votre portefeuille, vous pouvez redemander plus tard.
-                            </li>
+                            <li><strong>Min&nbsp;:</strong> {min.toLocaleString('fr-FR')} DT.</li>
+                            <li><strong>Délai&nbsp;:</strong> virement sous 3 à 7 jours.</li>
+                            <li><strong>Pendant le traitement&nbsp;:</strong> gains verrouillés.</li>
+                            <li><strong>Statut&nbsp;:</strong> visible dans l'historique.</li>
+                            <li><strong>Refus&nbsp;:</strong> gains restitués automatiquement.</li>
                           </ul>
 
                           {payoutError && <div className="inv-payout__err">Erreur&nbsp;: {payoutError}</div>}
@@ -2206,7 +2123,7 @@ export default function DashboardPage() {
           </>
         )}
 
-          <div className="zb-footer-note">Données indicatives · Portfolio Zitouna Bladi</div>
+          <div className="zb-footer-note">Données indicatives</div>
         </main>
         </div>
       </section>

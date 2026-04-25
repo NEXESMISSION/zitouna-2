@@ -36,6 +36,8 @@ export const NAV_ITEMS = [
   { to: '/admin/commissions', label: 'Commissions', icon: 'git-branch' },
   // Centralised page to process payout requests + distribute harvest revenue.
   { to: '/admin/distributions', label: 'Distributions', icon: 'send' },
+  // Focused accept/reject queue for ambassador withdrawal requests.
+  { to: '/admin/retraits', label: 'Retraits des gains', icon: 'wallet' },
   { to: '/admin/audit-log', label: "Journal d'activite", icon: 'file-text' },
 
   // Gouvernance

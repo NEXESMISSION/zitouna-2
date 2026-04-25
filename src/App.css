@@ -6389,31 +6389,54 @@
   width: 40px;
   height: 40px;
   padding: 8px;
-  background: transparent;
-  border: none;
+  background: #FFFFFF;
+  border: 1px solid #ECECEC;
   color: #1A2030;
   cursor: pointer;
   line-height: 1;
-  border-radius: 10px;
-  transition: color 0.15s ease, background-color 0.15s ease;
+  border-radius: 12px;
+  transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease;
+  flex-shrink: 0;
 }
-.notif-menu__bell:hover,
-.notif-menu__bell:focus-visible { color: #1E5CFF; }
+.notif-menu__bell svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 1.9;
+  display: block;
+}
+.notif-menu__bell:hover {
+  color: #1E5CFF;
+  background: #FAFAF8;
+}
 .notif-menu__bell:focus-visible {
   outline: none;
+  color: #1E5CFF;
+  border-color: #1E5CFF;
   background: rgba(30, 92, 255, 0.08);
 }
 
 .notif-menu__badge {
   position: absolute;
-  top: 5px;
-  right: 5px;
-  width: 8px;
-  height: 8px;
+  top: 6px;
+  right: 6px;
+  width: 9px;
+  height: 9px;
   border-radius: 999px;
   background: #DC2626;
-  box-shadow: 0 0 0 2px #fff;
+  box-shadow: 0 0 0 2px #FFFFFF;
   pointer-events: none;
+}
+
+/* Mobile / PWA: tighter size, still a clear button (matches avatar) */
+@media (max-width: 640px) {
+  .notif-menu__bell {
+    width: 38px;
+    height: 38px;
+    border-radius: 11px;
+    padding: 7px;
+  }
+  .notif-menu__bell svg { width: 17px; height: 17px; }
+  .notif-menu__badge { top: 5px; right: 5px; }
 }
 
 /* Full-screen overlay: dims the page behind and centers the panel. Clicking

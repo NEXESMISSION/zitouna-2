@@ -8,7 +8,7 @@ In the Supabase SQL Editor, paste each file as a separate run. Steps 1 and 2
 must be in the SAME tab — the safety token is session-scoped.
 
   1) SET app.allow_destructive_reset = 'I_UNDERSTAND_THIS_WIPES_DATA';
-  2) database/dev/01_reset_full.sql    ← wipes auth.users + public schema
+  2) database/01_reset_full.sql        ← wipes auth.users + public schema
   3) database/02_schema.sql            ← tables, enums, indexes, constraints
   4) database/03_functions.sql         ← RPCs, triggers, helpers
   5) database/04_rls.sql               ← row-level security policies
@@ -21,10 +21,24 @@ must be in the SAME tab — the safety token is session-scoped.
 LOGIN CREDENTIALS (after 06_seed_dev.sql)
 ==============================================================================
 
-Password for BOTH accounts: 123456
+Password for ALL accounts: 123456
 
-  lassad@gmail.com   SUPER_ADMIN
-  saif@gmail.com     SUPER_ADMIN
+  SUPER_ADMIN (2):
+    lassad@gmail.com
+    saif@gmail.com
+
+  Clients (7):
+    abir@gmail.com
+    mohamed@gmail.com
+    ahmed@gmail.com
+    fatma@gmail.com
+    salma@gmail.com
+    khaled@gmail.com
+    yosra@gmail.com
+
+  RLS probe buyers (infra — scripts/security/*):
+    rls_probe_a@zitouna.test
+    rls_probe_b@zitouna.test
 
 Note: Supabase enforces a 6-char minimum on sign-in. Keep the password 6+ chars
 or lower the minimum in Authentication → Providers → Email → Password policy.
@@ -41,24 +55,26 @@ DAILY DEV RESET (one file — wipes data, keeps schema)
   - wipes auth + business + catalog data
   - seeds 4 projects, 20 parcels per project (80 total)
   - seeds offers + visit slot options
-  - creates 2 SUPER_ADMIN login accounts
+  - creates 9 login accounts (2 SUPER_ADMIN + 7 clients) + 2 RLS probe buyers
 
 
 ==============================================================================
 File index (7 files — this is the whole pipeline)
 ==============================================================================
 
-  dev/01_reset_full.sql    DEV ONLY — full wipe, guard-gated
+  01_reset_full.sql        DEV ONLY — full wipe, guard-gated
   02_schema.sql            tables, enums, indexes, constraints, touch triggers,
                            phone_change_requests, harvest system tables,
                            project tree/health + address + workflow cadence
   03_functions.sql         helpers, RPCs, autolink + sale-invariant triggers,
                            phone-change RPCs, harvest distribution engine
   04_rls.sql               RLS policies (staff, delegated seller, client),
-                           phone-change + harvest policies, public views
+                           phone-change + harvest policies, public views,
+                           project_offers price_per_sqm columns + harvest grants
   06_seed_dev.sql          reset + seed in one run (primary dev driver)
   07_hardening.sql         consolidated hardening — RLS perf, grants, CHECKs,
-                           commission model v2, buyer snapshots on sales
+                           commission model v2, buyer snapshots on sales,
+                           project_offers mode/cash_amount/price_per_sqm
   08_notifications.sql     notifications infra (triggers, scans, outbox)
 
 

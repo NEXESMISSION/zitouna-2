@@ -109,7 +109,7 @@ export default function BrowsePage() {
       <div className="xp-shell xp-shell--embedded">
         <div className="xp-header">
           <h1>{greetingName ? `Bonjour ${greetingName} 👋` : 'Explorer'}</h1>
-          <div className="xp-sub">Explorez les projets Zitouna Bladi à travers la Tunisie.</div>
+          <div className="xp-sub">Projets en Tunisie.</div>
         </div>
 
         {/* Hero map */}
@@ -123,7 +123,7 @@ export default function BrowsePage() {
           <div className="xp-hero-copy">
             <div className="xp-eyebrow">Carte interactive</div>
             <h2>Trouvez votre prochain olivier.</h2>
-            <p>De Tunis à Sfax, chaque projet est cultivé par nos partenaires agricoles et disponible en parts ou en parcelles entières.</p>
+            <p>Disponible en parts ou en parcelles entières.</p>
             <div className="xp-mini-stats">
               <div>
                 <div className="xp-k">Projets</div>
@@ -147,7 +147,7 @@ export default function BrowsePage() {
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
             <input
               type="text"
-              placeholder="Rechercher par ville, région ou variété d'olivier…"
+              placeholder="Rechercher (ville, région, variété)…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
@@ -182,7 +182,7 @@ export default function BrowsePage() {
           watchdogMs={12000}
           empty={
             <EmptyState
-              title="Aucun projet ne correspond à votre recherche."
+              title="Aucun résultat."
               action={{ label: 'Réinitialiser', onClick: () => { setQuery(''); setRegionFilter('all') } }}
             />
           }

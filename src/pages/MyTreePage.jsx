@@ -48,11 +48,11 @@ export default function MyTreePage() {
   return (
     <DashboardShell active="tree">
       <div className="zb-greeting">
-        <h1 className="zb-greeting-h1">Arbre de commissions</h1>
+        <h1 className="zb-greeting-h1">Mon arbre</h1>
         <p style={{ color: 'var(--zb-muted)', fontSize: 14, margin: '6px 0 0' }}>
           {isEmpty
-            ? 'Votre réseau apparaîtra ici dès qu\'un filleul générera une commission.'
-            : `${totalNodes} personne${totalNodes > 1 ? 's' : ''} dans votre réseau · ${Math.round(totalEarnings).toLocaleString('fr-FR')} TND générés`}
+            ? 'Réseau visible dès la 1re commission.'
+            : `${totalNodes} membre${totalNodes > 1 ? 's' : ''} · ${Math.round(totalEarnings).toLocaleString('fr-FR')} TND`}
         </p>
       </div>
 
@@ -93,8 +93,8 @@ export default function MyTreePage() {
             <div className="zb-card" style={{ padding: 40 }}>
               <EmptyState
                 title="Aucun filleul pour le moment"
-                description="Partagez votre code de parrainage pour commencer à bâtir votre réseau."
-                action={{ label: 'Retour aux commissions', onClick: () => navigate('/my/commissions') }}
+                description="Partagez votre code de parrainage."
+                action={{ label: 'Retour', onClick: () => navigate('/my/commissions') }}
               />
             </div>
           ) : (

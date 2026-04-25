@@ -192,10 +192,6 @@ export default function DashboardShell({ active, children }) {
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
               </button>
-              <div className="zb-search">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
-                <input type="text" placeholder="Rechercher une parcelle, un projet…" readOnly />
-              </div>
               <div className="zb-topbar-actions">
                 <NotificationsMenu />
                 <div className="zb-avatar-wrap" ref={avatarMenuRef}>

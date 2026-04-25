@@ -1,7 +1,7 @@
 /* ============================================================================
-   CommissionsShell — unified /admin/commissions container.
-   Header + tab bar + <Outlet/>. Tabs: Overview / Network / Ledger / Analytics /
-   Anomalies. The Network tab runs fullbleed so the org chart fills the screen.
+   CommissionsShell — /admin/commissions.
+   Index route is the network tree, rendered chromeless. Sub-routes (ledger,
+   analytics, reverse-grants, anomalies) get a minimal top bar + tab strip.
    ============================================================================ */
 
 .cxs {
@@ -12,21 +12,27 @@
   color: #0f172a;
 }
 
+/* AdminLayout renders a global "← Dashboard" button as a sibling to the
+   outlet. Inside /admin/commissions the shell provides its own back control
+   (and the tree has one in its toolbar), so stacking both is noisy. Hide the
+   global one whenever the shell is rendered. */
+.adm-page-back-btn:has(+ .cxs) { display: none; }
+
+/* Tree index — chromeless. The tree absolute-fills the shell body. */
+.cxs--tree {
+  position: relative;
+  height: 100vh;
+  min-height: 520px;
+  overflow: hidden;
+}
+
 .cxs__top {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 14px 20px 6px;
+  padding: 14px 20px 10px;
   background: #fff;
   border-bottom: 1px solid #e2e8f0;
-}
-
-.cxs__top-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-  flex: 1;
 }
 
 .cxs__back {
@@ -48,25 +54,16 @@
 .cxs__back:active { background: #e2e8f0; }
 .cxs__back:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
 
-.cxs__title-block { min-width: 0; }
-
 .cxs__title {
   margin: 0;
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 800;
   letter-spacing: -0.01em;
   color: #0f172a;
   line-height: 1.15;
 }
 
-.cxs__subtitle {
-  margin: 2px 0 0;
-  font-size: 13px;
-  color: #64748b;
-  line-height: 1.35;
-}
-
-/* ── Tab bar (sticky, scrollable on mobile) ────────────────────────────── */
+/* ── Tab bar ──────────────────────────────────────────────────────────── */
 .cxs__tabs {
   display: flex;
   gap: 4px;
@@ -74,11 +71,7 @@
   background: #fff;
   border-bottom: 1px solid #e2e8f0;
   overflow-x: auto;
-  scroll-snap-type: x mandatory;
   -webkit-overflow-scrolling: touch;
-  position: sticky;
-  top: 0;
-  z-index: 10;
 }
 .cxs__tabs::-webkit-scrollbar { height: 0; }
 
@@ -96,7 +89,6 @@
   border-bottom: 2px solid transparent;
   white-space: nowrap;
   cursor: pointer;
-  scroll-snap-align: start;
   transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
 }
 .cxs__tab:hover { color: #0f172a; background: #f8fafc; }
@@ -116,19 +108,14 @@
   padding: 20px;
 }
 
-.cxs__body--bleed { padding: 0; }
-.cxs--bleed .cxs__body { background: #fff; }
-
 /* ── Mobile ────────────────────────────────────────────────────────────── */
 @media (max-width: 768px) {
-  .cxs__top { padding: 10px 14px 4px; }
-  .cxs__title { font-size: 17px; }
-  .cxs__subtitle { display: none; }
+  .cxs__top { padding: 10px 14px; }
+  .cxs__title { font-size: 15px; }
   .cxs__tabs { padding: 4px 10px 0; }
   .cxs__tab { padding: 9px 10px; font-size: 12px; }
   .cxs__tab-label { font-size: 12px; }
   .cxs__body { padding: 14px; }
-  .cxs__body--bleed { padding: 0; }
 }
 
 @media (max-width: 420px) {

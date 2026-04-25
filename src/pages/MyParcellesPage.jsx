@@ -73,7 +73,7 @@ export default function MyParcellesPage() {
 
           <section>
             <div className="zb-section-head">
-              <h2>Toutes vos parcelles</h2>
+              <h2>Toutes</h2>
               <span style={{ color: 'var(--zb-muted)', fontSize: 13 }}>
                 {myPurchases.length} parcelle{myPurchases.length !== 1 ? 's' : ''}
                 {myPurchases.length > 0 && ` · ${Math.round(totalInvested).toLocaleString('fr-FR')} DT investis · ${Math.round(totalAnnual).toLocaleString('fr-FR')} DT/an`}
@@ -107,7 +107,7 @@ export default function MyParcellesPage() {
               empty={
                 <EmptyState
                   title="Aucune parcelle"
-                  description="Vos parcelles s'afficheront ici après finalisation notaire."
+                  description="Visibles après la clôture notaire."
                   action={{ label: 'Explorer les projets', onClick: () => navigate('/browse') }}
                 />
               }

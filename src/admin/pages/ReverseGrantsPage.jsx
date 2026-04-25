@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useSearchParams } from 'react-router-dom'
 import {
   fetchReverseGrantsAdmin,
   revokeReverseGrant,
@@ -36,7 +36,6 @@ const STATUS_LABEL = {
 }
 
 export default function ReverseGrantsPage() {
-  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const highlightGrantId = searchParams.get('grant') || null
 
@@ -162,16 +161,6 @@ export default function ReverseGrantsPage() {
   return (
     <div className="zitu-page" dir="ltr">
       <div className="zitu-page__column">
-        <button
-          type="button"
-          className="ds-back-btn"
-          onClick={() => navigate(-1)}
-          title="Revenir à la page précédente"
-        >
-          <span className="ds-back-btn__icon" aria-hidden>←</span>
-          <span className="ds-back-btn__label">Retour</span>
-        </button>
-
         <section className="cli-hero rg-hero" aria-label="En-tête droits acquis">
           <span className="cli-hero__badge" aria-hidden>⇅</span>
           <div>

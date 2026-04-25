@@ -226,20 +226,16 @@ html:has(.zb-dash) body {
 .zb-topbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 18px;
 }
+/* Actions (notifications + avatar) always pinned to the right edge,
+   regardless of whether a back button is present (DashboardPage has no
+   back button — DashboardShell does). */
+.zb-topbar > .zb-topbar-actions { margin-inline-start: auto; }
 @media (max-width: 640px) {
   .zb-topbar { gap: 8px; }
   .zb-back { width: 38px; height: 38px; }
-  .zb-search { height: 38px; padding: 0 10px; }
-  .zb-search input { font-size: 14px; }
-}
-@media (max-width: 420px) {
-  /* On very narrow phones, the search input eats the row. Hide it
-     and let notifications + avatar sit directly after the back arrow
-     so the header never gets cropped or wraps onto two lines. */
-  .zb-topbar .zb-search { display: none; }
 }
 .zb-back {
   width: 42px;
@@ -380,6 +376,22 @@ html:has(.zb-dash) body {
   cursor: pointer;
   border: none;
   font-family: inherit;
+  flex-shrink: 0;
+  transition: transform 140ms ease, box-shadow 140ms ease;
+}
+.zb-avatar:hover { transform: translateY(-1px); box-shadow: 0 3px 10px rgba(17, 24, 39, 0.18); }
+.zb-avatar:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(30, 92, 255, 0.25);
+}
+
+/* Mobile / PWA: match the notification bell exactly so the two pair up cleanly */
+@media (max-width: 640px) {
+  .zb-avatar {
+    width: 38px; height: 38px;
+    font-size: 12.5px;
+  }
+  .zb-topbar-actions { gap: 8px; }
 }
 
 /* Greeting block */
@@ -561,6 +573,31 @@ html:has(.zb-dash) body {
   .zb-earn-t { font-size: 14px; }
   .zb-earn-s { font-size: 11.5px; }
   .zb-earn-cta { font-size: 12px; }
+}
+
+/* Compact earn cards — placed below "Prochaines échéances". Trimmed of
+   subtitle + meta paragraph, tighter padding, smaller number so the
+   dashboard doesn't devote hero-sized real estate to two summary stats. */
+.zb-hero--earn-compact {
+  margin-top: 14px;
+  gap: 12px;
+}
+.zb-earn--compact {
+  padding: 14px 16px 12px;
+  gap: 8px;
+  border-radius: 14px;
+}
+.zb-earn--compact .zb-earn-head { gap: 10px; align-items: center; }
+.zb-earn--compact .zb-earn-ic { width: 30px; height: 30px; border-radius: 9px; }
+.zb-earn--compact .zb-earn-ic svg { width: 16px; height: 16px; }
+.zb-earn--compact .zb-earn-t { font-size: 13px; }
+.zb-earn--compact .zb-earn-v { font-size: 26px; }
+.zb-earn--compact .zb-earn-u { font-size: 12px; margin-left: 6px; }
+.zb-earn--compact .zb-earn-cta { font-size: 12px; padding-top: 2px; }
+.zb-earn--compact::after { display: none; }
+@media (max-width: 560px) {
+  .zb-earn--compact { padding: 12px 14px 10px; }
+  .zb-earn--compact .zb-earn-v { font-size: 22px; }
 }
 
 /* Actions + rail card under the two earnings cards */
@@ -4302,7 +4339,40 @@ html:has(.zb-dash) body {
   font-size: 12px;
 }
 
-/* ═══ Santé du projet — health card ═══ */
+/* ═══ Santé du projet — header for the shared PlotHealthPanel ═══ */
+.pd-health-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+}
+.pd-section-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 0 2px;
+}
+.pd-section-head h2 {
+  font-family: 'Inter Tight', 'Inter', sans-serif;
+  font-weight: 700;
+  font-size: 18px;
+  letter-spacing: -0.02em;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--pd-ink, #0B1220);
+}
+.pd-section-head h2 .pd-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--pd-green, #0FA968);
+  display: inline-block;
+}
+
+/* Legacy health card (kept for backwards compat — no longer used by the
+   public project detail page; PlotHealthPanel now renders the rings). */
 .pd-health-card {
   padding: 22px 24px 20px;
 }

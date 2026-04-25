@@ -23,7 +23,7 @@ function fmtDate(iso) { return new Date(iso).toLocaleDateString('fr-FR', { day: 
 function statusMeta(status) {
   if (status === 'approved') return { label: 'Confirmé', hint: 'Paiement validé par l\'administration.', tone: 'approved' }
   if (status === 'submitted') return { label: 'En révision', hint: 'Reçu envoyé, en attente de validation.', tone: 'submitted' }
-  if (status === 'rejected') return { label: 'Rejeté', hint: 'Action requise : corriger et renvoyer.', tone: 'rejected' }
+  if (status === 'rejected') return { label: 'Rejeté', hint: 'À corriger et renvoyer.', tone: 'rejected' }
   return { label: 'En attente', hint: 'Vous pouvez envoyer le reçu.', tone: 'pending' }
 }
 function isPayable(status) { return status === 'pending' || status === 'rejected' || status === 'submitted' }
@@ -324,7 +324,7 @@ export default function InstallmentsPage() {
 
             <div className="ech-mode">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="9"/><path d="M12 8v4M12 16h.01"/></svg>
-              <span><b>Mode d&apos;emploi.</b> En attente = envoyez un reçu. En révision = attendez la validation. Confirmé = rien à faire. Rejeté = corrigez le reçu.</span>
+              <span>En attente : envoyer un reçu · Rejeté : corriger · En révision : patienter.</span>
             </div>
 
             <div className="ech-filters">
@@ -382,8 +382,8 @@ export default function InstallmentsPage() {
                       <div className="ech-fac-note">
                         {p.status === 'submitted' ? 'Reçu envoyé · en attente de validation'
                           : p.status === 'approved' ? 'Paiement validé par l\'administration'
-                            : p.status === 'rejected' ? <><span style={{ color: 'var(--zb-red)' }}>Action requise</span> · corrigez et renvoyez le reçu</>
-                              : <span className="ech-muted">Reçu à envoyer le jour du paiement</span>}
+                            : p.status === 'rejected' ? <><span style={{ color: 'var(--zb-red)' }}>À corriger</span></>
+                              : <span className="ech-muted">À envoyer à l'échéance</span>}
                       </div>
                     </div>
                     <div className="ech-fac-amount">
@@ -433,7 +433,7 @@ export default function InstallmentsPage() {
                         <div className="ech-info">
                           <div className="ech-t">{receipt.name}</div>
                           <div className="ech-s">
-                            {receipt.date ? `Envoyé le ${fmtDate(receipt.date)}` : 'Reçu en attente de validation'}
+                            {receipt.date ? `Envoyé le ${fmtDate(receipt.date)}` : 'En attente'}
                           </div>
                         </div>
                         <a href={receipt.url} target="_blank" rel="noreferrer" className="ech-btn-ghost">
@@ -508,7 +508,7 @@ export default function InstallmentsPage() {
           <>
             <div className="ech-header">
               <h1>Mes échéances</h1>
-              <div className="ech-sub">Suivez vos facilités en temps réel, projet par projet.</div>
+              <div className="ech-sub">Vos facilités, projet par projet.</div>
             </div>
 
             <div className="ech-kpi-card">
@@ -560,7 +560,7 @@ export default function InstallmentsPage() {
                   return (
                     <EmptyState
                       title="Plan en cours de génération"
-                      description="Votre vente à tempérament est clôturée mais l'échéancier n'a pas encore été généré. Une vérification automatique est en cours — contactez le support si cela persiste plus de quelques minutes."
+                      description="Échéancier en cours de génération. Contactez le support si cela dure."
                       action={{ label: 'Vérifier à nouveau', onClick: () => refresh() }}
                     />
                   )
@@ -569,14 +569,14 @@ export default function InstallmentsPage() {
                   return (
                     <EmptyState
                       title="Finalisation en cours"
-                      description="Vos échéances apparaîtront ici après la clôture notaire de votre achat à tempérament."
+                      description="Disponibles après la clôture notaire."
                     />
                   )
                 }
                 return (
                   <EmptyState
                     title="Aucun plan d'échéances"
-                    description="Vous n'avez pas d'achat à tempérament pour le moment."
+                    description="Aucun achat à tempérament."
                   />
                 )
               })()}
@@ -590,7 +590,7 @@ export default function InstallmentsPage() {
                     const tone = overviewStatusTone(plan)
                     const nextActionLabel = nextAction
                       ? `F.${nextAction.month} — ${statusMeta(nextAction.status).label}`
-                      : 'Toutes les facilités sont confirmées'
+                      : 'Tout est payé'
                     return (
                       <button
                         key={plan.id}
@@ -635,7 +635,7 @@ export default function InstallmentsPage() {
                         </div>
 
                         <span className="ech-cta">
-                          Ouvrir le détail
+                          Ouvrir
                           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M5 12h14M13 5l7 7-7 7"/></svg>
                         </span>
                       </button>
@@ -652,8 +652,7 @@ export default function InstallmentsPage() {
             <div className="ip__modal" onClick={(e) => e.stopPropagation()}>
               <div className="ip__modal-header">
                 <div>
-                  <h3 className="ip__modal-title">Soumettre votre reçu</h3>
-                  <p className="ip__modal-sub">Validation rapide de votre mensualité</p>
+                  <h3 className="ip__modal-title">Envoyer le reçu</h3>
                 </div>
                 <button type="button" className="ip__modal-close" onClick={closePay}>✕</button>
               </div>
@@ -705,7 +704,7 @@ export default function InstallmentsPage() {
                 <div className="ip__upload-label">Note (optionnelle)</div>
                 <textarea
                   className="ip__upload-note"
-                  placeholder="Ajouter un commentaire pour l'équipe finance…"
+                  placeholder="Commentaire (facultatif)…"
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
                 />
