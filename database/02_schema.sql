@@ -317,6 +317,11 @@ create table if not exists sales (
   finance_validated_at timestamptz,
   juridique_validated_by uuid references admin_users(id) on delete set null,
   juridique_validated_at timestamptz,
+  -- Juridique team assignment: which legal admin owns this file. Only that
+  -- user (and Super Admin) sees it on /admin/juridique. Picked in
+  -- /admin/coordination when scheduling the juridique RDV. Optional —
+  -- unassigned files are visible to Super Admin only.
+  juridique_user_id uuid references admin_users(id) on delete set null,
   coordination_finance_at timestamptz,
   coordination_juridique_at timestamptz,
   coordination_notes text not null default '',

@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useSales } from '../../lib/useSupabase.js'
+import { useAuth } from '../../lib/AuthContext.jsx'
+import { canonicalRole } from '../../lib/adminRole.js'
 import AdminModal from '../components/AdminModal.jsx'
 import SaleSnapshotTracePanel from '../components/SaleSnapshotTracePanel.jsx'
 import RenderDataGate from '../../components/RenderDataGate.jsx'
@@ -62,6 +64,12 @@ function juridiqueScheduleFromSale(iso) {
 export default function ServiceJuridiquePage() {
   const navigate = useNavigate()
   const { sales, loading: salesLoading } = useSales()
+  const { adminUser } = useAuth()
+  // Per-file assignment: each juridique user only sees the cases assigned
+  // to them in /admin/coordination. Super Admin sees everything (incl.
+  // unassigned files). Falls back to "see nothing" if no admin context.
+  const isSuperAdmin = canonicalRole(adminUser?.role) === 'Super Admin'
+  const myAdminId = adminUser?.id ? String(adminUser.id) : ''
 
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
@@ -85,6 +93,14 @@ export default function ServiceJuridiquePage() {
         if (['cancelled', 'rejected', 'completed'].includes(st)) return false
         if (!s.coordinationJuridiqueAt) return false
         if (s.juridiqueValidatedAt) return false
+        // Per-file assignment guard: a juridique staffer only sees the
+        // dossiers assigned to them. Super Admin sees everything,
+        // including unassigned files.
+        if (!isSuperAdmin) {
+          const assigned = String(s.juridiqueUserId || '')
+          if (!assigned) return false
+          if (assigned !== myAdminId) return false
+        }
         return true
       })
       .map((sale) => {
@@ -117,7 +133,7 @@ export default function ServiceJuridiquePage() {
         if (c !== 0) return c
         return String(a.clientName).localeCompare(String(b.clientName))
       })
-  }, [sales])
+  }, [sales, isSuperAdmin, myAdminId])
 
   // ── Status partition ──────────────────────────────────────────────────────
   const entryStatus = (e) => {

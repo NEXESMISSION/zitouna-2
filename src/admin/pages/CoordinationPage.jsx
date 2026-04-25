@@ -5,6 +5,7 @@ import { useClients, useSales, useProjects, useAdminUsers } from '../../lib/useS
 import { runSafeAction } from '../../lib/runSafeAction.js'
 import * as db from '../../lib/db.js'
 import { getSaleStatusMeta, canonicalSaleStatus } from '../../domain/workflowModel.js'
+import { canonicalRole } from '../../lib/adminRole.js'
 import SaleSnapshotTracePanel from '../components/SaleSnapshotTracePanel.jsx'
 import AdminModal from '../components/AdminModal.jsx'
 import RenderDataGate from '../../components/RenderDataGate.jsx'
@@ -118,6 +119,9 @@ export default function CoordinationPage() {
   const [scheduler, setScheduler] = useState({
     open: false, sale: null, type: 'finance',
     date: todayIso(), time: SLOT_OPTIONS[0], notes: '',
+    // For type === 'juridique': admin user assigned to handle this file.
+    // Only that user (and Super Admin) sees it on /admin/juridique.
+    juridiqueUserId: '',
   })
   const [schedulingSaving, setSchedulingSaving] = useState(false)
   const [selectedAppointment, setSelectedAppointment] = useState(null)
@@ -260,6 +264,20 @@ export default function CoordinationPage() {
     for (const [, list] of map) list.sort((a, b) => String(a.time).localeCompare(String(b.time)))
     return map
   }, [appointments])
+  // Juridique team picker — admins whose `allowedPages` include
+  // `/admin/juridique`. Super Admins are listed too because they always
+  // have implicit access to every page.
+  const juridiqueAdmins = useMemo(() => {
+    return (adminUsers || [])
+      .filter((u) => {
+        if (u.status && u.status !== 'active') return false
+        if (canonicalRole(u.role) === 'Super Admin') return true
+        const pages = Array.isArray(u.allowedPages) ? u.allowedPages : []
+        return pages.includes('/admin/juridique')
+      })
+      .sort((a, b) => String(a.fullName || a.name || '').localeCompare(String(b.fullName || b.name || '')))
+  }, [adminUsers])
+
   const monthCells = useMemo(() => monthGrid(monthAnchor), [monthAnchor])
   const dayAgenda = useMemo(() => appointmentsByDate.get(selectedDate) || [], [appointmentsByDate, selectedDate])
   const monthLabel = monthAnchor.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
@@ -285,9 +303,13 @@ export default function CoordinationPage() {
         time = upcoming || minHHMM
       }
     }
-    setScheduler({ open: true, sale, type, date, time, notes: existing?.notes || '' })
+    setScheduler({
+      open: true, sale, type, date, time,
+      notes: existing?.notes || '',
+      juridiqueUserId: type === 'juridique' ? (sale.juridiqueUserId || '') : '',
+    })
   }
-  const closeScheduler = () => setScheduler((p) => ({ ...p, open: false, sale: null, notes: '' }))
+  const closeScheduler = () => setScheduler((p) => ({ ...p, open: false, sale: null, notes: '', juridiqueUserId: '' }))
 
   const confirmSchedule = async () => {
     if (!scheduler.sale || schedulingSaving) return
@@ -308,6 +330,10 @@ export default function CoordinationPage() {
       }
     } else {
       patch.coordinationJuridiqueAt = atIso
+      // Per-file juridique assignment (empty string = unassigned, visible
+      // to Super Admin only). Always patched so re-scheduling can change
+      // the assignee or clear it.
+      patch.juridiqueUserId = scheduler.juridiqueUserId || null
     }
     setSchedulingSaving(true)
     const withTimeout = (p, ms, label) => Promise.race([
@@ -1115,6 +1141,30 @@ export default function CoordinationPage() {
                 })}
               </div>
             </div>
+
+            {scheduler.type === 'juridique' && (
+              <div className="sp-detail__section">
+                <div className="sp-detail__section-title">
+                  Notaire / juridique assigné
+                </div>
+                <select
+                  id="cv-jur-user"
+                  className="cv-input"
+                  value={scheduler.juridiqueUserId || ''}
+                  onChange={(e) => setScheduler((p) => ({ ...p, juridiqueUserId: e.target.value }))}
+                >
+                  <option value="">— Non assigné (visible Super Admin uniquement) —</option>
+                  {juridiqueAdmins.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.fullName || u.name || u.email || u.id}
+                    </option>
+                  ))}
+                </select>
+                <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 6 }}>
+                  Seul l&apos;utilisateur choisi verra ce dossier sur /admin/juridique.
+                </div>
+              </div>
+            )}
 
             <div className="sp-detail__section">
               <div className="sp-detail__section-title">Notes</div>
